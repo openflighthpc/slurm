@@ -332,8 +332,8 @@ install -D -m644 etc/slurmd.service    %{buildroot}/%{_unitdir}/slurmd.service
 install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/slurmdbd.service
 
 # Install Flight Starter Profile Scripts
-install -D -m755 etc/profile.d/90-slurm.sh /opt/flight/etc/profile.d/90-slurm.sh
-install -D -m755 etc/profile.d/90-slurm.csh /opt/flight/etc/profile.d/90-slurm.csh
+install -D -m755 etc/profile.d/90-slurm.sh %{buildroot}/opt/flight/etc/profile.d/90-slurm.sh
+install -D -m755 etc/profile.d/90-slurm.csh %{buildroot}/opt/flight/etc/profile.d/90-slurm.csh
 
 # Do not package Slurm's version of libpmi on Cray systems in the usual location.
 # Cray's version of libpmi should be used. Move it elsewhere if the site still
