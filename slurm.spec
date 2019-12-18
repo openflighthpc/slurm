@@ -489,7 +489,7 @@ rm -rf %{buildroot}
 %defattr(-,root,root,0755)
 %{_datadir}/doc
 %{_bindir}/s*
-%{_sysconfdir}/profile.d/90-slurm*
+/opt/flight/etc/profile.d/90-slurm*
 %exclude %{_bindir}/seff
 %exclude %{_bindir}/sjobexitmod
 %exclude %{_bindir}/sjstat
