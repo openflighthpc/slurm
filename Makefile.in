@@ -564,6 +564,8 @@ EXTRA_DIST = \
 	etc/slurmd.service.in	\
 	etc/slurmdbd.conf.example \
 	etc/slurmdbd.service.in	\
+	etc/profile.d/90-slurm.sh \
+	etc/profile.d/90-slurm.csh \
 	autogen.sh		\
 	slurm.spec		\
 	README.rst		\
