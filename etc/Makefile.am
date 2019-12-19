@@ -6,6 +6,7 @@ CLEANFILES = $(ETC_FILES)
 edit = sed \
         -e 's|@bindir[@]|$(bindir)|g' \
         -e 's|@libdir[@]|$(libdir)|g' \
+        -e 's|@prefix[@]|$(prefix)|g' \
         -e 's|@sbindir[@]|$(sbindir)|g' \
         -e 's|@sysconfdir[@]|$(sysconfdir)|g' \
 	-e 's|@BLUEGENE_LOADED_FALSE[@]|$(BLUEGENE_LOADED_FALSE)|g' \
