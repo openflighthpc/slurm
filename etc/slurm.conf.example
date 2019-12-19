@@ -16,8 +16,8 @@ ControlMachine=linux0
 #
 SlurmUser=slurm
 #SlurmdUser=root
-SlurmctldPort=6817
-SlurmdPort=6818
+SlurmctldPort=6827
+SlurmdPort=6828
 AuthType=auth/munge
 #JobCredentialPrivateKey=
 #JobCredentialPublicCertificate=
