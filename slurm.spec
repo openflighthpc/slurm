@@ -327,9 +327,9 @@ rm -rf %{buildroot}
 make install DESTDIR=%{buildroot}
 make install-contrib DESTDIR=%{buildroot}
 
-install -D -m644 etc/slurmctld.service %{buildroot}/%{_unitdir}/slurmctld.service
-install -D -m644 etc/slurmd.service    %{buildroot}/%{_unitdir}/slurmd.service
-install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/slurmdbd.service
+install -D -m644 etc/slurmctld.service %{buildroot}/%{_unitdir}/flight-slurmctld.service
+install -D -m644 etc/slurmd.service    %{buildroot}/%{_unitdir}/flight-slurmd.service
+install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/flight-slurmdbd.service
 
 # Install Flight Starter Profile Scripts
 install -D -m755 etc/profile.d/90-slurm.sh %{buildroot}/opt/flight/etc/profile.d/90-slurm.sh
@@ -539,21 +539,21 @@ rm -rf %{buildroot}
 %files slurmctld
 %defattr(-,root,root)
 %{_sbindir}/slurmctld
-%{_unitdir}/slurmctld.service
+%{_unitdir}/flight-slurmctld.service
 #############################################################################
 
 %files slurmd
 %defattr(-,root,root)
 %{_sbindir}/slurmd
 %{_sbindir}/slurmstepd
-%{_unitdir}/slurmd.service
+%{_unitdir}/flight-slurmd.service
 #############################################################################
 
 %files slurmdbd
 %defattr(-,root,root)
 %{_sbindir}/slurmdbd
 %{_libdir}/slurm/accounting_storage_mysql.so
-%{_unitdir}/slurmdbd.service
+%{_unitdir}/flight-slurmdbd.service
 #############################################################################
 
 %files libpmi
@@ -623,22 +623,22 @@ rm -rf %{buildroot}
 /sbin/ldconfig
 
 %post slurmctld
-%systemd_post slurmctld.service
+%systemd_post flight-slurmctld.service
 %preun slurmctld
-%systemd_preun slurmctld.service
+%systemd_preun flight-slurmctld.service
 %postun slurmctld
-%systemd_postun_with_restart slurmctld.service
+%systemd_postun_with_restart flight-slurmctld.service
 
 %post slurmd
-%systemd_post slurmd.service
+%systemd_post flight-slurmd.service
 %preun slurmd
-%systemd_preun slurmd.service
+%systemd_preun flight-slurmd.service
 %postun slurmd
-%systemd_postun_with_restart slurmd.service
+%systemd_postun_with_restart flight-slurmd.service
 
 %post slurmdbd
-%systemd_post slurmdbd.service
+%systemd_post flight-slurmdbd.service
 %preun slurmdbd
-%systemd_preun slurmdbd.service
+%systemd_preun flight-slurmdbd.service
 %postun slurmdbd
-%systemd_postun_with_restart slurmdbd.service
+%systemd_postun_with_restart flight-slurmdbd.service
