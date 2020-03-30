@@ -2355,6 +2355,8 @@ extern int step_create(job_step_create_request_msg_t *step_specs,
 	List step_gres_list = (List) NULL;
 	dynamic_plugin_data_t *select_jobinfo = NULL;
 	uint32_t task_dist;
+	uint16_t over_time_limit;
+	time_t over_run;
 	uint32_t max_tasks;
 	char *mpi_params;
 	uint32_t jobid;
@@ -2392,8 +2394,19 @@ extern int step_create(job_step_create_request_msg_t *step_specs,
 		return ESLURM_DUPLICATE_JOB_ID;
 	}
 
+        if (job_ptr->part_ptr &&
+            (job_ptr->part_ptr->over_time_limit != NO_VAL16)) {
+          over_time_limit = job_ptr->part_ptr->over_time_limit;
+        } else {
+          over_time_limit = slurmctld_conf.over_time_limit;
+        }
+        if (over_time_limit == INFINITE16)
+          over_run = now - YEAR_SECONDS;
+        else
+          over_run = now - (over_time_limit  * 60);
+
 	if (IS_JOB_FINISHED(job_ptr) ||
-	    ((job_ptr->end_time <= time(NULL)) && !IS_JOB_CONFIGURING(job_ptr)))
+	    ((job_ptr->end_time <= over_run) && !IS_JOB_CONFIGURING(job_ptr)))
 		return ESLURM_ALREADY_DONE;
 
 	task_dist = step_specs->task_dist & SLURM_DIST_STATE_BASE;
