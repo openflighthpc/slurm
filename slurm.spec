@@ -1,4 +1,4 @@
-Name:		slurm
+Name:		flight-slurm
 Version:	17.11.13
 %global rel	2
 Release:	%{rel}.flight1%{?dist}
