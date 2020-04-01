@@ -1,4 +1,4 @@
-Name:		slurm
+Name:		flight-slurm
 Version:	19.05.6
 %define rel	1
 Release:	%{rel}.flight2%{?dist}
