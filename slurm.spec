@@ -1,7 +1,7 @@
 Name:		slurm
 Version:	19.05.6
 %define rel	1
-Release:	%{rel}.flight1%{?dist}
+Release:	%{rel}.flight2%{?dist}
 Summary:	Slurm Workload Manager
 
 Group:		System Environment/Base
@@ -10,9 +10,9 @@ URL:		https://slurm.schedmd.com/
 
 # when the rel number is one, the directory name does not include it
 %if "%{rel}" == "1"
-%global slurm_source_dir %{name}-%{version}.flight1
+%global slurm_source_dir %{name}-%{version}.flight2
 %else
-%global slurm_source_dir %{name}-%{version}-%{rel}.flight1
+%global slurm_source_dir %{name}-%{version}-%{rel}.flight2
 %endif
 
 Source:		%{slurm_source_dir}.tar.bz2
@@ -62,7 +62,11 @@ Requires: munge
 %{?systemd_requires}
 BuildRequires: systemd
 BuildRequires: munge-devel munge-libs
+%if 0%{?rhel} >= 8
+BuildRequires: python2
+%else
 BuildRequires: python
+%endif
 BuildRequires: readline-devel
 Obsoletes: slurm-lua slurm-munge slurm-plugins
 
@@ -124,12 +128,12 @@ BuildRequires: numactl-devel
 
 %if %{with pmix}
 BuildRequires: pmix
-%global pmix_version %(rpm -q pmix --qf "%{VERSION}")
+%global pmix_version %(rpm -q pmix --qf "%%{VERSION}")
 %endif
 
 %if %{with ucx}
 BuildRequires: ucx-devel
-%global ucx_version %(rpm -q ucx-devel --qf "%{VERSION}")
+%global ucx_version %(rpm -q ucx-devel --qf "%%{VERSION}")
 %endif
 
 #  Allow override of sysconfdir via _slurm_sysconfdir.
@@ -316,7 +320,7 @@ notifies slurm about failed nodes.
 	%{?_without_cray:--enable-really-no-cray}\
 	%{?_with_cray_network:--enable-cray-network}\
 	%{?_with_multiple_slurmd:--enable-multiple-slurmd} \
-	%{?_with_pmix} \
+	%{?_with_pmix:--with-pmix=/usr} \
 	%{?_with_freeipmi} \
 	%{?_with_hdf5} \
 	%{?_with_shared_libslurm} \
