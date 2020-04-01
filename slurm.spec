@@ -131,12 +131,12 @@ BuildRequires: numactl-devel
 
 %if %{with pmix}
 BuildRequires: pmix
-%global pmix_version %(rpm -q pmix --qf "%{VERSION}")
+%global pmix_version %(rpm -q pmix --qf "%%{VERSION}")
 %endif
 
 %if %{with ucx}
 BuildRequires: ucx-devel
-%global ucx_version %(rpm -q ucx-devel --qf "%{VERSION}")
+%global ucx_version %(rpm -q ucx-devel --qf "%%{VERSION}")
 %endif
 
 #  Allow override of sysconfdir via _slurm_sysconfdir.
@@ -333,7 +333,7 @@ notifies slurm about failed nodes.
 	%{?_without_cray:--enable-really-no-cray}\
 	%{?_with_cray_network:--enable-cray-network}\
 	%{?_with_multiple_slurmd:--enable-multiple-slurmd} \
-	%{?_with_pmix} \
+	%{?_with_pmix:--with-pmix=/usr} \
 	%{?_with_freeipmi} \
 	%{?_with_hdf5} \
 	%{?_with_shared_libslurm} \
