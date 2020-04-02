@@ -1,7 +1,7 @@
 Name:		flight-slurm
 Version:	20.02.1
 %define rel	1
-Release:	%{rel}.flight1%{?dist}
+Release:	%{rel}.flight2%{?dist}
 Summary:	Slurm Workload Manager
 
 Group:		System Environment/Base
@@ -254,14 +254,14 @@ is preferred over the compatibility libraries shipped by the PMIx project.
 %package torque
 Summary: Torque/PBS wrappers for transition from Torque/PBS to Slurm
 Group: Development/System
-Requires: slurm-perlapi
+Requires: flight-slurm-perlapi
 %description torque
 Torque wrapper scripts used for helping migrate from Torque/PBS to Slurm
 
 %package openlava
 Summary: openlava/LSF wrappers for transition from OpenLava/LSF to Slurm
 Group: Development/System
-Requires: slurm-perlapi
+Requires: flight-slurm-perlapi
 %description openlava
 OpenLava wrapper scripts used for helping migrate from OpenLava/LSF to Slurm
 
