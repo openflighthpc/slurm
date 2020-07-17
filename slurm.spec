@@ -1,5 +1,5 @@
 Name:		flight-slurm
-Version:	19.05.6
+Version:	19.05.7
 %define rel	1
 Release:	%{rel}.flight3%{?dist}
 Summary:	Slurm Workload Manager
