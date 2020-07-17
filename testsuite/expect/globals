@@ -46,6 +46,11 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 
+#
+# Include private functions and variables
+#
+source ./globals_private
+
 global sacctmgr sacct salloc sattach sbatch sbcast scancel scontrol sinfo
 global smap smd squeue sreport srun sstat strigger
 
@@ -240,6 +245,12 @@ cset poll_interval 1
 # Force LANG, as the expect tests aren't localized
 set ::env(LANG)          "en_US.UTF-8"
 
+# Testsuite level variables
+cset testsuite_cleanup_on_failure false
+if {[info exists env(SLURM_TESTSUITE_CLEANUP_ON_FAILURE)]} {
+	set testsuite_cleanup_on_failure $env(SLURM_TESTSUITE_CLEANUP_ON_FAILURE)
+}
+
 # Other common variables
 set alpha                "\[a-zA-Z\]+"
 set alpha_cap            "\[A-Z\]+"
@@ -285,6 +296,133 @@ set gpu_sock_list {}
 
 ################################################################
 #
+# Proc: get_test_name
+#
+# Purpose: Gets the name of the invoking source script
+#
+# Returns: The name of the originally called script
+#
+################################################################
+proc get_test_name { } {
+
+	set test_name unknown
+	set frame_level 1
+	while { $frame_level <= [info frame] } {
+		if { [dict get [info frame $frame_level] type] == "source" } {
+			set test_name [file tail [dict get [info frame $frame_level] file]]
+			break
+		}
+		incr frame_level
+	}
+
+	return $test_name
+}
+
+#
+# Name of the originally invoked test script, e.g. test1.1
+#
+set test_name [get_test_name]
+
+#
+# Suffix of the test script, e.g. 1.1
+#
+set test_id   [string map {test ""} $test_name]
+
+################################################################
+#
+# Proc: exit_with_failure
+#
+# Purpose: Print a failure message, clean up and exit with a non-zero exit code
+#
+# Input: message -- The message to print
+#
+#  NOTE: This calls the cleanup procedure if defined and exits with a non-zero
+#        exit code (1). DO NOT call this within your local cleanup procedure.
+#
+################################################################
+proc exit_with_failure { message } {
+	global testsuite_cleanup_on_failure
+
+	# Call the test's locally-defined cleanup procedure if present
+	if {$testsuite_cleanup_on_failure && [info procs cleanup] eq "cleanup"} {
+		cleanup
+	}
+
+	log_error $message
+
+	exit 1
+}
+
+################################################################
+#
+# Proc: exit_with_warning
+#
+# Purpose: Print a warning message and exit with a zero exit code
+#
+# Input: message -- The message to print
+#
+#  NOTE: This calls the cleanup procedure if defined and exits with a non-zero
+#        exit code (1). DO NOT call this within your local cleanup procedure.
+#
+################################################################
+proc exit_with_warning { message } {
+
+	# Call the test's locally-defined cleanup procedure if present
+	if {[info procs cleanup] eq "cleanup"} {
+		cleanup
+	}
+
+	log_warn $message
+
+	exit 0
+}
+
+################################################################
+#
+# Proc: exit_with_success
+#
+# Purpose: Print a success message and exit with a zero exit code
+#
+#  NOTE: This calls the cleanup procedure if defined and exits with an exit
+#        code of zero. DO NOT call this within your local cleanup procedure.
+#
+################################################################
+proc exit_with_success { } {
+
+	# Call the test's locally-defined cleanup procedure if present
+	if {[info procs cleanup] eq "cleanup"} {
+		cleanup
+	}
+
+	send_user "\nSUCCESS\n"
+
+	exit 0
+}
+
+################################################################
+#
+# Proc: fail_on_error
+#
+# Purpose: Tests the exit_code global variable and exits with failure if the
+#          exit code is non-zero.
+#
+# Input: message -- The failure message to print
+#
+#  NOTE: If this test results in a call to exit_with_failure, the cleanup
+#        procedure will be invoked if locally-defined. DO NOT call this
+#        within your local cleanup procedure.
+#
+################################################################
+proc fail_on_error { message } {
+	global exit_code
+
+	if {$exit_code != 0} {
+		exit_with_failure "$message"
+	}
+}
+
+################################################################
+#
 # Proc: print_time
 #
 # Purpose:  Print the current data and time
@@ -314,9 +452,11 @@ proc print_time { } {
 # Returns: A non-zero return code indicates a failure.
 #
 # Input: job_id  -- The Slurm job id of a job we want to cancel.
+#        het_job -- (optional) For a het job confirm each component
+#        job has completed.
 #
 ################################################################
-proc cancel_job { job_id } {
+proc cancel_job { job_id {het_job 0}} {
 	global scancel bin_sleep
 
 	if {$job_id == 0} {
@@ -326,7 +466,7 @@ proc cancel_job { job_id } {
 	send_user "cancelling $job_id\n"
 	set status [catch [exec $scancel -Q $job_id] result]
 	exec $bin_sleep 1
-	return [wait_for_job $job_id "DONE"]
+	return [wait_for_job $job_id "DONE" $het_job]
 }
 
 ################################################################
@@ -579,14 +719,19 @@ proc kill_srun {  } {
 #
 # Purpose:  Print header with test ID
 #
-# Input: job_id   -- The Slurm job id of a job we want to cancel.
+# Input (optional): test_id -- The Slurm regression test ID.
 #
 ################################################################
 
-proc print_header { test_id } {
+proc print_header { { test_id_in "" } } {
+	global test_id
+
+	if { "$test_id_in" == "" } {
+		set test_id_in $test_id
+	}
 
 	send_user "============================================\n"
-	send_user "TEST: $test_id\n"
+	send_user "TEST: $test_id_in\n"
 }
 
 ################################################################
@@ -716,15 +861,12 @@ proc wait_for_file { file_name } {
 	return 1
 }
 
-
 ################################################################
 #
 # Proc: wait_for_job
 #
-# Purpose:  Wait for a previously submitted Slurm job to reach
-# the desired state. Polls every $poll_interval seconds.
-#
-# Returns: A non-zero return code indicates a failure.
+# Purpose: Wait for job to be in desired state. Can handle het job
+#          components.
 #
 # Input: job_id   -- The Slurm job id of a job we want to
 #                    wait for.
@@ -733,104 +875,37 @@ proc wait_for_file { file_name } {
 #                            DONE any terminated state
 #                            PENDING job is pending
 #                            RUNNING job is running
+#                            SPECIAL_EXIT
 #                            SUSPENDED job is suspended
+#        het_job (optional) -- If set, checks the state of each
+#                              component job if the job is a het one.
 #
-# NOTE: We sleep for two seconds before replying that a job is
-# done to give time for I/O completion (stdout/stderr files)
+# Returns: A non-zero return code indicates a failure. See
+# wait_for_single_job.
 #
 ################################################################
+proc wait_for_job { job_id desired_state {het_job 0}} {
+	set jid_list ""
 
-proc wait_for_job { job_id desired_state } {
-	global scontrol max_job_state_delay poll_interval
-
-	# First verify that desired_state is supported
-	switch $desired_state {
-		"DONE" {}
-		"PENDING" {}
-		"RUNNING" {}
-		"SUSPENDED" {}
-		default {
-			send_user "WARNING: wait_for_job with invalid state: $desired_state\n"
-			return 1
-		}
+	if { $het_job } {
+		# get component job ids
+		set jid_list [get_het_job_ids $job_id 1]
 	}
 
-	if {$job_id == 0} {
-		send_user "WARNING: wait_for_job with invalid job ID: $job_id\n"
-		return 1
+	set rc 0
+	if { $jid_list == "" } {
+		# non-het job
+		set jid_list $job_id
 	}
 
-	set my_delay    0
-	while 1 {
-		set fd [open "|$scontrol -o show job $job_id"]
-		gets $fd line
-		catch {close $fd}
-		if {[regexp {JobState\s*=\s*(\w+)} $line foo state] != 1} {
-			set state "NOT_FOUND"
+	foreach jid $jid_list {
+		set rc [_wait_for_single_job $jid $desired_state]
+		if { $rc } {
+			# bail out on first failure
+			break
 		}
-
-		switch $state {
-			"NOT_FOUND" -
-			"CANCELLED" -
-			"DEADLINE" -
-			"FAILED" -
-			"TIMEOUT" -
-			"NODE_FAIL" -
-			"PREEMPTED" -
-			"COMPLETED" {
-				if {[string compare $desired_state "DONE"] == 0} {
-					send_user "Job $job_id is DONE ($state)\n"
-					sleep 2
-					return 0
-				}
-				if {[string compare $desired_state "RUNNING"] == 0} {
-					send_user "Job $job_id is $state, "
-					send_user "but we wanted RUNNING\n"
-				}
-				if {[string compare $desired_state "SUSPENDED"] == 0} {
-					send_user "Job $job_id is $state, "
-					send_user "but we wanted SUSPENDED\n"
-				}
-				return 1
-			}
-			"PENDING" {
-				if {[string compare $desired_state "PENDING"] == 0} {
-					send_user "Job $job_id is PENDING\n"
-					return 0
-				}
-				send_user "Job $job_id is in state $state, "
-				send_user "desire $desired_state\n"
-			}
-			"RUNNING" {
-				if {[string compare $desired_state "RUNNING"] == 0} {
-					send_user "Job $job_id is RUNNING\n"
-					return 0
-				}
-				send_user "Job $job_id is in state $state, "
-				send_user "desire $desired_state\n"
-			}
-			"SUSPENDED" {
-				if {[string compare $desired_state "SUSPENDED"] == 0} {
-					send_user "Job $job_id is SUSPENDED\n"
-					return 0
-				}
-				send_user "Job $job_id is in state $state, "
-				send_user "desire $desired_state\n"
-			}
-			default {
-				send_user "Job $job_id is in state $state, "
-				send_user "desire $desired_state\n"
-			}
-		}
-
-		if { $my_delay > $max_job_state_delay } {
-			send_user "WARNING: Timeout waiting for job state $desired_state\n"
-			return 1
-		}
-
-		exec sleep $poll_interval
-		set my_delay [expr $my_delay + $poll_interval]
 	}
+	return $rc
 }
 
 ################################################################
@@ -1074,6 +1149,92 @@ proc wait_for_all_jobs { job_name } {
 		}
 	}
 	return $matches
+}
+
+################################################################
+#
+# Proc: wait_job_reason
+#	Wait until the job is in desired state and reason is one
+#	of the desired ones. Or to max_job_state_delay.
+#
+# Input: job_id              - The job to wait for.
+#        desired_state       - Desired state.
+#        desired_reason_list - List of desired reasons. Empty list
+#                              means that any reason is ok.
+#
+# Returns: 0 when job is in the desired state and reason is one
+#          of the desired ones, or 1 otherwise.
+#
+################################################################
+proc wait_job_reason { job_id {desired_state "PENDING"}
+		       {desired_reason_list ""} } {
+	global scontrol alpha max_job_state_delay poll_interval
+	set final_state "COMPLETED CANCELLED FAILED TIMEOUT DEADLINE
+	                 OUT_OF_MEMORY"
+
+	set log_user_prev [log_user -info]
+	log_user 0
+
+	set my_delay 0
+	while true {
+		set pending 0
+		set has_reason 1
+		spawn $scontrol show job $job_id
+		expect {
+			-re "JobState=($alpha) Reason=(\\S+)" {
+				set job_state $expect_out(1,string)
+				set job_reason $expect_out(2,string)
+			}
+			timeout {
+				log_error "No response from scontrol show job"
+				set rc 1
+				break
+			}
+		}
+
+		# Check if both state and reason are the desired ones
+		if {$job_state == $desired_state} {
+			set found 0
+			if {$desired_reason_list == ""} {
+				set found 1
+			}
+			foreach desired_reason $desired_reason_list {
+				if {$job_reason == $desired_reason } {
+					set found 1
+				}
+			}
+			if {$found} {
+				set rc 0
+				break
+			}
+		} elseif {[lsearch -exact final_state $job_state] >= 0} {
+			# Job is in final step no need to wait longer
+			log_error [format "Job in final state/reason '%s' / '%s' instead of the desired '%s' / '%s'." \
+			                  $job_state $job_reason \
+			                  $desired_state $desired_reason_list]
+			set rc 1
+			break
+		}
+
+		# Check if this was the last poll
+		if {$my_delay > $max_job_state_delay} {
+			log_error "wait_job_reason timeout"
+			set rc 1
+			break
+		}
+		set remamining_sec [expr $max_job_state_delay - $my_delay]
+		log_info [format "Job in state/reason '%s' / '%s' instead of the desired '%s' / '%s'." \
+		                 $job_state $job_reason \
+		                 $desired_state $desired_reason_list]
+		log_info [format "Polling again in %ss, %ss to timeout." \
+		                 $poll_interval $remamining_sec]
+
+		sleep $poll_interval
+		set my_delay [expr $my_delay + $poll_interval]
+	}
+
+	log_user $log_user_prev
+	return $rc
 }
 
 ################################################################
@@ -3323,14 +3484,19 @@ proc get_idle_node_in_part { partition } {
 #
 # Purpose:  Print failure with test ID
 #
-# Input: test_id   -- The Slurm regression test ID.
+# Input (optional): test_id_in -- The Slurm regression test ID.
 #
 ################################################################
 
-proc print_failure { test_id } {
+proc print_failure { {test_id_in ""} } {
+	global test_id
+
+	if { "$test_id_in" == "" } {
+		set test_id_in $test_id
+	}
 
 	send_user "\n"
-	send_user "FAILURE: test$test_id\n"
+	send_user "\nFAILURE: test$test_id_in\n"
 }
 
 ################################################################
@@ -3339,14 +3505,20 @@ proc print_failure { test_id } {
 #
 # Purpose:  Print success with test ID
 #
-# Input: test_id   -- The Slurm regression test ID.
+# Input (optional): test_id_in -- The Slurm regression test ID.
 #
 ################################################################
 
-proc print_success { test_id } {
+proc print_success { {test_id_in ""} } {
+
+	global test_id
+
+	if { "$test_id_in" == "" } {
+		set test_id_in $test_id
+	}
 
 	send_user "\n"
-	send_user "SUCCESS: test$test_id\n"
+	send_user "SUCCESS: test$test_id_in\n"
 }
 
 ###############################################################
@@ -4578,6 +4750,49 @@ proc expect_extern_step { } {
 
 ################################################################
 #
+# Proc: get_het_job_ids
+#
+# Purpose: Gets list of component job ids for a het job.
+#
+# Input: jobid - Slurm job id
+#        use_offset (optional) - If zero, returns list of
+#        integer job ids, else returns ids in the form of X+Y
+#        where X is het job master id and Y is the offset.
+#
+# Returns: A list of ids for a hetjob or an empty list if jobid
+# is not a het one.
+#
+################################################################
+proc get_het_job_ids { jobid {use_offset 0}} {
+	global scontrol number
+
+	set id_list ""
+	set log_user_save [log_user -info]
+	log_user 0
+	spawn $scontrol show job $jobid
+	expect {
+		-re "JobId=($number) PackJobId=($number) PackJobOffset=($number)" {
+			if { $use_offset } {
+				lappend id_list "$expect_out(2,string)+$expect_out(3,string)"
+			} else {
+				lappend id_list $expect_out(1,string)
+			}
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol not responding\n"
+			set id_list ""
+		}
+		eof {
+			wait
+		}
+	}
+	log_user $log_user_save
+	return $id_list
+}
+
+################################################################
+#
 # Proc: test_pack_step
 #
 # Returns 1 if steps can span multiple heterogeneous job allocations,
@@ -4738,29 +4953,59 @@ proc in_fed {} {
 	return 0
 }
 
-# Checks the state of the job
-proc check_job_state { job state } {
+################################################################
+#
+# Proc: check_job_state
+#
+# Checks if the state of a job is the expected one.
+#
+# Input: job    : Job ID to check
+# Input: state  : Desired state of the job to match
+# Input: het_job: If set, checks state of each component job if the
+#                 job is a hetjob.
+#
+# Returns: 1 if job was on the desired state, or the number of job components
+#          on that state if it's a hetjob and het_job option enabled.
+#          0 otherwise.
+#          Also sets exit_code to 1 if job (or component) if there are some
+#          error in the called commands.
+#
+################################################################
+proc check_job_state { job state {het_job 0}} {
 
 	global scontrol exit_code
 
-	set state_match 0
-	spawn $scontrol show job $job
-	expect {
-		-re "JobState=($state)" {
-			incr state_match
-		}
-		timeout {
-			send_user "\nFAILURE scontrol not responding\n"
-			set exit_code 1
-		}
-		eof {
-			wait
-		}
+	set jid_list ""
+	if { $het_job } {
+		set jid_list [get_het_job_ids $job 1]
 	}
 
-	if {$state_match != 1} {
-		send_user "\nFAILURE job should be in $state state, but is not\n"
-		set exit_code 1
+	if { $jid_list == "" } {
+		# non-het job
+		set jid_list $job
+	}
+
+	foreach jid $jid_list {
+		set state_match 0
+		spawn $scontrol show job $jid
+		expect {
+			-re "JobState=($state)" {
+				incr state_match
+			}
+			timeout {
+				send_user "\nFAILURE scontrol not responding\n"
+				set exit_code 1
+			}
+			eof {
+				wait
+			}
+		}
+
+		if {$state_match != 1} {
+			send_user "\nFAILURE job $jid should be in $state state, but is not\n"
+			set exit_code 1
+			break
+		}
 	}
 }
 
@@ -5233,6 +5478,190 @@ proc copy_conf { config_path cwd } {
 
 ################################################################
 #
+# Proc: save_conf
+#
+# Rename a file as <file_name>.<test_id> and make a copy of it
+# to its original name to be able to modify it.
+# It registers the saved files to allow to restore them properly
+# with restore_conf.
+# It will log_warn if the file dosn't exist, but will register it
+# to allow restore_conf to "restore" the original state: no file.
+#
+# It throws a TCL error (FATAL: ) if unsafe scenarios are detected,
+# like a backup file already existing, or any error with mv or cp.
+# It does this to encourage the user executing the test to manually
+# check the files to avoid automatically removing any original file.
+#
+# Input file_name - Path and name of file to backup
+#
+# See also restore_conf.
+#
+################################################################
+proc save_conf { file_name } {
+	global test_id
+	global bin_mv bin_cp bin_rm
+	global _global_bkp_register _global_bkp_noexist
+
+	set log_prev [log_user -info]
+	set rc       0
+
+	log_info "Saving backup of $file_name"
+
+	#
+	# Check for existing backups
+	# If it exists, throw a tcl exception/error to stop.
+	# If it exists, manual intervation should be encouraged to avoid
+	# original config files to be overwriten by a test.
+	#
+	set backup_files [glob -nocomplain $file_name*\[0-9\].\[0-9\]*]
+	if {$backup_files != ""} {
+		error [format "\nFATAL: Backup file already exists: %s" \
+		       $backup_files]
+	}
+
+	#
+	# Check if file to backup exists.
+	# If is doesn't warn the user, register the file as nonexistent and
+	# allow the test to continue.
+	# The restore_conf should remove the file.
+	#
+	if {![file exists $file_name]} {
+		log_warn [format "Backup of a nonexistent file registered: %s" \
+			  $file_name]
+		lappend _global_bkp_register $file_name
+		lappend _global_bkp_noexist  $file_name
+		return
+	}
+
+	log_user 0
+	spawn $bin_mv $file_name $file_name.$test_id
+	expect {
+		timeout {
+			error [format "\nFATAL: Timeout moving original %s" \
+			       $file_name]
+		}
+		eof {
+			lassign [wait] pid spawnid os_error_flag rc
+			if {$rc != 0} {
+				error [format "\nFATAL: Error moving original %s" \
+				       $file_name]
+			}
+		}
+	}
+	spawn $bin_cp $file_name.$test_id $file_name
+	expect {
+		timeout {
+			error [format "\nFATAL: Timeout copying original %s" \
+			       $file_name]
+		}
+		eof {
+			lassign [wait] pid spawnid os_error_flag rc
+			if {$rc != 0} {
+				error [format "\nFATAL: Error copying original %s" \
+				       $file_name]
+			}
+		}
+	}
+	# If everything is ok, register the backup file
+	lappend _global_bkp_register $file_name
+	log_user $log_prev
+}
+
+################################################################
+#
+# Proc: restore_conf
+#
+# Restore the original file saved previously with save_config.
+#
+# It throws a TCL error (FATAL: ) if unsafe scenarios are detected,
+# like a file_name not previously saved or, or any error with the
+# mv command.
+# It does this to encourage the user executing the test to manually
+# check the files to avoid automatically removing any original file.
+#
+# Input file_name - Path and name of file to restore
+#
+# See also save_conf.
+
+################################################################
+proc restore_conf { file_name } {
+	global test_id
+	global bin_mv bin_rm
+	global _global_bkp_register _global_bkp_noexist
+
+	set log_prev [log_user -info]
+	set rc       0
+
+	#
+	# We don't want to restore any file not previously saved.
+	# This avoids possible overwrtites or removals.
+	# We want to throw an error because this may indicate data corruption.
+	#
+	if { [lsearch $_global_bkp_register $file_name] == -1 } {
+		error [format "\nFATAL: Cannot restore a not previously saved file:\n%s\nSaved files are: %s\n" \
+		       $file_name [join $_global_bkp_register "\n"]]
+	}
+
+	log_user 0
+	if {[file exists $file_name.$test_id]} {
+		#
+		# If backup file exist but it was nonexistent when saved it
+		# means that it has been created in the middle of the test.
+		# This shouldn't happen and manual intervention is prefeared.
+		#
+		if { [lsearch $_global_bkp_noexist $file_name] != -1 } {
+			error [format "\nFATAL: Backup file created by someone, not by this test!" \
+			       $file_name]
+		}
+
+		log_info "Restoring backup of $file_name"
+		spawn $bin_mv $file_name.$test_id $file_name
+		expect {
+			timeout {
+				error [format "\nFATAL: Timeout restoring original: %s" \
+				       $file_name.$test_id]
+			}
+			eof {
+				lassign [wait] pid spawnid os_error_flag rc
+				if {$rc != 0} {
+					error [format "\nFATAL: Error restoring original %s" \
+					       $file_name]
+				}
+			}
+		}
+	} else {
+		#
+		# If backup file doesn't exist but it did when when we saved
+		# it means that it has been removed while the test was running.
+		# This should never happen, manual intervention is prefered.
+		#
+		if { [lsearch $_global_bkp_noexist $file_name] == -1 } {
+			error [format "\nFATAL: Backup file was removed since saved!" \
+				$file_name]
+		}
+
+		log_info "Removing file used for the test: $file_name"
+		spawn $bin_rm -f $file_name
+		expect {
+			timeout {
+				error [format "\nFATAL: Timeout removing vestigial file: %s" \
+					$file_name]
+			}
+			eof {
+				lassign [wait] pid spawnid os_error_flag rc
+				if {$rc != 0} {
+					error [format "\nFATAL: Error removing vestigial file: %s" \
+					       $file_name]
+				}
+			}
+		}
+	}
+
+	log_user $log_prev
+}
+
+################################################################
+#
 # Proc: have_nvml
 #
 # Returns 1 if HAVE_NVML is set in config.h. Else, returns 0.
@@ -5449,85 +5878,77 @@ proc create_part { part_name num_nodes_in } {
 #
 # Proc: get_node_config
 #
-# Determine the configuration of a node containing at least desired_gpus, one
-# gpu id desired_gpus is not specified.
+# Purpose: Obtain the node configuration of a node with the requested
+#          resources.
 #
-# Set the following global variables
-# cores_per_socket - Cores per socet
-# cpus_per_socket - CPUs per socket
-# cpus_tot - Total count of CPUs on the node
-# exit_code - Set to 1 on failure
-# gpu_tot - GPUs in the node
-# hostname - Name of the node referenced
-# mem_size - Real memory size
-# sockets_per_node - Sockets per node
+# Input: request_args -- Desired resources of a node in form of srun
+#                        arguments, e.g. "--gres=gpu:1 -n1 -t1"
 #
-# Returns true if node with the desired_gpus was found, false otherwise.
+# Returns: An array with the configuration of a node with at least the
+#          requested  resources. The keys of the arrays are the same that
+#          appear in the scontrol show node (e.g. CPUTot, State, RealMemory.)
+#          The array also includes some extra values:
+#          - GPUTot       : Total number of GPUs of the node.
+#          - CPUPerSocker : Number of CPUs per Socket (i.e. CPUTot / Sockets)
+#
+#          In no node is found, it returns an empty array.
+#          In case of other errors, the global exit_code is set to 1.
 #
 ################################################################
-proc get_node_config { {desired_gpus 1} } {
-	global cores_per_socket cpus_per_socket sockets_per_node mem_size
-	global hostname exit_code max_job_delay number srun scontrol gpu_tot
-	global alpha_numeric_nodelist bin_rm gres_regex
+proc get_node_config { {request_args "-n1 -t1"} } {
+	global exit_code max_job_delay srun scontrol
+	global bin_rm
 
-	set node_found false
-	set cpus_tot 1
-	set file_in  "test_gloabls"
-	set hostname "UNKNOWN"
-	set mem_size 1
-	set sockets_per_node 1
-	set cpus_per_socket 1
-	set gpu_tot 0
+	array set node_conf {}
+	set node_conf(GPUTot) 0
+
+	set file_in "get_node_config"
 	make_bash_script $file_in "$scontrol show node \$SLURM_JOB_NODELIST"
+
 	set timeout $max_job_delay
+	set log_prev [log_user -info]
 	log_user 0
-	set srun_pid [spawn $srun --gres=gpu:$desired_gpus -n1 -t1 ./$file_in]
+
+	set srun_pid [spawn $srun {*}$request_args -t1 ./$file_in]
 	expect {
-		-re "NodeName=($alpha_numeric_nodelist)" {
-			set hostname $expect_out(1,string)
-			set node_found true
-			exp_continue
-		}
-		-re "CoresPerSocket=($number)" {
-			set cores_per_socket $expect_out(1,string)
-			exp_continue
-		}
-		-re "CPUTot=($number)" {
-			set cpus_tot $expect_out(1,string)
-			exp_continue
-		}
-		-re "(Gres=|,)$gres_regex" {
-			set count 0
-			set line $expect_out(1,string)
-			set name $expect_out(2,string)
-			# Assume typed GRES of format gpu:1080:5 to start out
-			set type $expect_out(3,string)
-			set count $expect_out(4,string)
+		# The regexp is an OR for all cases of Key=Value where
+		# Value has no whitespaces, and the Key "Os=" that may
+		# have Value with whitespaces, so we match until the
+		# end of the line
+		-re "(\ *(\[^=\\n\]+)=(\\S+)\|\\n\ *(OS)=(\[^\\n\]*))" {
+			if {[string first "OS=" $expect_out(0,string)] != -1 } {
+				# Use the last groups the main regexp
+				set node_conf($expect_out(4,string)) \
+					$expect_out(5,string)
+			} else {
+				# Use the first groups of the main regexp
+				set node_conf($expect_out(2,string)) \
+					$expect_out(3,string)
 
-			# Skip all GRES of different names
-			if {$name != "gpu"} {
-				exp_continue
+				# Compute the GPUTot when Key is Gres
+				if {[string first "Gres=" $expect_out(0,string)] \
+					!= -1 } {
+					set gres_list [split \
+						$expect_out(3,string) ","]
+					foreach gres $gres_list {
+						if {[regexp {gpu:(\S+?):(\d+)} \
+							$gres match type count] \
+							== 1} {
+							incr node_conf(GPUTot) \
+								$count
+						}
+						if {[regexp {gpu:(\d+)} $gres \
+							match count] == 1} {
+							incr node_conf(GPUTot) \
+								$count
+						}
+					}
+				}
 			}
-			if {$count == ""} {
-				# Now assume GRES format gpu:5
-				set count $type
-			}
-			if { $count } {
-				incr gpu_tot $count
-			}
-
-			exp_continue
-		}
-		-re "RealMemory=($number)" {
-			set mem_size $expect_out(1,string)
-			exp_continue
-		}
-		-re "Sockets=($number)" {
-			set sockets_per_node $expect_out(1,string)
 			exp_continue
 		}
 		timeout {
-			send_user "\nFAILURE: srun not responding\n"
+			log_error "srun not responding\n"
 			slow_kill $srun_pid
 			set exit_code 1
 		}
@@ -5536,9 +5957,14 @@ proc get_node_config { {desired_gpus 1} } {
 		}
 	}
 	exec $bin_rm -f $file_in
-	log_user 1
-	set cpus_per_socket [expr $cpus_tot / $sockets_per_node]
-	return $node_found
+	log_user $log_prev
+	if { [info exists node_conf(NodeName)] } {
+		set node_conf(CPUsPerSocket) \
+			[expr $node_conf(CPUTot) / $node_conf(Sockets)]
+	} else {
+		array unset node_conf
+	}
+	array get node_conf
 }
 
 proc check_reason { job_id reason } {
@@ -5565,8 +5991,21 @@ proc check_reason { job_id reason } {
 	return $found
 }
 
-proc compile_against_libslurm { test_prog use_full use_valgrind } {
-	global slurm_dir bin_cc src_dir build_dir
+################################################################################
+#
+# Proc: compile_against_libslurm
+#
+# Compile a test program against either libslurm.so or libslurmfull.so.
+#
+# test_prog  - The name of the test program (and .c file)
+# use_full   - If 1, use libslurmfull.so instead of libslurm.so. Defaults to 0.
+# build_args - Additional string to be appended to the build command.
+#              E.g. "-DUSING_VALGRIND -lm ${build_dir}/src/slurmctld/locks.o"
+#              (initial space will be added automatically).
+#
+################################################################################
+proc compile_against_libslurm { test_prog {use_full 0} {build_args ""} } {
+	global slurm_dir bin_cc src_dir build_dir exit_code bin_chmod
 
 	if {$use_full} {
 		set libfile "libslurmfull.so"
@@ -5590,9 +6029,18 @@ proc compile_against_libslurm { test_prog use_full use_valgrind } {
 
 	set build_cmd "$bin_cc ${test_prog}.c -g -pthread -o $test_prog -I$src_dir -I$build_dir -I$slurm_dir/include -Wl,-rpath=$libline -L$libline -l$libfile"
 
-	if {$use_valgrind} {
-		set build_cmd "$build_cmd -DUSING_VALGRIND"
+	# Add additional arguments to the build command
+	if {$build_args != ""} {
+		set build_cmd "$build_cmd $build_args"
 	}
-	send_user "$build_cmd\n"
-	eval exec $build_cmd
+
+	log_info "Build command: $build_cmd"
+	catch {exec {*}$build_cmd} out_str out_dict
+	if {[dict get $out_dict -code]} {
+		log_error $out_str
+		set exit_code 1
+		return
+	}
+
+	exec $bin_chmod 700 $test_prog
 }
