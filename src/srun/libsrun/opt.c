@@ -95,8 +95,6 @@ slurm_opt_t opt =
 List 	opt_list = NULL;
 int	pass_number = 0;
 time_t	srun_begin_time = 0;
-bool	tres_bind_err_log = true;
-bool	tres_freq_err_log = true;
 
 /*---- forward declarations of static variables and functions  ----*/
 
@@ -286,12 +284,12 @@ static slurm_opt_t *_opt_copy(void)
 	opt_dup->srun_opt->export_env = xstrdup(sropt.export_env);
 	opt_dup->extra = xstrdup(opt.extra);
 	opt.gres = NULL;		/* Moved by memcpy */
-	opt_dup->gpu_bind = NULL;	/* Moved by memcpy */
-	opt_dup->gpu_freq = NULL;	/* Moved by memcpy */
-	opt_dup->gpus = NULL;		/* Moved by memcpy */
-	opt_dup->gpus_per_node = NULL;	/* Moved by memcpy */
-	opt_dup->gpus_per_socket = NULL;/* Moved by memcpy */
-	opt_dup->gpus_per_task = NULL;	/* Moved by memcpy */
+	opt.gpu_bind = NULL;		/* Moved by memcpy */
+	opt.gpu_freq = NULL;		/* Moved by memcpy */
+	opt.gpus = NULL;		/* Moved by memcpy */
+	opt.gpus_per_node = NULL;	/* Moved by memcpy */
+	opt.gpus_per_socket = NULL;	/* Moved by memcpy */
+	opt.gpus_per_task = NULL;	/* Moved by memcpy */
 	opt_dup->ifname = xstrdup(opt.ifname);
 	opt_dup->job_name = xstrdup(opt.job_name);
 	opt.licenses = NULL;		/* Moved by memcpy */
@@ -1400,7 +1398,7 @@ static void _help(void)
 	slurm_ctl_conf_t *conf;
 
         printf (
-"Usage: srun [OPTIONS...] executable [args...]\n"
+"Usage: srun [OPTIONS(0)... [executable(0) [args(0)...]]] [ : [OPTIONS(N)...]] executable(N) [args(N)...]\n"
 "\n"
 "Parallel run options:\n"
 "  -A, --account=name          charge job to specified account\n"

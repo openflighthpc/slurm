@@ -1809,6 +1809,29 @@ static void _sync_node_weight(struct node_set *node_set_ptr, int node_set_size)
 	}
 }
 
+static int _bit_or_cond_internal(void *x, void *arg)
+{
+	job_record_t *job_ptr = (job_record_t *)x;
+	bitstr_t *bitmap = (bitstr_t *)arg;
+
+	if (!IS_JOB_RUNNING(job_ptr) || job_ptr->details->share_res ||
+	    !job_ptr->job_resrcs)
+		return 0;
+
+	bit_or(bitmap, job_ptr->job_resrcs->node_bitmap);
+
+	return 0;
+}
+
+static void _bit_or_cond(job_record_t *job_ptr, bitstr_t *bitmap)
+{
+	if (!job_ptr->het_job_list)
+		_bit_or_cond_internal(job_ptr, bitmap);
+	else
+		list_for_each_nobreak(job_ptr->het_job_list,
+				      _bit_or_cond_internal, bitmap);
+}
+
 /*
  * _pick_best_nodes - from a weight order list of all nodes satisfying a
  *	job's specifications, select the "best" for use
@@ -2171,14 +2194,8 @@ static int _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 				job_record_t *tmp_job_ptr = NULL;
 				ListIterator job_iterator;
 				job_iterator = list_iterator_create(preemptee_candidates);
-				while ((tmp_job_ptr = list_next(job_iterator))) {
-					if (!IS_JOB_RUNNING(tmp_job_ptr) ||
-					    tmp_job_ptr->details->share_res ||
-					    !tmp_job_ptr->job_resrcs)
-						continue;
-					bit_or(avail_bitmap,
-					       tmp_job_ptr->job_resrcs->node_bitmap);
-				}
+				while ((tmp_job_ptr = list_next(job_iterator)))
+					_bit_or_cond(tmp_job_ptr, avail_bitmap);
 				list_iterator_destroy(job_iterator);
 				bit_and(avail_bitmap, avail_node_bitmap);
 				bit_and(avail_bitmap, total_bitmap);
@@ -2217,6 +2234,7 @@ static int _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			xfree(tmp_str2);
 }
 #endif
+
 			if (pick_code == SLURM_SUCCESS) {
 				FREE_NULL_BITMAP(backup_bitmap);
 				if (bit_set_count(avail_bitmap) > max_nodes) {
@@ -2401,6 +2419,9 @@ static int _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 
 	if (error_code == SLURM_SUCCESS) {
 		error_code = ESLURM_NODES_BUSY;
+	}
+
+	if (possible_bitmap && runable_ever) {
 		*select_bitmap = possible_bitmap;
 	} else {
 		FREE_NULL_BITMAP(possible_bitmap);
@@ -2853,9 +2874,8 @@ extern int select_nodes(job_record_t *job_ptr, bool test_only,
 		}
 		_preempt_jobs(preemptee_job_list, kill_pending, &error_code,
 			      job_ptr);
-		if ((error_code == ESLURM_NODES_BUSY) &&
-		    (detail_ptr->preempt_start_time == 0)) {
-  			detail_ptr->preempt_start_time = now;
+		if ((error_code == ESLURM_NODES_BUSY) && kill_pending) {
+			detail_ptr->preempt_start_time = now;
 			job_ptr->preempt_in_progress = true;
 			if (job_ptr->array_recs)
 				job_ptr->array_recs->pend_run_tasks++;
@@ -3086,12 +3106,6 @@ extern int select_nodes(job_record_t *job_ptr, bool test_only,
 	 * representing the amount of each GRES type requested and allocated.
 	 */
 	_fill_in_gres_fields(job_ptr);
-	if (slurmctld_conf.debug_flags & DEBUG_FLAG_GRES) {
-		char *tmp = _build_tres_str(job_ptr);
-		info("%s: %pJ gres:%s gres_alloc:%s",
-		     __func__, job_ptr, tmp, job_ptr->gres_alloc);
-		xfree(tmp);
-	}
 
 	/*
 	 * If ran with slurmdbd this is handled out of band in the
@@ -3391,8 +3405,7 @@ static int _fill_in_gres_fields(job_record_t *job_ptr)
 		if (job_ptr->gres_req == NULL)
 			xstrcat(job_ptr->gres_req, "");
 	} else if ((job_ptr->node_cnt > 0) && !job_ptr->gres_req) {
-		job_ptr->gres_req =
-			gres_plugin_job_alloc_count(job_ptr->gres_list);
+		job_ptr->gres_req = _build_tres_str(job_ptr);
 	}
 
 	if (!job_ptr->gres_alloc || (job_ptr->gres_alloc[0] == '\0') ) {
@@ -3520,6 +3533,7 @@ extern bool valid_feature_counts(job_record_t *job_ptr, bool use_active,
 				bit_or(feature_bitmap, work_bitmap);
 			} else {	/* FEATURE_OP_XOR or FEATURE_OP_XAND */
 				*has_xor = true;
+				bit_or(feature_bitmap, work_bitmap);
 			}
 			FREE_NULL_BITMAP(paren_bitmap);
 			work_bitmap = feature_bitmap;
@@ -3527,6 +3541,21 @@ extern bool valid_feature_counts(job_record_t *job_ptr, bool use_active,
 
 		last_op = job_feat_ptr->op_code;
 		last_paren_cnt = job_feat_ptr->paren;
+
+		if (job_feat_ptr->count && !(*has_xor)) {
+			/* simple AND/OR features should never have counts */
+			rc = false;
+
+			if (job_ptr->job_id) {
+				error("%s: %pJ has feature count requested: %s",
+				      __func__, job_ptr, detail_ptr->features);
+			} else {
+				error("%s: Reservation has feature count requested: %s",
+				      __func__, detail_ptr->features);
+			}
+			break;
+		}
+
 #if _DEBUG
 {
 		char *tmp_f, *tmp_w, *tmp_t;
@@ -4526,7 +4555,8 @@ static bitstr_t *_valid_features(job_record_t *job_ptr,
 		}
 		if ((job_feat_ptr->op_code == FEATURE_OP_XAND) ||
 		    (job_feat_ptr->op_code == FEATURE_OP_XOR)  ||
-		    ((job_feat_ptr->op_code == FEATURE_OP_END)  &&
+		    ((job_feat_ptr->op_code != FEATURE_OP_XAND) &&
+		     (job_feat_ptr->op_code != FEATURE_OP_XOR)  &&
 		     ((last_op == FEATURE_OP_XAND) ||
 		      (last_op == FEATURE_OP_XOR)))) {
 			if (bit_overlap_any(config_ptr->node_bitmap,

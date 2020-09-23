@@ -1,10 +1,6 @@
 #!/usr/bin/env expect
 ############################################################################
 # Purpose:  Test lua JobSubmitPlugin
-#
-# Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
-#          "FAILURE: ..." otherwise with an explanation of the failure, OR
-#          anything else indicates a failure mode that must be investigated.
 ############################################################################
 # Copyright (C) 2019 SchedMD LLC
 # Written by Nathan Rini
@@ -30,13 +26,13 @@
 source ./globals
 source ./globals_accounting
 
-set test_id		"7.20"
 set test_lua_reject	"test$test_id\_scripts/reject.lua"
 set test_lua_pass	"test$test_id\_scripts/pass.lua"
 set exit_code		 0
 set exit_code_skip	 -123123
 set cwd			"[$bin_pwd]"
 set job_name		"test$test_id"
+set is_skip              0
 
 set ta1	    "test$test_id-account.1"
 set tu1     [get_my_user_name]
@@ -66,7 +62,6 @@ set qos_2(Description)    "test_qos_2"
 set access_err  0
 
 set timeout $max_job_delay
-print_header $test_id
 
 # Create test assoc and accounts
 proc create_accounts {} {
@@ -104,8 +99,7 @@ proc do_copy { src dst } {
 		spawn $bin_cp -v $src $dst
 		expect {
 			timeout {
-				log_error "$file was not copied"
-				exit 1
+				fail "$file was not copied"
 			}
 			eof {
 				lassign [wait] pid spawnid os_error_flag rc
@@ -156,7 +150,7 @@ proc restore_backup { file } {
 }
 
 proc endit { exit_code } {
-	global test_id config_dir exit_code_skip
+	global test_id config_dir exit_code_skip is_skip
 
 	cleanup_accounts
 	restore_backup $config_dir/job_submit.lua
@@ -164,55 +158,62 @@ proc endit { exit_code } {
 	reconfigure
 
 	if {$exit_code == $exit_code_skip} {
-		send_user "\nWARNING: Unable to run test with available nodes\n"
-		exit 0
-	} elseif {$exit_code == 0} {
-		print_success $test_id
-	} else {
-		log_error "exiting with exit code $exit_code"
+		skip "Unable to run test with available nodes"
 	}
-
-	exit $exit_code
+	if {$is_skip} {
+		skip "Some subtests were skipped"
+	}
+	if {$exit_code != 0} {
+		fail "Test failed due to previous errors (\$exit_code = $exit_code)"
+	}
+	pass
 }
 
 proc check_rc { exit_code } {
 	if {$exit_code != 0} {
-		log_error "exiting with exit code $exit_code"
-		exit $exit_code
+		fail "Exiting with exit code $exit_code"
 	}
 }
 
 proc test_bin_pass { num bin args het_job count } {
-	global job_name salloc ta1 tq2 srun number
+	global job_name salloc ta1 tq2 srun number eol is_skip
 
 	set got_init 0
 	set got_sub1 0
 	set got_sub2 0
 	set got_sub3 0
 	set rc -12345
+	set is_builtin [string equal [get_config_param "SchedulerType"] "sched/builtin"]
 
-	send_user "\n\n**** TEST PASS $num ****\n"
+	log_info "**** TEST PASS $num ****"
 	eval spawn $bin [join $args " "]
 	set pid [exp_pid]
 	expect {
-		-re "^(srun|salloc|sbatch): initialized\r\n" {
+		-re "^(srun|salloc|sbatch): error: .*: Requested operation not supported on this system$eol" {
+			if { $het_job && $is_builtin } {
+				log_warn "Hetjobs are not supported with sched/builtin this failure is expected"
+				set is_skip 1
+				return 0
+			}
+		}
+		-re "^(srun|salloc|sbatch): initialized$eol" {
 			incr got_init
 			exp_continue
 		}
 		# salloc: 0: submit1
-		-re "^(srun|salloc|sbatch): ($number: |)submit1\r\n" {
+		-re "^(srun|salloc|sbatch): ($number: |)submit1$eol" {
 			if {!$het_job || $expect_out(2,string) != ""} {
 				incr got_sub1
 			}
 			exp_continue
 		}
-		-re "^(srun|salloc|sbatch): ($number: |)submit2\r\n" {
+		-re "^(srun|salloc|sbatch): ($number: |)submit2$eol" {
 			if {!$het_job || $expect_out(2,string) != ""} {
 				incr got_sub2
 			}
 			exp_continue
 		}
-		-re "^(srun|salloc|sbatch): ($number: |)submit3\r\n" {
+		-re "^(srun|salloc|sbatch): ($number: |)submit3$eol" {
 			if {!$het_job || $expect_out(2,string) != ""} {
 				incr got_sub3
 			}
@@ -240,37 +241,45 @@ proc test_bin_pass { num bin args het_job count } {
 }
 
 proc test_bin_fail { num bin args het_job count } {
-	global job_name ta1 tq1 tq2 srun number
+	global job_name ta1 tq1 tq2 srun number eol is_skip
 
 	set got_init 0
 	set got_sub1 0
 	set got_sub2 0
 	set got_sub3 0
 	set rc -12345
+	set is_builtin [string equal [get_config_param "SchedulerType"] "sched/builtin"]
 
-	send_user "\n\n**** TEST FAIL $num ****\n"
+	log_info "**** TEST FAIL $num ****"
 	eval spawn $bin [join $args " "]
 	set pid [exp_pid]
 	expect {
-		-re "^(srun|salloc|sbatch): error: initialized\r\n" {
+		-re "^(srun|salloc|sbatch): error: .*: Requested operation not supported on this system$eol" {
+			if { $het_job && $is_builtin } {
+				log_warn "Hetjobs are not supported with sched/builtin this failure is expected"
+				set is_skip 1
+				return 0
+			}
+		}
+		-re "^(srun|salloc|sbatch): error: initialized$eol" {
 			incr got_init
 			exp_continue
 		}
 		#srun: error: submit1\r\n
 		#salloc: error: 0: submit1\r\n
-		-re "^(srun|salloc|sbatch): error: ($number: |)submit1\r\n" {
+		-re "^(srun|salloc|sbatch): error: ($number: |)submit1$eol" {
 			if {!$het_job || $expect_out(2,string) != ""} {
 				incr got_sub1
 			}
 			exp_continue
 		}
-		-re "^(srun|salloc|sbatch): error: ($number: |)submit2\r\n" {
+		-re "^(srun|salloc|sbatch): error: ($number: |)submit2$eol" {
 			if {!$het_job || $expect_out(2,string) != ""} {
 				incr got_sub2
 			}
 			exp_continue
 		}
-		-re "^(srun|salloc|sbatch): error: ($number: |)submit3\r\n" {
+		-re "^(srun|salloc|sbatch): error: ($number: |)submit3$eol" {
 			if {!$het_job || $expect_out(2,string) != ""} {
 				incr got_sub3
 			}
@@ -298,20 +307,16 @@ proc test_bin_fail { num bin args het_job count } {
 }
 
 if {[have_lua] == 0} {
-	log_warn "LUA must be installed and enabled to test lua job_submit plugin."
-	exit 0
+	skip "LUA must be installed and enabled to test lua job_submit plugin."
 }
 
 if { [test_account_storage] == 0 } {
-	send_user "\nWARNING: This test can't be run without a usable AccountStorageType\n"
-	exit 0
+	skip "This test can't be run without a usable AccountStorageType"
 } elseif { [test_enforce_limits] == 0 } {
-	send_user "\nWARNING: This test can't be run without a usable AccountingStorageEnforce\n"
-	exit 0
+	skip "This test can't be run without a usable AccountingStorageEnforce"
 }
 if { [test_limits_enforced] == 0 } {
-	send_user "\nWARNING: This test can't be run without enforcing limits\n"
-	exit 0
+	skip "This test can't be run without enforcing limits"
 }
 
 # Verify cluster is able to run largest test job
@@ -324,24 +329,22 @@ expect {
 	}
 
 	timeout {
-		send_user "\nFAILURE: srun not responding\n"
 		slow_kill $srun_pid
-		exit 0
+		fail "srun not responding"
 	}
 	eof {
 		wait
 	}
 }
 if { $got_uid == 0 } {
-	send_user "\nWARNING: System too small for test\n"
-	exit 0
+	skip "System too small for test"
 }
 
 set config_dir ""
 log_user 0
 spawn $scontrol show config
 expect {
-	-re "SLURM_CONF *= (\\S+)$end_of_line" {
+	-re "SLURM_CONF *= (\\S+)$eol" {
 		set config_dir [file dirname $expect_out(1,string)]
 		exp_continue
 	}
@@ -355,8 +358,7 @@ expect {
 }
 log_user 1
 if { $config_dir == "" } {
-	log_error "scontrol did not provide SLURM_CONF"
-	exit 1
+	fail "scontrol did not provide SLURM_CONF"
 }
 
 cleanup_accounts
