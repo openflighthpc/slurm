@@ -1301,6 +1301,10 @@ static void _dump_job_state(job_record_t *dump_job_ptr, Buf buffer)
 
 	xassert(dump_job_ptr->magic == JOB_MAGIC);
 
+	/* Don't pack "unlinked" job. */
+	if (dump_job_ptr->job_id == NO_VAL)
+		return;
+
 	/* Dump basic job info */
 	pack32(dump_job_ptr->array_job_id, buffer);
 	pack32(dump_job_ptr->array_task_id, buffer);
@@ -1513,7 +1517,7 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 	List gres_list = NULL, part_ptr_list = NULL;
 	job_record_t *job_ptr = NULL;
 	part_record_t *part_ptr;
-	int error_code, i, qos_error;
+	int error_code, i, qos_error, rc;
 	dynamic_plugin_data_t *select_jobinfo = NULL;
 	job_resources_t *job_resources = NULL;
 	slurmdb_assoc_rec_t assoc_rec;
@@ -2243,6 +2247,13 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 		goto unpack_error;
 	}
 
+	/* "Don't load "unlinked" job. */
+	if (job_ptr->job_id == NO_VAL) {
+		debug("skipping unlinked job");
+		rc = SLURM_SUCCESS;
+		goto free_it;
+	}
+
 	if (((job_state & JOB_STATE_BASE) >= JOB_END) ||
 	    (batch_flag > MAX_BATCH_REQUEUE)) {
 		error("Invalid data for JobId=%u: job_state=%u batch_flag=%u",
@@ -2590,6 +2601,9 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 
 unpack_error:
 	error("Incomplete job record");
+	rc = SLURM_ERROR;
+
+free_it:
 	xfree(alloc_node);
 	xfree(account);
 	xfree(admin_comment);
@@ -2636,7 +2650,8 @@ unpack_error:
 	for (i = 0; i < pelog_env_size; i++)
 		xfree(pelog_env[i]);
 	xfree(pelog_env);
-	return SLURM_ERROR;
+
+	return rc;
 }
 
 /*
@@ -3982,6 +3997,9 @@ extern int kill_running_job_by_node_name(char *node_name)
 	int node_inx;
 	int kill_job_cnt = 0;
 	time_t now = time(NULL);
+
+	xassert(verify_lock(JOB_LOCK, WRITE_LOCK));
+	xassert(verify_lock(NODE_LOCK, WRITE_LOCK));
 
 	node_ptr = find_node_record(node_name);
 	if (node_ptr == NULL)	/* No such node */
@@ -8272,18 +8290,20 @@ static int _copy_job_desc_to_job_record(job_desc_msg_t *job_desc,
 		detail_ptr->pn_min_cpus = job_desc->pn_min_cpus;
 	if (job_desc->overcommit != NO_VAL8)
 		detail_ptr->overcommit = job_desc->overcommit;
+	if (job_desc->num_tasks != NO_VAL)
+		detail_ptr->num_tasks = job_desc->num_tasks;
 	if (job_desc->ntasks_per_node != NO_VAL16) {
 		detail_ptr->ntasks_per_node = job_desc->ntasks_per_node;
-		if (detail_ptr->overcommit == 0) {
+		if ((detail_ptr->overcommit == 0) &&
+		    (detail_ptr->num_tasks > 1)) {
 			detail_ptr->pn_min_cpus =
 				MAX(detail_ptr->pn_min_cpus,
 				    (detail_ptr->cpus_per_task *
 				     detail_ptr->ntasks_per_node));
 		}
-	} else {
-		detail_ptr->pn_min_cpus = MAX(detail_ptr->pn_min_cpus,
-					      detail_ptr->cpus_per_task);
 	}
+	detail_ptr->pn_min_cpus = MAX(detail_ptr->pn_min_cpus,
+				      detail_ptr->cpus_per_task);
 	detail_ptr->orig_pn_min_cpus = detail_ptr->pn_min_cpus;
 	if (job_desc->reboot != NO_VAL16)
 		job_ptr->reboot = MIN(job_desc->reboot, 1);
@@ -8298,8 +8318,6 @@ static int _copy_job_desc_to_job_record(job_desc_msg_t *job_desc,
 	detail_ptr->orig_pn_min_memory = detail_ptr->pn_min_memory;
 	if (job_desc->pn_min_tmp_disk != NO_VAL)
 		detail_ptr->pn_min_tmp_disk = job_desc->pn_min_tmp_disk;
-	if (job_desc->num_tasks != NO_VAL)
-		detail_ptr->num_tasks = job_desc->num_tasks;
 	detail_ptr->std_err = xstrdup(job_desc->std_err);
 	detail_ptr->std_in = xstrdup(job_desc->std_in);
 	detail_ptr->std_out = xstrdup(job_desc->std_out);
@@ -8677,6 +8695,17 @@ extern bool test_job_nodes_ready(job_record_t *job_ptr)
 		if ((select_g_job_ready(job_ptr) & READY_NODE_STATE) == 0)
 			return false;
 	} else if (job_ptr->batch_flag) {
+
+#ifdef HAVE_FRONT_END
+		/* Make sure frontend node is ready to start batch job */
+		front_end_record_t *front_end_ptr =
+			find_front_end_record(job_ptr->batch_host);
+		if (!front_end_ptr ||
+		    IS_NODE_POWER_SAVE(front_end_ptr) ||
+		    IS_NODE_POWER_UP(front_end_ptr)) {
+			return false;
+		}
+#else
 		/* Make sure first node is ready to start batch job */
 		node_record_t *node_ptr =
 			find_node_record(job_ptr->batch_host);
@@ -8685,6 +8714,7 @@ extern bool test_job_nodes_ready(job_record_t *job_ptr)
 		    IS_NODE_POWER_UP(node_ptr)) {
 			return false;
 		}
+#endif
 	}
 
 	return true;
@@ -10710,13 +10740,16 @@ static void _pack_default_job_details(job_record_t *job_ptr, Buf buffer,
 			} else if (detail_ptr->cpus_per_task > 1) {
 				/* min_nodes based upon task count and cpus
 				 * per task */
-				uint32_t min_cpus, min_nodes;
-				min_cpus = detail_ptr->num_tasks *
-					   detail_ptr->cpus_per_task;
-				min_nodes = min_cpus + max_cpu_cnt - 1;
-				min_nodes /= max_cpu_cnt;
+				uint32_t ntasks_per_node, min_nodes;
+				ntasks_per_node = max_cpu_cnt /
+						  detail_ptr->cpus_per_task;
+				ntasks_per_node = MAX(ntasks_per_node, 1);
+				min_nodes = detail_ptr->num_tasks /
+					    ntasks_per_node;
 				min_nodes = MAX(min_nodes,
 						detail_ptr->min_nodes);
+				if (detail_ptr->num_tasks % ntasks_per_node)
+					min_nodes++;
 				pack32(min_nodes, buffer);
 				pack32(detail_ptr->max_nodes, buffer);
 			} else if (detail_ptr->mc_ptr &&
@@ -16130,6 +16163,12 @@ static int _resume_job_nodes(job_record_t *job_ptr, bool indf_susp)
 			if (node_ptr->no_share_job_cnt)
 				bit_clear(share_node_bitmap, i);
 		}
+
+		if (slurm_mcs_get_select(job_ptr) == 1) {
+			xfree(node_ptr->mcs_label);
+			node_ptr->mcs_label = xstrdup(job_ptr->mcs_label);
+		}
+
 		bit_clear(idle_node_bitmap, i);
 		node_flags = node_ptr->node_state & NODE_STATE_FLAGS;
 		node_ptr->node_state = NODE_STATE_ALLOCATED | node_flags;

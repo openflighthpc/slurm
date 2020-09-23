@@ -1,7 +1,8 @@
 Name:		flight-slurm
-Version:	20.02.3
+Version:	20.02.5
 %define rel	1
-Release:	%{rel}.flight2%{?dist}
+%define flrel 1
+Release:	%{rel}.flight%{flrel}%{?dist}
 Summary:	Slurm Workload Manager
 
 Group:		System Environment/Base
@@ -10,9 +11,9 @@ URL:		https://slurm.schedmd.com/
 
 # when the rel number is one, the directory name does not include it
 %if "%{rel}" == "1"
-%global slurm_source_dir %{name}-%{version}.flight2
+%global slurm_source_dir %{name}-%{version}.flight%{flrel}
 %else
-%global slurm_source_dir %{name}-%{version}-%{rel}.flight2
+%global slurm_source_dir %{name}-%{version}-%{rel}.flight%{flrel}
 %endif
 
 Source:		%{slurm_source_dir}.tar.bz2

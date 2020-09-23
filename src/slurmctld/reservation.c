@@ -2640,8 +2640,11 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 		}
 		if (resv_desc_ptr->flags & RESERVE_FLAG_NO_HOLD_JOBS)
 			resv_ptr->flags |= RESERVE_FLAG_NO_HOLD_JOBS;
-		if (resv_desc_ptr->flags & RESERVE_FLAG_PROM)
+		if ((resv_desc_ptr->flags & RESERVE_FLAG_PROM) &&
+		    !(resv_ptr->flags & RESERVE_FLAG_PROM)) {
 			resv_ptr->flags |= RESERVE_FLAG_PROM;
+			list_append(prom_resv_list, resv_ptr);
+		}
 		if (resv_desc_ptr->flags & RESERVE_FLAG_NO_PROM) {
 			resv_ptr->flags &= (~RESERVE_FLAG_PROM);
 			(void)list_remove_first(
@@ -2778,7 +2781,7 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 			goto update_failure;
 		}
 		resv_ptr->end_time = resv_desc_ptr->end_time;
-		resv_ptr->duration = 0;
+		resv_ptr->duration = NO_VAL;
 	}
 
 	if (resv_desc_ptr->duration == INFINITE) {
@@ -2890,7 +2893,16 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 			error_code = rc;
 			goto update_failure;
 		}
-		resv_ptr->node_cnt = bit_set_count(resv_ptr->node_bitmap);
+		/*
+		 * If the reservation was 0 node count before (ANY_NODES) this
+		 * could be NULL, if for some reason someone tried to update the
+		 * node count in this situation we will still not have a
+		 * node_bitmap.
+		 */
+		if (resv_ptr->node_bitmap)
+			resv_ptr->node_cnt =
+				bit_set_count(resv_ptr->node_bitmap);
+
 	}
 	memset(&resv_desc, 0, sizeof(resv_desc_msg_t));
 	resv_desc.start_time  = resv_ptr->start_time;
@@ -3829,7 +3841,16 @@ static int  _resize_resv(slurmctld_resv_t *resv_ptr, uint32_t node_cnt)
 	xfree(resv_desc.node_list);
 	xfree(resv_desc.partition);
 	if (i == SLURM_SUCCESS) {
-		bit_or(resv_ptr->node_bitmap, tmp1_bitmap);
+		/*
+		 * If the reservation was 0 node count before (ANY_NODES) this
+		 * could be NULL, if for some reason someone tried to update the
+		 * node count in this situation we will still not have a
+		 * node_bitmap.
+		 */
+		if (resv_ptr->node_bitmap)
+			bit_or(resv_ptr->node_bitmap, tmp1_bitmap);
+		else
+			resv_ptr->node_bitmap = bit_copy(tmp1_bitmap);
 		FREE_NULL_BITMAP(tmp1_bitmap);
 		FREE_NULL_BITMAP(resv_ptr->core_bitmap);
 		resv_ptr->core_bitmap = core_bitmap;
@@ -4250,7 +4271,7 @@ static bitstr_t *_pick_idle_node_cnt(bitstr_t *avail_bitmap,
 	job_record_t *job_ptr;
 	bitstr_t *orig_bitmap, *save_bitmap = NULL;
 	bitstr_t *ret_bitmap = NULL, *tmp_bitmap;
-	int total_node_cnt, requested_node_cnt;
+	int total_node_cnt;
 
 	total_node_cnt = bit_set_count(avail_bitmap);
 	if (total_node_cnt < node_cnt) {
@@ -4290,18 +4311,8 @@ static bitstr_t *_pick_idle_node_cnt(bitstr_t *avail_bitmap,
 	}
 	list_iterator_destroy(job_iterator);
 
-	/*
-	 * Save the number of requested nodes. If node_cnt wasn't specified and
-	 * a node_list was passed instead, node_cnt will be 0, and
-	 * total_node_cnt will hold the number of requested nodes. If node_cnt
-	 * was specified, then that is the number of requested nodes.
-	 * We want to know if the number of available nodes (total_node_cnt
-	 * after total_node_cnt = bit_set_count(avail_bitmap)) is at least as
-	 * many as the number of requested nodes.
-	 */
-	requested_node_cnt = node_cnt ? node_cnt : total_node_cnt;
 	total_node_cnt = bit_set_count(avail_bitmap);
-	if (total_node_cnt >= requested_node_cnt) {
+	if (total_node_cnt >= node_cnt) {
 		/*
 		 * NOTE: select_g_resv_test() does NOT preserve avail_bitmap,
 		 * so we do that here and other calls to that function.
@@ -5658,7 +5669,7 @@ static int _resv_list_reset_cnt(void *x, void *arg)
 extern void job_resv_check(void)
 {
 	ListIterator iter;
-	slurmctld_resv_t *resv_backup, *resv_ptr;
+	slurmctld_resv_t *resv_ptr;
 	time_t now = time(NULL);
 
 	if (!resv_list)
@@ -5669,10 +5680,13 @@ extern void job_resv_check(void)
 
 	iter = list_iterator_create(resv_list);
 	while ((resv_ptr = list_next(iter))) {
-		if (resv_ptr->job_run_cnt || resv_ptr->job_pend_cnt)
-			resv_ptr->idle_start_time = 0;
-		else if (!resv_ptr->idle_start_time)
-			resv_ptr->idle_start_time = now;
+		if (resv_ptr->start_time <= now) {
+			if (resv_ptr->job_run_cnt || resv_ptr->job_pend_cnt)
+				resv_ptr->idle_start_time = 0;
+			else if (!resv_ptr->idle_start_time)
+				resv_ptr->idle_start_time = now;
+		}
+
 		if ((resv_ptr->flags & RESERVE_FLAG_PURGE_COMP) &&
 		    resv_ptr->idle_start_time &&
 		    (resv_ptr->end_time > now) &&
@@ -5683,12 +5697,42 @@ extern void job_resv_check(void)
 				      tmp_pct, sizeof(tmp_pct));
 			info("Reservation %s has no more jobs for %s, ending it",
 			     resv_ptr->name, tmp_pct);
-			resv_backup = _copy_resv(resv_ptr);
-			resv_ptr->end_time = now;
-			_post_resv_update(resv_ptr, resv_backup); /* accounting */
-			_del_resv_rec(resv_backup);
+
+			/*
+			 * Reset time here for reoccurring reservations so we
+			 * don't continually keep running this.
+			 */
+			resv_ptr->idle_start_time = 0;
+
+			(void)_post_resv_delete(resv_ptr);
+
+			if (!resv_ptr->run_epilog)
+				_run_script(slurmctld_conf.resv_epilog,
+					    resv_ptr);
+
+			/*
+			 * If we are ending a reoccurring reservation advance
+			 * it, otherwise delete it.
+			 */
+			if (!(resv_ptr->flags & (RESERVE_FLAG_DAILY |
+						 RESERVE_FLAG_WEEKDAY |
+						 RESERVE_FLAG_WEEKEND |
+						 RESERVE_FLAG_WEEKLY))) {
+				/*
+				 * Clear resv ptrs on finished jobs still
+				 * pointing to this reservation.
+				 */
+				_clear_job_resv(resv_ptr);
+				list_delete_item(iter);
+			} else {
+				resv_ptr->run_prolog = false;
+				resv_ptr->run_epilog = false;
+				_advance_resv_time(resv_ptr);
+			}
+
 			last_resv_update = now;
 			schedule_resv_save();
+			continue;
 		}
 		if ((resv_ptr->end_time >= now) ||
 		    (resv_ptr->duration && (resv_ptr->duration != NO_VAL) &&
