@@ -374,7 +374,7 @@ install -D -m755 etc/profile.d/90-slurm.sh %{buildroot}/opt/flight/etc/profile.d
 install -D -m755 etc/profile.d/90-slurm.csh %{buildroot}/opt/flight/etc/profile.d/90-slurm.csh
 
 %if %{with slurmrestd}
-install -D -m644 etc/slurmrestd.service  %{buildroot}/%{_unitdir}/slurmrestd.service
+install -D -m644 etc/slurmrestd.service  %{buildroot}/%{_unitdir}/flight-slurmrestd.service
 %endif
 
 # Do not package Slurm's version of libpmi on Cray systems in the usual location.
@@ -638,7 +638,7 @@ rm -rf %{buildroot}
 %if %{with slurmrestd}
 %files slurmrestd
 %{_sbindir}/slurmrestd
-%{_unitdir}/slurmrestd.service
+%{_unitdir}/flight-slurmrestd.service
 %endif
 #############################################################################
 
