@@ -2331,7 +2331,7 @@ extern int step_create(job_step_create_request_msg_t *step_specs,
             (job_ptr->part_ptr->over_time_limit != NO_VAL16)) {
           over_time_limit = job_ptr->part_ptr->over_time_limit;
         } else {
-          over_time_limit = slurmctld_conf.over_time_limit;
+          over_time_limit = slurm_conf.over_time_limit;
         }
         if (over_time_limit == INFINITE16)
           over_run = now - YEAR_SECONDS;
