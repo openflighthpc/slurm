@@ -46,7 +46,7 @@ proc endit { } {
 # We must be SlurmUser or root in order to change the partition MaxTime limit,
 # otherwise this test may fail.
 #
-if {[test_super_user] == 0} {
+if {![is_super_user]} {
 	skip "You must be SlurmUser or root to run this test."
 }
 
@@ -69,7 +69,7 @@ expect {
 		set exit_code 1
 		exp_continue
 	}
-	-re "launching ($number)\.($number) on host" {
+	-re "launching StepId=($number)\\.($re_word_str) on host" {
 		set job_id $expect_out(1,string)
 		set exit_code 0
 		exp_continue

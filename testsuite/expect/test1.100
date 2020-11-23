@@ -31,11 +31,8 @@ source ./globals
 
 set exit_code   0
 
-if { [test_front_end] } {
+if {[get_config_param "FrontendName"] ne "MISSING"} {
 	skip "This test is incompatible with front end systems"
-}
-if {[test_front_end] != 0} {
-	skip "This test is incompatible with front-end systems"
 }
 
 # find out if we have enough nodes to test functionality
@@ -86,7 +83,7 @@ expect {
 		lset tested_layout $index $value
 		exp_continue
 	}
-	-re "($number)\.($number):($re_word_str)" {
+	-re "($number)\\.($number):($re_word_str)" {
 		set index $expect_out(1,string)
 		set index2 $expect_out(2,string)
 		if { $index == 0 } {
@@ -138,7 +135,7 @@ expect {
 		lset tested_layout $index $value
 		exp_continue
 	}
-	-re "($number)\.($number):($re_word_str)" {
+	-re "($number)\\.($number):($re_word_str)" {
 		set index $expect_out(1,string)
 		set index2 $expect_out(2,string)
 		if { $index == 0 } {

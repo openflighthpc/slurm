@@ -27,14 +27,13 @@
 source ./globals
 
 set exit_code	0
-set prompt	"PROMPT:"
 set task_num	2
 
-if {[test_front_end]} {
+if {[get_config_param "FrontendName"] ne "MISSING"} {
         skip "This test is incompatible with front-end systems"
 }
-if {[test_hetjob_step] == 0} {
-	skip "Heterogeneous steps not currently supported"
+if {[get_config_param "SchedulerType"] ne "sched/backfill"} {
+	skip "This test requires SchedulerType = sched/backfill"
 }
 
 set nb_nodes [get_node_cnt_in_part]
@@ -62,15 +61,14 @@ set sid [spawn $salloc -t1 -N1 : -N1 : -N1 $bin_bash]
 expect {
 	-re "Granted job allocation ($number)" {
 		set het_job_id $expect_out(1,string)
-		send "export PS1=\"$prompt\"\r"
+		send "$reset_bash_prompt\r"
 		exp_continue
 	}
-	-re "export PS1=\"$prompt\"\r" {
-		# skip this, just echo of setting prompt"
+	-re "\"$test_prompt\"" {
+		# skip this, just echo of setting test_prompt
 		exp_continue
 	}
-	-re "$prompt" {
-		#log_debug "Job initiated"
+	-re "$test_prompt" {
 	}
 	timeout {
 		log_error "salloc : allocation not granted in $timeout seconds"
@@ -88,7 +86,7 @@ if {$het_job_id == 0} {
 #
 set timeout 1
 expect {
-	-re $prompt {
+	-re $test_prompt {
 		exp_continue
 	}
 	timeout {
@@ -108,7 +106,7 @@ expect {
 		incr index
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#break
 	}
 	timeout {
@@ -132,7 +130,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#break
 	}
 	timeout {
@@ -153,7 +151,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#break
 	}
 	timeout {
@@ -174,7 +172,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#break
 	}
 	timeout {
@@ -195,7 +193,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#break
 	}
 	timeout {
@@ -216,7 +214,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#break
 	}
 	timeout {
@@ -240,7 +238,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#break
 	}
 	timeout {
@@ -261,7 +259,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#break
 	}
 	timeout {
@@ -282,7 +280,7 @@ expect {
 		incr matches
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#break
 	}
 	timeout {

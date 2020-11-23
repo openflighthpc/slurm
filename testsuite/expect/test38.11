@@ -33,7 +33,7 @@ set job_id     0
 set hostlist   ""
 set node1      ""
 set node2      ""
-set prompt	"PROMPT: "
+set het_job_id 0
 
 proc cleanup { } {
 	global het_job_id scancel
@@ -42,15 +42,19 @@ proc cleanup { } {
 	}
 }
 
-if {![test_accting_steps]} {
+set accounting_storage_enforce [get_config_param "AccountingStorageEnforce"]
+if {[param_contains $accounting_storage_enforce "nosteps"] || [param_contains $accounting_storage_enforce "nojobs"]} {
 	skip "This test can not be run with nosteps or nojobs (AccountingStorageEnforce)"
 }
-if {[test_front_end] != 0} {
+if {[get_config_param "FrontendName"] ne "MISSING"} {
 	skip "This test is incompatible with front-end systems"
-} elseif {[slurmd_user_root] == 0} {
+} elseif {[get_config_param "SlurmdUser"] ne "root(0)"} {
 	skip "This test requires that the SlurmdUser be root"
-} elseif {[get_node_cnt] < 2} {
+} elseif {[get_node_cnt_in_part] < 2} {
 	skip "This test requires that the configuration has at least 2 nodes"
+}
+if {[get_config_param "SchedulerType"] ne "sched/backfill"} {
+	skip "This test requires SchedulerType = sched/backfill"
 }
 
 set def_part [default_partition]
@@ -73,7 +77,6 @@ if {![string compare $node1 ""] || ![string compare $node2 ""]} {
 	skip "Did not find at least 2 idle nodes"
 }
 
-set het_job_id 0
 set matches 0
 set index 0
 set timeout $max_job_delay
@@ -81,14 +84,14 @@ spawn $salloc -t2 -N1 : -N1 $bin_bash
 expect {
 	-re "job ($number) has been allocated resources" {
 		set het_job_id $expect_out(1,string)
-		send "export PS1=\"$prompt\"\r"
+		send "$reset_bash_prompt\r"
 		exp_continue
 	}
-	-re "\"$prompt" {
-		# skip this, just echo of setting prompt"
+	-re "\"$test_prompt\"" {
+		# skip this, just echo of setting test_prompt
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#log_debug "Job initiated"
 	}
 	timeout {
@@ -185,7 +188,7 @@ expect {
 		set exit_code 1
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#log_debug "Job initiated"
 	}
 	timeout {

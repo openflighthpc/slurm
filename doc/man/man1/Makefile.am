@@ -9,6 +9,7 @@ man1_MANS = \
 	sbcast.1 \
 	scancel.1 \
 	scontrol.1 \
+	scrontab.1 \
 	sdiag.1	\
 	sinfo.1   \
 	slurm.1 \
@@ -27,8 +28,6 @@ endif
 if BUILD_SVIEW
 man1_MANS += sview.1
 endif
-
-EXTRA_DIST = $(man1_MANS)
 
 if HAVE_MAN2HTML
 
@@ -60,8 +59,6 @@ html_DATA += sview.html
 endif
 
 MOSTLYCLEANFILES = ${html_DATA}
-
-EXTRA_DIST += $(html_DATA)
 
 SUFFIXES = .html
 

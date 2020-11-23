@@ -31,7 +31,7 @@ set job_id      0
 
 set default_time [get_partition_default_time_limit]
 if { $default_time != -1} {
-	skip "This test is not compatible with default partition having a default time limit ($part_name $default_time)"
+	skip "This test is not compatible with default partition having a default time limit ([default_partition]: $default_time)"
 }
 
 #
@@ -44,7 +44,7 @@ expect {
 		set exit_code 1
 		exp_continue
 	}
-	-re "launching ($number)\.($number) on host" {
+	-re "launching StepId=($number)\\.($re_word_str) on host" {
 		set job_id $expect_out(1,string)
 		set exit_code 0
 		exp_continue

@@ -1,4 +1,4 @@
-.TH "gres.conf" "5" "Slurm Configuration File" "August 2020" "Slurm Configuration File"
+.TH "gres.conf" "5" "Slurm Configuration File" "October 2020" "Slurm Configuration File"
 
 .SH "NAME"
 gres.conf \- Slurm configuration file for Generic RESource (GRES) management.
@@ -51,15 +51,28 @@ The overall configuration parameters available include:
 .TP
 \fBAutoDetect\fR
 The hardware detection mechanisms to enable for automatic GRES configuration.
-This should be on a line by itself. Current, options are:
+Currently, the options are:
 .RS
 .TP
 \fBnvml\fR
-Used to automatically detect NVIDIA GPUs
+Automatically detect NVIDIA GPUs
+.TP
+\fBoff\fR
+Do not automatically detect any GPUs. Used to override other options.
 .TP
 \fBrsmi\fR
-Used to automatically detect AMD GPUs
+Automatically detect AMD GPUs
 .RE
+
+\fIAutoDetect\fR can be on a line by itself, in which case it will globally
+apply to all lines in gres.conf by default. In addition, \fIAutoDetect\fR can be
+combined with \fBNodeName\fR to only apply to certain nodes. Node-specific
+\fIAutoDetect\fRs will trump the global \fIAutoDetect\fR. A node-specific
+\fIAutoDetect\fR only needs to be specified once per node. If specified multiple
+times for the same nodes, they must all be the same value. To unset
+\fIAutoDetect\fR for a node when a global \fIAutoDetect\fR is set, simply set it
+to "off" in a node-specific GRES line.
+E.g.: \fINodeName=tux3 AutoDetect=off Name=gpu File=/dev/nvidia[0\-3]\fR.
 
 .TP
 \fBCount\fR
@@ -71,7 +84,7 @@ For example: "Count=10G".
 
 .TP
 \fBCores\fR
-Optionally specify the first thread CPU index numbers for the specific cores
+Optionally specify the core index numbers for the specific cores
 which can use this resource.
 For example, it may be strongly preferable to use specific cores with specific
 GRES devices (e.g. on a NUMA architecture).
@@ -90,7 +103,7 @@ identified cores can be allocated with each generic resource. This will tend to
 improve performance of jobs, but delay the allocation of resources to them.
 If specified and a job is \fInot\fR submitted with the
 \fB\-\-gres\-flags=enforce\-binding\fR option the identified cores will be
-preferred for scheduled with each generic resource.
+preferred for scheduling with each generic resource.
 
 If \fB\-\-gres\-flags=disable\-binding\fR is specified, then any core can be
 used with the resources, which also increases the speed of Slurm's
@@ -103,21 +116,13 @@ If any core can be effectively used with the resources, then do not specify the
 A restart of the slurmctld is needed for changes to the Cores option to take
 effect.
 
-\fBNOTE:\fR If your cores contain multiple threads only the first thread
-(processing unit) of each core needs to be listed.
-Also note that since Slurm must be able to perform resource management on
+\fBNOTE:\fR Since Slurm must be able to perform resource management on
 heterogeneous clusters having various processing unit numbering schemes,
-a logical processing unit index must be specified instead of the physical
-processing unit index.
-That processing unit logical index might not correspond to your physical index
-number.
-Processing unit 0 will be the first socket, first core and (if configured) first
-thread.
-If hyperthreading is enabled, processing unit 1 will always be the first socket,
-first core and second thread.
-If hyperthreading is not enabled, processing unit 1 will always be the first
-socket and second core.
-This numbering coincides with the processing unit logical number (PU L#) seen
+a logical core index must be specified instead of the physical core index.
+That logical core index might not correspond to your physical core index number.
+Core 0 will be the first core on the first socket, while core 1 will be the
+second core on the first socket.
+This numbering coincides with the logical core number (Core L#) seen
 in "lstopo \-l" command output.
 
 .TP
@@ -233,7 +238,7 @@ If \fBType\fR is specified, then \fBCount\fR is limited in size (currently 1024)
 .br
 # Slurm's Generic Resource (GRES) configuration file
 .br
-# Define GPU devices with MPS support
+# Define GPU devices with MPS support, with AutoDetect sanity checking
 .br
 ##################################################################
 .br
@@ -297,11 +302,29 @@ NodeName=tux[4\-15]  Name=gpu File=/dev/nvidia[0\-3]
 .br
 # Use NVML to gather GPU configuration information
 .br
-# Information about all other GRES gathered from slurm.conf
+# for all nodes except one
 .br
 ##################################################################
 .br
 AutoDetect=nvml
+.br
+NodeName=tux3 AutoDetect=off Name=gpu File=/dev/nvidia[0\-3]
+.br
+
+##################################################################
+.br
+# Slurm's Generic Resource (GRES) configuration file
+.br
+# Specify some nodes with NVML, some with RSMI, and some with no AutoDetect
+.br
+##################################################################
+.br
+NodeName=tux[0\-7] AutoDetect=nvml
+.br
+NodeName=tux[8\-11] AutoDetect=rsmi
+.br
+NodeName=tux[12\-15] Name=gpu File=/dev/nvidia[0\-3]
+.br
 
 .SH "COPYING"
 Copyright (C) 2010 The Regents of the University of California.

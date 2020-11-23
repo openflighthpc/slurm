@@ -28,12 +28,14 @@ source ./globals
 
 set exit_code	0
 
-set prompt           "PROMPT: "
-
-if {[test_front_end]} {
+if {[get_config_param "FrontendName"] ne "MISSING"} {
         skip "This test is incompatible with front-end systems"
 } else {
 	set task_num 2
+}
+
+if {[get_config_param "SchedulerType"] ne "sched/backfill"} {
+	skip "This test requires SchedulerType = sched/backfill"
 }
 
 set nb_nodes [get_node_cnt_in_part]
@@ -83,14 +85,14 @@ spawn $salloc -t9 -N1 : -N1 : -N1 $bin_bash
 expect {
 	-re "job ($number) has been allocated resources" {
 		set het_job_id $expect_out(1,string)
-		send "export PS1=\"$prompt\"\r"
+		send "$reset_bash_prompt\r"
 		exp_continue
 	}
-	-re "\"$prompt" {
-		# skip this, just echo of setting prompt"
+	-re "\"$test_prompt\"" {
+		# skip this, just echo of setting test_prompt
 		exp_continue
 	}
-	-re "$prompt" {
+	-re "$test_prompt" {
 		#log_debug "Job initiated"
 	}
 	timeout {

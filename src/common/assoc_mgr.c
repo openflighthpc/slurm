@@ -69,9 +69,9 @@ List assoc_mgr_qos_list = NULL;
 List assoc_mgr_user_list = NULL;
 List assoc_mgr_wckey_list = NULL;
 
-static char *assoc_mgr_cluster_name = NULL;
 static int setup_children = 0;
 static pthread_rwlock_t assoc_mgr_locks[ASSOC_MGR_ENTITY_COUNT];
+static pthread_mutex_t assoc_lock_init = PTHREAD_MUTEX_INITIALIZER;
 
 static assoc_init_args_t init_setup;
 static slurmdb_assoc_rec_t **assoc_hash_id = NULL;
@@ -80,7 +80,8 @@ static int *assoc_mgr_tres_old_pos = NULL;
 
 static bool _running_cache(void)
 {
-	if (init_setup.running_cache && *init_setup.running_cache)
+	if (init_setup.running_cache &&
+	    (*init_setup.running_cache != RUNNING_CACHE_STATE_NOTRUNNING))
 		return true;
 
 	return false;
@@ -112,7 +113,7 @@ static int _assoc_hash_index(slurmdb_assoc_rec_t *assoc)
 	index = assoc->uid;
 
 	/* only set on the slurmdbd */
-	if (!assoc_mgr_cluster_name && assoc->cluster)
+	if (slurmdbd_conf && assoc->cluster)
 		index += _get_str_inx(assoc->cluster);
 
 	if (assoc->acct)
@@ -170,7 +171,7 @@ static slurmdb_assoc_rec_t *_find_assoc_rec_id(uint32_t assoc_id)
 	slurmdb_assoc_rec_t *assoc;
 
 	if (!assoc_hash_id) {
-		debug2("_find_assoc_rec_id: no associations added yet");
+		debug2("%s: no associations added yet", __func__);
 		return NULL;
 	}
 
@@ -198,11 +199,11 @@ static slurmdb_assoc_rec_t *_find_assoc_rec(
 	int inx;
 
 	/* We can only use _find_assoc_rec_id if we are not on the slurmdbd */
-	if (assoc->id && assoc_mgr_cluster_name)
+	if (assoc->id && !slurmdbd_conf)
 		return _find_assoc_rec_id(assoc->id);
 
 	if (!assoc_hash) {
-		debug2("_find_assoc_rec: no associations added yet");
+		debug2("%s: no associations added yet", __func__);
 		return NULL;
 	}
 
@@ -247,7 +248,7 @@ static slurmdb_assoc_rec_t *_find_assoc_rec(
 		}
 
 		/* only check for on the slurmdbd */
-		if (!assoc_mgr_cluster_name && assoc->cluster
+		if (slurmdbd_conf && assoc->cluster
 		    && (!assoc_ptr->cluster
 			|| xstrcasecmp(assoc->cluster, assoc_ptr->cluster))) {
 			debug3("%s: not the right cluster", __func__);
@@ -406,36 +407,10 @@ static int _addto_used_info(slurmdb_assoc_rec_t *assoc1,
 	assoc1->usage->used_submit_jobs += assoc2->usage->used_submit_jobs;
 	assoc1->usage->usage_raw += assoc2->usage->usage_raw;
 
-	/*
-	 * Basically copied from src/slurmctld/acct_policy.c
-	 * _add_usage_node_bitmap().
-	 */
-	if (assoc2->usage->grp_node_bitmap) {
-		int i_first, i_last;
-		if (assoc1->usage->grp_node_bitmap)
-			bit_or(assoc1->usage->grp_node_bitmap,
-			       assoc2->usage->grp_node_bitmap);
-		else
-			assoc1->usage->grp_node_bitmap =
-				bit_copy(assoc2->usage->grp_node_bitmap);
-
-		if (!assoc1->usage->grp_node_job_cnt)
-			assoc1->usage->grp_node_job_cnt = xcalloc(
-				bit_size(assoc1->usage->grp_node_bitmap),
-				sizeof(uint16_t));
-
-		i_first = bit_ffs(assoc2->usage->grp_node_bitmap);
-		if (i_first != -1) {
-			i_last = bit_fls(assoc2->usage->grp_node_bitmap);
-			for (int i = i_first; i <= i_last; i++) {
-				if (!bit_test(assoc2->usage->grp_node_bitmap,
-					      i))
-					continue;
-				assoc1->usage->grp_node_job_cnt[i] +=
-					assoc2->usage->grp_node_job_cnt[i];
-			}
-		}
-	}
+	slurmdb_merge_grp_node_usage(&assoc1->usage->grp_node_bitmap,
+				     &assoc1->usage->grp_node_job_cnt,
+				     assoc2->usage->grp_node_bitmap,
+				     assoc2->usage->grp_node_job_cnt);
 	return SLURM_SUCCESS;
 }
 
@@ -557,8 +532,8 @@ static int _change_user_name(slurmdb_user_rec_t *user)
 	xassert(user->old_name);
 
 	if (uid_from_string(user->name, &pw_uid) < 0) {
-		debug("_change_user_name: couldn't get new uid for user %s",
-		      user->name);
+		debug("%s: couldn't get new uid for user %s",
+		      __func__, user->name);
 		user->uid = NO_VAL;
 	} else
 		user->uid = pw_uid;
@@ -692,6 +667,16 @@ static int _local_update_assoc_qos_list(slurmdb_assoc_rec_t *assoc,
 	return SLURM_SUCCESS;
 }
 
+static int _list_find_uid(void *x, void *key)
+{
+	slurmdb_user_rec_t *user = (slurmdb_user_rec_t *) x;
+	uint32_t uid = *(uint32_t *) key;
+
+	if (user->uid == uid)
+		return 1;
+	return 0;
+}
+
 /* locks should be put in place before calling this function USER_WRITE */
 static void _set_user_default_acct(slurmdb_assoc_rec_t *assoc)
 {
@@ -701,24 +686,21 @@ static void _set_user_default_acct(slurmdb_assoc_rec_t *assoc)
 
 	/* set up the default if this is it */
 	if ((assoc->is_def == 1) && (assoc->uid != NO_VAL)) {
-		slurmdb_user_rec_t *user = NULL;
-		ListIterator user_itr =
-			list_iterator_create(assoc_mgr_user_list);
-		while ((user = list_next(user_itr))) {
-			if (user->uid != assoc->uid)
-				continue;
-			if (!user->default_acct
-			    || xstrcmp(user->default_acct, assoc->acct)) {
-				xfree(user->default_acct);
-				user->default_acct = xstrdup(assoc->acct);
-				debug2("user %s default acct is %s",
-				       user->name, user->default_acct);
-			}
-			/* cache user rec reference for backfill*/
-			assoc->user_rec = user;
-			break;
+		slurmdb_user_rec_t *user = list_find_first(
+			assoc_mgr_user_list, _list_find_uid, &assoc->uid);
+
+		if (!user)
+			return;
+
+		if (!user->default_acct
+		    || xstrcmp(user->default_acct, assoc->acct)) {
+			xfree(user->default_acct);
+			user->default_acct = xstrdup(assoc->acct);
+			debug2("user %s default acct is %s",
+			       user->name, user->default_acct);
 		}
-		list_iterator_destroy(user_itr);
+		/* cache user rec reference for backfill*/
+		assoc->user_rec = user;
 	}
 }
 
@@ -731,22 +713,18 @@ static void _set_user_default_wckey(slurmdb_wckey_rec_t *wckey)
 
 	/* set up the default if this is it */
 	if ((wckey->is_def == 1) && (wckey->uid != NO_VAL)) {
-		slurmdb_user_rec_t *user = NULL;
-		ListIterator user_itr =
-			list_iterator_create(assoc_mgr_user_list);
-		while ((user = list_next(user_itr))) {
-			if (user->uid != wckey->uid)
-				continue;
-			if (!user->default_wckey
-			    || xstrcmp(user->default_wckey, wckey->name)) {
-				xfree(user->default_wckey);
-				user->default_wckey = xstrdup(wckey->name);
-				debug2("user %s default wckey is %s",
-				       user->name, user->default_wckey);
-			}
-			break;
+		slurmdb_user_rec_t *user = list_find_first(
+			assoc_mgr_user_list, _list_find_uid, &wckey->uid);
+
+		if (!user)
+			return;
+		if (!user->default_wckey
+		    || xstrcmp(user->default_wckey, wckey->name)) {
+			xfree(user->default_wckey);
+			user->default_wckey = xstrdup(wckey->name);
+			debug2("user %s default wckey is %s",
+			       user->name, user->default_wckey);
 		}
-		list_iterator_destroy(user_itr);
 	}
 }
 
@@ -1171,7 +1149,7 @@ static int _post_qos_list(List qos_list)
 
 static int _post_res_list(List res_list)
 {
-	if (res_list && assoc_mgr_cluster_name) {
+	if (res_list && !slurmdbd_conf) {
 		slurmdb_res_rec_t *object = NULL;
 		ListIterator itr = list_iterator_create(res_list);
 		while ((object = list_next(itr))) {
@@ -1184,9 +1162,9 @@ static int _post_res_list(List res_list)
 					/* only update the local clusters
 					 * res, only one per res
 					 * record, so throw the others away. */
-					if (!xstrcasecmp(object->clus_res_rec->
-							cluster,
-							assoc_mgr_cluster_name))
+					if (!xstrcasecmp(
+						object->clus_res_rec->cluster,
+						slurm_conf.cluster_name))
 						break;
 					slurmdb_destroy_clus_res_rec(
 						object->clus_res_rec);
@@ -1509,7 +1487,6 @@ static int _get_assoc_mgr_tres_list(void *db_conn, int enforce)
 	slurmdb_tres_cond_t tres_q;
 	uid_t uid = getuid();
 	List new_list = NULL;
-	char *tres_req_str;
 	int changed;
 	assoc_mgr_lock_t locks =
 		{ .assoc = WRITE_LOCK, .qos = WRITE_LOCK, .tres= WRITE_LOCK };
@@ -1519,10 +1496,10 @@ static int _get_assoc_mgr_tres_list(void *db_conn, int enforce)
 	assoc_mgr_lock(&locks);
 
 	/* If this exists we only want/care about tracking/caching these TRES */
-	if ((tres_req_str = slurm_get_accounting_storage_tres())) {
+	if (slurm_conf.accounting_storage_tres) {
 		tres_q.type_list = list_create(xfree_ptr);
-		slurm_addto_char_list(tres_q.type_list, tres_req_str);
-		xfree(tres_req_str);
+		slurm_addto_char_list(tres_q.type_list,
+				      slurm_conf.accounting_storage_tres);
 	}
 	new_list = acct_storage_g_get_tres(
 		db_conn, uid, &tres_q);
@@ -1532,8 +1509,7 @@ static int _get_assoc_mgr_tres_list(void *db_conn, int enforce)
 	if (!new_list) {
 		assoc_mgr_unlock(&locks);
 		if (enforce & ACCOUNTING_ENFORCE_ASSOCS) {
-			error("_get_assoc_mgr_tres_list: "
-			      "no list was made.");
+			error("%s: no list was made.", __func__);
 			return SLURM_ERROR;
 		} else {
 			return SLURM_SUCCESS;
@@ -1565,13 +1541,12 @@ static int _get_assoc_mgr_assoc_list(void *db_conn, int enforce)
 	FREE_NULL_LIST(assoc_mgr_assoc_list);
 
 	memset(&assoc_q, 0, sizeof(slurmdb_assoc_cond_t));
-	if (assoc_mgr_cluster_name) {
+	if (!slurmdbd_conf) {
 		assoc_q.cluster_list = list_create(NULL);
-		list_append(assoc_q.cluster_list, assoc_mgr_cluster_name);
+		list_append(assoc_q.cluster_list, slurm_conf.cluster_name);
 	} else if ((enforce & ACCOUNTING_ENFORCE_ASSOCS) && !slurmdbd_conf) {
-		error("_get_assoc_mgr_assoc_list: "
-		      "no cluster name here going to get "
-		      "all associations.");
+		error("%s: no cluster name here going to get all associations.",
+		      __func__);
 	}
 
 //	START_TIMER;
@@ -1588,8 +1563,7 @@ static int _get_assoc_mgr_assoc_list(void *db_conn, int enforce)
 			list_create(slurmdb_destroy_assoc_rec);
 		assoc_mgr_unlock(&locks);
 		if (enforce & ACCOUNTING_ENFORCE_ASSOCS) {
-			error("_get_assoc_mgr_assoc_list: "
-			      "no list was made.");
+			error("%s: no list was made.", __func__);
 			return SLURM_ERROR;
 		} else {
 			debug3("not enforcing associations and no "
@@ -1615,14 +1589,13 @@ static int _get_assoc_mgr_res_list(void *db_conn, int enforce)
 	FREE_NULL_LIST(assoc_mgr_res_list);
 
 	slurmdb_init_res_cond(&res_q, 0);
-	if (assoc_mgr_cluster_name) {
+	if (!slurmdbd_conf) {
 		res_q.with_clusters = 1;
 		res_q.cluster_list = list_create(NULL);
-		list_append(res_q.cluster_list, assoc_mgr_cluster_name);
+		list_append(res_q.cluster_list, slurm_conf.cluster_name);
 	} else if ((enforce & ACCOUNTING_ENFORCE_ASSOCS) && !slurmdbd_conf) {
-		error("_get_assoc_mgr_res_list: "
-		      "no cluster name here going to get "
-		      "all associations.");
+		error("%s: no cluster name here going to get all associations.",
+		      __func__);
 	}
 
 	assoc_mgr_res_list = acct_storage_g_get_res(db_conn, uid, &res_q);
@@ -1632,8 +1605,7 @@ static int _get_assoc_mgr_res_list(void *db_conn, int enforce)
 	if (!assoc_mgr_res_list) {
 		assoc_mgr_unlock(&locks);
 		if (enforce & ACCOUNTING_ENFORCE_ASSOCS) {
-			error("_get_assoc_mgr_res_list:"
-			      "no list was made.");
+			error("%s: no list was made.", __func__);
 			return SLURM_ERROR;
 		} else {
 			return SLURM_SUCCESS;
@@ -1656,7 +1628,7 @@ static int _get_assoc_mgr_qos_list(void *db_conn, int enforce)
 
 	if (!new_list) {
 		if (enforce & ACCOUNTING_ENFORCE_ASSOCS) {
-			error("_get_assoc_mgr_qos_list: no list was made.");
+			error("%s: no list was made.", __func__);
 			return SLURM_ERROR;
 		} else {
 			return SLURM_SUCCESS;
@@ -1692,8 +1664,7 @@ static int _get_assoc_mgr_user_list(void *db_conn, int enforce)
 	if (!assoc_mgr_user_list) {
 		assoc_mgr_unlock(&locks);
 		if (enforce & ACCOUNTING_ENFORCE_ASSOCS) {
-			error("_get_assoc_mgr_user_list: "
-			      "no list was made.");
+			error("%s: no list was made.", __func__);
 			return SLURM_ERROR;
 		} else {
 			return SLURM_SUCCESS;
@@ -1718,13 +1689,12 @@ static int _get_assoc_mgr_wckey_list(void *db_conn, int enforce)
 	FREE_NULL_LIST(assoc_mgr_wckey_list);
 
 	memset(&wckey_q, 0, sizeof(slurmdb_wckey_cond_t));
-	if (assoc_mgr_cluster_name) {
+	if (!slurmdbd_conf) {
 		wckey_q.cluster_list = list_create(NULL);
-		list_append(wckey_q.cluster_list, assoc_mgr_cluster_name);
+		list_append(wckey_q.cluster_list, slurm_conf.cluster_name);
 	} else if ((enforce & ACCOUNTING_ENFORCE_WCKEYS) && !slurmdbd_conf) {
-		error("_get_assoc_mgr_wckey_list: "
-		      "no cluster name here going to get "
-		      "all wckeys.");
+		error("%s: no cluster name here going to get all wckeys.",
+		      __func__);
 	}
 
 //	START_TIMER;
@@ -1740,8 +1710,7 @@ static int _get_assoc_mgr_wckey_list(void *db_conn, int enforce)
 		assoc_mgr_wckey_list = list_create(slurmdb_destroy_wckey_rec);
 		assoc_mgr_unlock(&locks);
 		if (enforce & ACCOUNTING_ENFORCE_WCKEYS) {
-			error("_get_assoc_mgr_wckey_list: "
-			      "no list was made.");
+			error("%s: no list was made.", __func__);
 			return SLURM_ERROR;
 		} else {
 			debug3("not enforcing wckeys and no "
@@ -1780,13 +1749,12 @@ static int _refresh_assoc_mgr_assoc_list(void *db_conn, int enforce)
 //	DEF_TIMERS;
 
 	memset(&assoc_q, 0, sizeof(slurmdb_assoc_cond_t));
-	if (assoc_mgr_cluster_name) {
+	if (!slurmdbd_conf) {
 		assoc_q.cluster_list = list_create(NULL);
-		list_append(assoc_q.cluster_list, assoc_mgr_cluster_name);
+		list_append(assoc_q.cluster_list, slurm_conf.cluster_name);
 	} else if ((enforce & ACCOUNTING_ENFORCE_ASSOCS) && !slurmdbd_conf) {
-		error("_refresh_assoc_mgr_assoc_list: "
-		      "no cluster name here going to get "
-		      "all associations.");
+		error("%s: no cluster name here going to get all associations.",
+		      __func__);
 	}
 
 	assoc_mgr_lock(&locks);
@@ -1804,8 +1772,8 @@ static int _refresh_assoc_mgr_assoc_list(void *db_conn, int enforce)
 		assoc_mgr_assoc_list = current_assocs;
 		assoc_mgr_unlock(&locks);
 
-		error("_refresh_assoc_mgr_assoc_list: "
-		      "no new list given back keeping cached one.");
+		error("%s: no new list given back keeping cached one.",
+		      __func__);
 		return SLURM_ERROR;
 	}
 
@@ -1855,14 +1823,13 @@ static int _refresh_assoc_mgr_res_list(void *db_conn, int enforce)
 	assoc_mgr_lock_t locks = { .res = WRITE_LOCK };
 
 	slurmdb_init_res_cond(&res_q, 0);
-	if (assoc_mgr_cluster_name) {
+	if (!slurmdbd_conf) {
 		res_q.with_clusters = 1;
 		res_q.cluster_list = list_create(NULL);
-		list_append(res_q.cluster_list, assoc_mgr_cluster_name);
+		list_append(res_q.cluster_list, slurm_conf.cluster_name);
 	} else if ((enforce & ACCOUNTING_ENFORCE_ASSOCS) && !slurmdbd_conf) {
-		error("_refresh_assoc_mgr_res_list: "
-		      "no cluster name here going to get "
-		      "all associations.");
+		error("%s: no cluster name here going to get all associations.",
+		      __func__);
 	}
 
 	current_res = acct_storage_g_get_res(db_conn, uid, &res_q);
@@ -1870,8 +1837,8 @@ static int _refresh_assoc_mgr_res_list(void *db_conn, int enforce)
 	FREE_NULL_LIST(res_q.cluster_list);
 
 	if (!current_res) {
-		error("_refresh_assoc_mgr_res_list: "
-		      "no new list given back keeping cached one.");
+		error("%s: no new list given back keeping cached one.",
+		      __func__);
 		return SLURM_ERROR;
 	}
 
@@ -1900,8 +1867,8 @@ static int _refresh_assoc_mgr_qos_list(void *db_conn, int enforce)
 	current_qos = acct_storage_g_get_qos(db_conn, uid, NULL);
 
 	if (!current_qos) {
-		error("_refresh_assoc_mgr_qos_list: "
-		      "no new list given back keeping cached one.");
+		error("%s: no new list given back keeping cached one.",
+		      __func__);
 		return SLURM_ERROR;
 	}
 
@@ -1950,8 +1917,8 @@ static int _refresh_assoc_mgr_user_list(void *db_conn, int enforce)
 	current_users = acct_storage_g_get_users(db_conn, uid, &user_q);
 
 	if (!current_users) {
-		error("_refresh_assoc_mgr_user_list: "
-		      "no new list given back keeping cached one.");
+		error("%s: no new list given back keeping cached one.",
+		      __func__);
 		return SLURM_ERROR;
 	}
 	_post_user_list(current_users);
@@ -1978,13 +1945,12 @@ static int _refresh_assoc_wckey_list(void *db_conn, int enforce)
 	assoc_mgr_lock_t locks = { .user = WRITE_LOCK, .wckey = WRITE_LOCK };
 
 	memset(&wckey_q, 0, sizeof(slurmdb_wckey_cond_t));
-	if (assoc_mgr_cluster_name) {
+	if (!slurmdbd_conf) {
 		wckey_q.cluster_list = list_create(NULL);
-		list_append(wckey_q.cluster_list, assoc_mgr_cluster_name);
+		list_append(wckey_q.cluster_list, slurm_conf.cluster_name);
 	} else if ((enforce & ACCOUNTING_ENFORCE_WCKEYS) && !slurmdbd_conf) {
-		error("_refresh_assoc_wckey_list: "
-		      "no cluster name here going to get "
-		      "all wckeys.");
+		error("%s: no cluster name here going to get all wckeys.",
+		      __func__);
 	}
 
 	current_wckeys = acct_storage_g_get_wckeys(db_conn, uid, &wckey_q);
@@ -1992,8 +1958,8 @@ static int _refresh_assoc_wckey_list(void *db_conn, int enforce)
 	FREE_NULL_LIST(wckey_q.cluster_list);
 
 	if (!current_wckeys) {
-		error("_refresh_assoc_wckey_list: "
-		      "no new list given back keeping cached one.");
+		error("%s: no new list given back keeping cached one.",
+		      __func__);
 		return SLURM_ERROR;
 	}
 
@@ -2014,11 +1980,9 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args,
 	static uint16_t checked_prio = 0;
 
 	if (!checked_prio) {
-		char *prio = slurm_get_priority_type();
-		if (prio && xstrcmp(prio, "priority/basic"))
+		if (xstrcmp(slurm_conf.priority_type, "priority/basic"))
 			setup_children = 1;
 
-		xfree(prio);
 		checked_prio = 1;
 		memset(&init_setup, 0, sizeof(assoc_init_args_t));
 		init_setup.cache_level = ASSOC_MGR_CACHE_ALL;
@@ -2032,11 +1996,6 @@ extern int assoc_mgr_init(void *db_conn, assoc_init_args_t *args,
 		       "we probably don't have a connection.  "
 		       "If we do use assoc_mgr_refresh_lists instead.");
 		return SLURM_SUCCESS;
-	}
-
-	if ((!assoc_mgr_cluster_name) && !slurmdbd_conf) {
-		xfree(assoc_mgr_cluster_name);
-		assoc_mgr_cluster_name = slurm_get_cluster_name();
 	}
 
 	/* check if we can't talk to the db yet (Do this after all
@@ -2122,7 +2081,6 @@ extern int assoc_mgr_fini(bool save_state)
 	}
 	xfree(assoc_mgr_tres_array);
 	xfree(assoc_mgr_tres_old_pos);
-	xfree(assoc_mgr_cluster_name);
 	assoc_mgr_assoc_list = NULL;
 	assoc_mgr_res_list = NULL;
 	assoc_mgr_qos_list = NULL;
@@ -2132,7 +2090,7 @@ extern int assoc_mgr_fini(bool save_state)
 	assoc_mgr_root_assoc = NULL;
 
 	if (_running_cache())
-		*init_setup.running_cache = 0;
+		*init_setup.running_cache = RUNNING_CACHE_STATE_NOTRUNNING;
 
 	xfree(assoc_hash_id);
 	xfree(assoc_hash);
@@ -2200,11 +2158,13 @@ extern void assoc_mgr_lock(assoc_mgr_lock_t *locks)
 	static bool init_run = false;
 	xassert(_store_locks(locks));
 
+	slurm_mutex_lock(&assoc_lock_init);
 	if (!init_run) {
 		init_run = true;
 		for (int i = 0; i < ASSOC_MGR_ENTITY_COUNT; i++)
 			slurm_rwlock_init(&assoc_mgr_locks[i]);
 	}
+	slurm_mutex_unlock(&assoc_lock_init);
 
 	if (locks->assoc == READ_LOCK)
 		slurm_rwlock_rdlock(&assoc_mgr_locks[ASSOC_LOCK]);
@@ -2503,7 +2463,7 @@ extern int assoc_mgr_fill_in_assoc(void *db_conn,
 		}
 
 		if (!assoc->cluster)
-			assoc->cluster = assoc_mgr_cluster_name;
+			assoc->cluster = slurm_conf.cluster_name;
 	}
 	debug5("%s: looking for assoc of user=%s(%u), acct=%s, cluster=%s, partition=%s",
 	       __func__, assoc->user, assoc->uid, assoc->acct, assoc->cluster,
@@ -2937,7 +2897,7 @@ extern int assoc_mgr_fill_in_wckey(void *db_conn, slurmdb_wckey_rec_t *wckey,
 
 
 		if (!wckey->cluster)
-			wckey->cluster = assoc_mgr_cluster_name;
+			wckey->cluster = slurm_conf.cluster_name;
 	}
 /* 	info("looking for wckey of user=%s(%u), name=%s, " */
 /* 	     "cluster=%s", */
@@ -2951,7 +2911,7 @@ extern int assoc_mgr_fill_in_wckey(void *db_conn, slurmdb_wckey_rec_t *wckey,
 	itr = list_iterator_create(assoc_mgr_wckey_list);
 	while ((found_wckey = list_next(itr))) {
 		/* only and always check for on the slurmdbd */
-		if (!assoc_mgr_cluster_name) {
+		if (slurmdbd_conf) {
 			if (!wckey->cluster) {
 				error("No cluster name was given "
 				      "to check against, "
@@ -3031,9 +2991,9 @@ extern int assoc_mgr_fill_in_wckey(void *db_conn, slurmdb_wckey_rec_t *wckey,
 extern slurmdb_admin_level_t assoc_mgr_get_admin_level(void *db_conn,
 						       uint32_t uid)
 {
-	ListIterator itr = NULL;
-	slurmdb_user_rec_t * found_user = NULL;
 	assoc_mgr_lock_t locks = { .user = READ_LOCK };
+	slurmdb_user_rec_t *found_user = NULL;
+	slurmdb_admin_level_t level = SLURMDB_ADMIN_NOTSET;
 
 	if (!assoc_mgr_user_list)
 		if (_get_assoc_mgr_user_list(db_conn, 0) == SLURM_ERROR)
@@ -3045,18 +3005,14 @@ extern slurmdb_admin_level_t assoc_mgr_get_admin_level(void *db_conn,
 		return SLURMDB_ADMIN_NOTSET;
 	}
 
-	itr = list_iterator_create(assoc_mgr_user_list);
-	while ((found_user = list_next(itr))) {
-		if (uid == found_user->uid)
-			break;
-	}
-	list_iterator_destroy(itr);
-	assoc_mgr_unlock(&locks);
+	found_user = list_find_first(assoc_mgr_user_list, _list_find_uid, &uid);
 
 	if (found_user)
-		return found_user->admin_level;
+		level = found_user->admin_level;
 
-	return SLURMDB_ADMIN_NOTSET;
+	assoc_mgr_unlock(&locks);
+
+	return level;
 }
 
 extern bool assoc_mgr_is_user_acct_coord(void *db_conn,
@@ -3081,12 +3037,8 @@ extern bool assoc_mgr_is_user_acct_coord(void *db_conn,
 		return false;
 	}
 
-	itr = list_iterator_create(assoc_mgr_user_list);
-	while ((found_user = list_next(itr))) {
-		if (uid == found_user->uid)
-			break;
-	}
-	list_iterator_destroy(itr);
+	found_user = list_find_first(assoc_mgr_user_list, _list_find_uid,
+				     &uid);
 
 	if (!found_user || !found_user->coord_accts) {
 		assoc_mgr_unlock(&locks);
@@ -3121,7 +3073,6 @@ extern void assoc_mgr_get_shares(void *db_conn,
 	char *tmp_char = NULL;
 	slurmdb_user_rec_t user;
 	int is_admin=1;
-	uint16_t private_data = slurm_get_private_data();
 	assoc_mgr_lock_t locks = { .assoc = READ_LOCK, .tres = READ_LOCK };
 
 	xassert(resp_msg);
@@ -3140,12 +3091,11 @@ extern void assoc_mgr_get_shares(void *db_conn,
 			acct_itr = list_iterator_create(req_msg->acct_list);
 	}
 
-	if (private_data & PRIVATE_DATA_USAGE) {
-		uint32_t slurm_uid = slurm_get_slurm_user_id();
+	if (slurm_conf.private_data & PRIVATE_DATA_USAGE) {
 		is_admin = 0;
 		/* Check permissions of the requesting user.
 		 */
-		if ((uid == slurm_uid || uid == 0)
+		if ((uid == slurm_conf.slurm_user_id || uid == 0)
 		    || assoc_mgr_get_admin_level(db_conn, uid)
 		    >= SLURMDB_ADMIN_OPERATOR)
 			is_admin = 1;
@@ -3196,7 +3146,7 @@ extern void assoc_mgr_get_shares(void *db_conn,
 				continue;
 		}
 
-		if (private_data & PRIVATE_DATA_USAGE) {
+		if (slurm_conf.private_data & PRIVATE_DATA_USAGE) {
 			if (!is_admin) {
 				ListIterator itr = NULL;
 				slurmdb_coord_rec_t *coord = NULL;
@@ -3321,7 +3271,6 @@ extern void assoc_mgr_info_get_pack_msg(
 	void *object;
 	uint32_t flags = 0;
 
-	uint16_t private_data = slurm_get_private_data();
 	assoc_mgr_lock_t locks = { .assoc = READ_LOCK, .res = READ_LOCK,
 				   .tres = READ_LOCK, .user = READ_LOCK };
 	Buf buffer;
@@ -3344,12 +3293,12 @@ extern void assoc_mgr_info_get_pack_msg(
 		flags = msg->flags;
 	}
 
-	if (private_data & (PRIVATE_DATA_USAGE | PRIVATE_DATA_USERS)) {
-		uint32_t slurm_uid = slurm_get_slurm_user_id();
+	if (slurm_conf.private_data &
+	    (PRIVATE_DATA_USAGE | PRIVATE_DATA_USERS)) {
 		is_admin = 0;
 		/* Check permissions of the requesting user.
 		 */
-		if ((uid == slurm_uid || uid == 0)
+		if ((uid == slurm_conf.slurm_user_id || uid == 0)
 		    || assoc_mgr_get_admin_level(db_conn, uid)
 		    >= SLURMDB_ADMIN_OPERATOR)
 			is_admin = 1;
@@ -3400,7 +3349,7 @@ extern void assoc_mgr_info_get_pack_msg(
 				continue;
 		}
 
-		if (private_data & PRIVATE_DATA_USAGE) {
+		if (slurm_conf.private_data & PRIVATE_DATA_USAGE) {
 			if (!is_admin) {
 				ListIterator itr = NULL;
 				slurmdb_coord_rec_t *coord = NULL;
@@ -3490,7 +3439,8 @@ no_qos:
 	/* now filter out the users */
 	itr = list_iterator_create(assoc_mgr_user_list);
 	while ((user_rec = list_next(itr))) {
-		if (!is_admin && (private_data & PRIVATE_DATA_USERS) &&
+		if (!is_admin &&
+		    (slurm_conf.private_data & PRIVATE_DATA_USERS) &&
 		    xstrcasecmp(user_rec->name, user.name))
 			continue;
 
@@ -3700,14 +3650,14 @@ extern int assoc_mgr_update_assocs(slurmdb_update_object_t *update, bool locked)
 
 	while ((object = list_pop(update->objects))) {
 		bool update_jobs = false;
-		if (object->cluster && assoc_mgr_cluster_name) {
+		if (object->cluster && !slurmdbd_conf) {
 			/* only update the local clusters assocs */
 			if (xstrcasecmp(object->cluster,
-					assoc_mgr_cluster_name)) {
+					slurm_conf.cluster_name)) {
 				slurmdb_destroy_assoc_rec(object);
 				continue;
 			}
-		} else if (assoc_mgr_cluster_name) {
+		} else if (!slurmdbd_conf) {
 			error("We don't have a cluster here, no "
 			      "idea if this is our association.");
 			continue;
@@ -4191,14 +4141,14 @@ extern int assoc_mgr_update_wckeys(slurmdb_update_object_t *update, bool locked)
 
 	itr = list_iterator_create(assoc_mgr_wckey_list);
 	while ((object = list_pop(update->objects))) {
-		if (object->cluster && assoc_mgr_cluster_name) {
+		if (object->cluster && !slurmdbd_conf) {
 			/* only update the local clusters assocs */
 			if (xstrcasecmp(object->cluster,
-					assoc_mgr_cluster_name)) {
+					slurm_conf.cluster_name)) {
 				slurmdb_destroy_wckey_rec(object);
 				continue;
 			}
-		} else if (assoc_mgr_cluster_name) {
+		} else if (!slurmdbd_conf) {
 			error("We don't have a cluster here, no "
 			      "idea if this is our wckey.");
 			continue;
@@ -4207,7 +4157,7 @@ extern int assoc_mgr_update_wckeys(slurmdb_update_object_t *update, bool locked)
 		list_iterator_reset(itr);
 		while ((rec = list_next(itr))) {
 			/* only and always check for on the slurmdbd */
-			if (!assoc_mgr_cluster_name &&
+			if (slurmdbd_conf &&
 			    xstrcasecmp(object->cluster, rec->cluster)) {
 				debug4("not the right cluster");
 				continue;
@@ -4863,8 +4813,7 @@ extern int assoc_mgr_update_qos(slurmdb_update_object_t *update, bool locked)
 }
 
 /*
- * NOTE: This function only works when assoc_mgr_cluster_name is defined.  This
- * does not currently work for the slurmdbd.
+ * NOTE: This function does not currently work for the slurmdbd.
  */
 extern int assoc_mgr_update_res(slurmdb_update_object_t *update, bool locked)
 {
@@ -4889,13 +4838,13 @@ extern int assoc_mgr_update_res(slurmdb_update_object_t *update, bool locked)
 		   clus_res_list then the resource it self changed so
 		   update counts.
 		*/
-		if (assoc_mgr_cluster_name && object->clus_res_rec) {
+		if (!slurmdbd_conf && object->clus_res_rec) {
 			if (!object->clus_res_rec->cluster) {
 				error("Resource doesn't have a cluster name?");
 				slurmdb_destroy_res_rec(object);
 				continue;
 			} else if (xstrcmp(object->clus_res_rec->cluster,
-					   assoc_mgr_cluster_name)) {
+					   slurm_conf.cluster_name)) {
 				debug("Not for our cluster for '%s'",
 				      object->clus_res_rec->cluster);
 				slurmdb_destroy_res_rec(object);
@@ -5209,13 +5158,13 @@ static void _set_usage_tres_raw(long double *tres_cnt, char *tres_str)
 		id = atoi(tmp_str);
 		/* 0 isn't a valid tres id */
 		if (id <= 0) {
-			error("_set_usage_tres_raw: no id "
-			      "found at %s instead", tmp_str);
+			error("%s: no id found at %s instead",
+			      __func__, tmp_str);
 			break;
 		}
 		if (!(tmp_str = strchr(tmp_str, '='))) {
-			error("_set_usage_tres_raw: "
-			      "no value found %s", tres_str);
+			error("%s: no value found %s",
+			      __func__, tres_str);
 			break;
 		}
 
@@ -5225,9 +5174,8 @@ static void _set_usage_tres_raw(long double *tres_cnt, char *tres_str)
 			/* set the index to the count */
 			tres_cnt[pos] = strtold(++tmp_str, &endptr);
 		} else {
-			debug("_set_usage_tres_raw: "
-			       "no tres of id %u found in the array",
-			       tres_rec.id);
+			debug("%s: no tres of id %u found in the array",
+			      __func__, tres_rec.id);
 		}
 		if (!(tmp_str = strchr(tmp_str, ',')))
 			break;
@@ -6065,7 +6013,7 @@ extern int load_assoc_mgr_state(bool only_tres)
 	}
 
 	if (!only_tres && init_setup.running_cache)
-		*init_setup.running_cache = 1;
+		*init_setup.running_cache = RUNNING_CACHE_STATE_RUNNING;
 
 	free_buf(buffer);
 	assoc_mgr_unlock(&locks);
@@ -6125,7 +6073,7 @@ extern int assoc_mgr_refresh_lists(void *db_conn, uint16_t cache_level)
 			return SLURM_ERROR;
 
 	if (!partial_list && _running_cache())
-		*init_setup.running_cache = 0;
+		*init_setup.running_cache = RUNNING_CACHE_STATE_LISTS_REFRESHED;
 
 	return SLURM_SUCCESS;
 }
@@ -6209,12 +6157,12 @@ extern void assoc_mgr_normalize_assoc_shares(slurmdb_assoc_rec_t *assoc)
 {
 	xassert(assoc);
 	/*
-	 * Use slurmctld_conf.priority_flags directly instead of using a
+	 * Use slurm_conf.priority_flags directly instead of using a
 	 * global flags variable. assoc_mgr_init() would be the logical
 	 * place to set a global, but there is no great location for
 	 * resetting it when scontrol reconfigure is called
 	 */
-	if (slurmctld_conf.priority_flags & PRIORITY_FLAGS_FAIR_TREE)
+	if (slurm_conf.priority_flags & PRIORITY_FLAGS_FAIR_TREE)
 		_normalize_assoc_shares_fair_tree(assoc);
 	else
 		_normalize_assoc_shares_traditional(assoc);

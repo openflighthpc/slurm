@@ -460,23 +460,6 @@ extern void print_fields(type_t type, void *object)
 					     tmp_int,
 					     (curr_inx == field_count));
 			break;
-		case PRINT_ALLOC_GRES:
-			switch(type) {
-			case JOB:
-				tmp_char = job->alloc_gres;
-				break;
-			case JOBSTEP:
-				tmp_char = step->job_ptr->alloc_gres;
-				break;
-			case JOBCOMP:
-			default:
-				tmp_char = NULL;
-				break;
-			}
-			field->print_routine(field,
-					     tmp_char,
-					     (curr_inx == field_count));
-			break;
 		case PRINT_ALLOC_NODES:
 			switch(type) {
 			case JOB:
@@ -1066,17 +1049,16 @@ extern void print_fields(type_t type, void *object)
 				tmp_char = xstrdup(id);
 				break;
 			case JOBSTEP:
-				if (step->stepid == SLURM_BATCH_SCRIPT) {
-					tmp_char = xstrdup_printf(
-						"%s.batch", id);
-				} else if (step->stepid == SLURM_EXTERN_CONT) {
-					tmp_char = xstrdup_printf(
-						"%s.extern", id);
-				} else {
-					tmp_char = xstrdup_printf(
-						"%s.%u",
-						id, step->stepid);
-				}
+				tmp_int = 64;
+				tmp_char = xmalloc(tmp_int);
+				tmp_int2 =
+					snprintf(tmp_char, tmp_int, "%s.", id);
+				tmp_int -= tmp_int2;
+				log_build_step_id_str(&step->step_id,
+						      tmp_char + tmp_int2,
+						      tmp_int,
+						      STEP_ID_FLAG_NO_PREFIX |
+						      STEP_ID_FLAG_NO_JOB);
 				break;
 			case JOBCOMP:
 				tmp_char = xstrdup_printf("%u",
@@ -1096,20 +1078,13 @@ extern void print_fields(type_t type, void *object)
 				tmp_char = xstrdup_printf("%u", job->jobid);
 				break;
 			case JOBSTEP:
-				if (step->stepid == SLURM_BATCH_SCRIPT) {
-					tmp_char = xstrdup_printf(
-						"%u.batch",
-						step->job_ptr->jobid);
-				} else if (step->stepid == SLURM_EXTERN_CONT) {
-					tmp_char = xstrdup_printf(
-						"%u.extern",
-						step->job_ptr->jobid);
-				} else {
-					tmp_char = xstrdup_printf(
-						"%u.%u",
-						step->job_ptr->jobid,
-						step->stepid);
-				}
+				log_build_step_id_str(&step->step_id, id,
+						      sizeof(id),
+						      (STEP_ID_FLAG_NO_PREFIX |
+						       STEP_ID_FLAG_NO_JOB));
+				tmp_char = xstrdup_printf("%u.%s",
+							  step->job_ptr->jobid,
+							  id);
 				break;
 			case JOBCOMP:
 				tmp_char = xstrdup_printf("%u",
@@ -1143,28 +1118,32 @@ extern void print_fields(type_t type, void *object)
 					     (curr_inx == field_count));
 			break;
 		case PRINT_LAYOUT:
+		{
+			char *name = NULL;
+
 			switch(type) {
 			case JOB:
 				/* below really should be step.  It is
 				   not a typo */
 				if (!job->track_steps)
-					tmp_char = slurm_step_layout_type_name(
+					name = slurm_step_layout_type_name(
 						step->task_dist);
 				break;
 			case JOBSTEP:
-				tmp_char = slurm_step_layout_type_name(
+				name = slurm_step_layout_type_name(
 					step->task_dist);
 				break;
 			case JOBCOMP:
 				break;
 			default:
-				tmp_char = NULL;
+				/* no-op */
 				break;
 			}
-			field->print_routine(field,
-					     tmp_char,
+			field->print_routine(field, name,
 					     (curr_inx == field_count));
+			xfree(name);
 			break;
+		}
 		case PRINT_MAXDISKREAD:
 			tmp_uint64 = _get_tres_cnt(
 				type, object, TRES_FS_DISK, 0);
@@ -1917,25 +1896,6 @@ extern void print_fields(type_t type, void *object)
 					     tmp_int,
 					     (curr_inx == field_count));
 			break;
-		case PRINT_REQ_GRES:
-			switch(type) {
-			case JOB:
-				tmp_char = job->req_gres;
-				break;
-			case JOBSTEP:
-				tmp_char = step->job_ptr->req_gres;
-				break;
-			case JOBCOMP:
-				tmp_char = job_comp->req_gres;
-				break;
-			default:
-				tmp_char = NULL;
-				break;
-			}
-			field->print_routine(field,
-					     tmp_char,
-					     (curr_inx == field_count));
-			break;
 		case PRINT_REQ_MEM:
 			switch(type) {
 			case JOB:
@@ -2376,10 +2336,10 @@ extern void print_fields(type_t type, void *object)
 		case PRINT_UID:
 			switch(type) {
 			case JOB:
-				if (job->user) {
-					if ((pw=getpwnam(job->user)))
-						tmp_int = pw->pw_uid;
-				} else
+				if (params.use_local_uid && job->user &&
+				    (pw = getpwnam(job->user)))
+					tmp_int = pw->pw_uid;
+				else
 					tmp_int = job->uid;
 				break;
 			case JOBSTEP:
@@ -2401,10 +2361,8 @@ extern void print_fields(type_t type, void *object)
 			case JOB:
 				if (job->user)
 					tmp_char = job->user;
-				else if (job->uid != -1) {
-					if ((pw=getpwuid(job->uid)))
+				else if ((pw=getpwuid(job->uid)))
 						tmp_char = pw->pw_name;
-				}
 				break;
 			case JOBSTEP:
 

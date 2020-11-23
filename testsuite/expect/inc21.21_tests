@@ -35,7 +35,7 @@ proc test_info { test_type func_type } {
 #
 proc inc21_21_good { test_type limit } {
 
-	global number bin_id ta srun test_node selectparam nthreads is_skip
+	global number bin_id ta srun test_node selectparam nthreads is_skip re_word_str
 	set job_id 0
 	set val 0
 	set add ""
@@ -68,7 +68,7 @@ proc inc21_21_good { test_type limit } {
 	spawn $srun -v -t1 $add [lindex $limit 0][lindex $limit 1] \
 	    --account=$ta $bin_id
 	expect {
-		-re "launching ($number)" {
+		-re "launching StepId=($number)\\.$re_word_str" {
 			set job_id $expect_out(1,string)
 			incr matches
 			exp_continue
@@ -85,7 +85,7 @@ proc inc21_21_good { test_type limit } {
 		fail "Job $job_id did not complete [test_info $test_type \"inc21_21_good\"]"
 	}
 
-	assert_or_fail { $matches == 1 } "Job did not launch with correct limit [test_info $test_type \"inc21_21_good\"]"
+	subtest -fail { $matches == 1 } "Job launches with correct limit"
 }
 
 #
@@ -94,7 +94,7 @@ proc inc21_21_good { test_type limit } {
 #
 proc inc21_21_bad { test_type limit } {
 
-	global number bin_id ta srun test_node nthreads selectparam
+	global number bin_id ta srun test_node nthreads selectparam re_word_str
 	set job_id 0
 	set over_lim [expr [lindex $limit 1] + 1]
 	set add ""
@@ -115,7 +115,7 @@ proc inc21_21_bad { test_type limit } {
 			log_info "This error is expected, not a problem [test_info $test_type \"inc21_21_bad\"]"
 			exp_continue
 		}
-		-re "launching ($number)" {
+		-re "launching StepId=($number)\\.$re_word_str" {
 			set job_id $expect_out(1,string)
 			fail "Job ($job_id) should not have run [test_info $test_type \"inc21_21_bad\"]"
 		}
@@ -143,7 +143,7 @@ proc inc21_21_grp_test { test_type limit } {
 	log_info "===== Test $test_type within: inc21.21_tests function: inc21_21_grp_test) ====="
 
 	if  { ![string compare $test_type "grpcpumins"] &&
-	      ![test_enforce_safe_set] } {
+	      ![param_contains [get_config_param "AccountingStorageEnforce"] "safe"] } {
 		log_warn "This test can't be run without AccountingStorageEnforce having \"safe\" in it"
 		set is_skip 1
 		return
@@ -204,7 +204,9 @@ sleep 10"
 		}
 	}
 
-	assert_or_fail {$matches == [expr $val + 1]} "$matches != [expr $val + 1]"
+	if {$matches != [expr $val + 1]} {
+		fail "Only $matches out of [expr $val + 1] jobs were submitted"
+	}
 
 	#
 	# Wait for squeue to update
@@ -232,7 +234,7 @@ sleep 10"
 		}
 	}
 
-	assert_or_fail { $pending == 1 && $running == $val } "Found $pending jobs pending and $running jobs running (want 1 and $val) [test_info $test_type \"inc21_21_grp_test\"]"
+	subtest -fail { $pending == 1 && $running == $val } "$test_type limit" "Found $pending jobs pending and $running jobs running while expecting 1 and $val"
 
 	#
 	# Cancel test jobs
@@ -349,7 +351,7 @@ proc inc21_21_submit_test { limit } {
 			wait
 		}
 	}
-	assert_or_fail { $matches == 1 } "Message of policy violation not found"
+	subtest -fail { $matches == 1 } "Policy violation error detected"
 
 	set matches 0
 	set mypid [spawn $squeue -A$ta -h -o "\%i \%t \%r"]
@@ -500,7 +502,7 @@ proc inc21_21_submit_test { limit } {
 #
 proc inc21_21_grpwall { test_type limit } {
 
-	global number bin_id ta srun bin_sleep bin_rm file_in test_qos
+	global number bin_id ta srun bin_sleep bin_rm file_in test_qos re_word_str
 	set job_id 0
 	set timeout 120
 
@@ -522,7 +524,7 @@ proc inc21_21_grpwall { test_type limit } {
 	spawn $srun -v [lindex $limit 0][lindex $limit 1] --account=$ta \
 	    -I $file_in
 	expect {
-		-re "launching ($number)" {
+		-re "launching StepId=($number)\\.$re_word_str" {
 			set job_id $expect_out(1,string)
 			incr matches
 			exp_continue
@@ -551,7 +553,7 @@ proc inc21_21_grpwall { test_type limit } {
 			log_info "This error is expected, not a problem [test_info $test_type \"inc21_21_grpwall\"]"
 			exp_continue
 		}
-		-re "launching ($number)" {
+		-re "launching StepId=($number)\\.$re_word_str" {
 			set job_id $expect_out(1,string)
 			fail "Job should not have run [test_info $test_type \"inc21_21_grpwall\"]"
 		}

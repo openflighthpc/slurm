@@ -88,7 +88,7 @@ static int _set_cond(int *start, int argc, char **argv,
 					 MAX(command_len, 1))) {
 			if (!job_cond->step_list)
 				job_cond->step_list = list_create(
-					slurmdb_destroy_selected_step);
+					slurm_destroy_selected_step);
 			slurm_addto_step_list(job_cond->step_list, argv[i]+end);
 			if (!list_count(job_cond->step_list))
 				FREE_NULL_LIST(job_cond->step_list);
@@ -119,8 +119,9 @@ static int _set_cond(int *start, int argc, char **argv,
 					 MAX(command_len, 1))) {
 			if (!job_cond->userid_list)
 				job_cond->userid_list = list_create(xfree_ptr);
-			slurm_addto_id_char_list(job_cond->userid_list,
-						 argv[i]+end, 0);
+			if (!slurm_addto_id_char_list(job_cond->userid_list,
+			                              argv[i]+end, 0))
+				exit(1);
 			set = 1;
 		} else {
 			exit_code = 1;
@@ -132,7 +133,8 @@ static int _set_cond(int *start, int argc, char **argv,
 
 	if (!job_cond->cluster_list) {
 		job_cond->cluster_list = list_create(xfree_ptr);
-		list_push(job_cond->cluster_list, slurm_get_cluster_name());
+		list_push(job_cond->cluster_list,
+			  xstrdup(slurm_conf.cluster_name));
 	}
 
 	(*start) = i;

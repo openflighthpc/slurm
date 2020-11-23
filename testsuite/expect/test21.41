@@ -268,7 +268,7 @@ proc _run_test { update_str expected_jobs } {
 # Check configuration
 # TODO: chack also slurm.conf!!
 #
-if { [test_account_storage] == 0 } {
+if {[get_config_param "AccountingStorageType"] ne "accounting_storage/slurmdbd"} {
 	skip "This test can't be run without a usable AccountStorageType"
 }
 
@@ -277,8 +277,12 @@ if { $wc_key_track == 0 } {
 	skip "This test can't be run without TrackWCKey set in slurmdbd.conf"
 }
 
-if { [string compare [check_accounting_admin_level] "Administrator"] } {
+if {[string compare [get_admin_level] "Administrator"]} {
 	skip "This test can't be run without being an Accounting administrator.\nUse: sacctmgr mod user \$USER set admin=admin"
+}
+
+if {![string compare $user1 $user2]} {
+	skip "This test can't be run as root, because it needs 2 usernames and uses the current one and root"
 }
 
 # Cluster Request

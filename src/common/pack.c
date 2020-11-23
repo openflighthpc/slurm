@@ -99,7 +99,6 @@ strong_alias(unpack16_array,    slurm_unpack16_array);
 strong_alias(pack32_array,	slurm_pack32_array);
 strong_alias(unpack32_array,	slurm_unpack32_array);
 strong_alias(packmem,		slurm_packmem);
-strong_alias(unpackmem,		slurm_unpackmem);
 strong_alias(unpackmem_ptr,	slurm_unpackmem_ptr);
 strong_alias(unpackmem_xmalloc,	slurm_unpackmem_xmalloc);
 strong_alias(unpackmem_malloc,	slurm_unpackmem_malloc);
@@ -180,7 +179,7 @@ void free_buf(Buf my_buf)
 {
 	if (!my_buf)
 		return;
-	assert(my_buf->magic == BUF_MAGIC);
+	xassert(my_buf->magic == BUF_MAGIC);
 	if (my_buf->mmaped)
 		munmap(my_buf->head, my_buf->size);
 	else
@@ -231,7 +230,7 @@ void *xfer_buf_data(Buf my_buf)
 {
 	void *data_ptr;
 
-	assert(my_buf->magic == BUF_MAGIC);
+	xassert(my_buf->magic == BUF_MAGIC);
 
 	if (my_buf->mmaped)
 		fatal_abort("attempt to grow mmap()'d buffer not supported");
@@ -811,7 +810,7 @@ int unpackbool(bool * valp, Buf buffer)
  * size_val to network byte order and store at buffer followed by
  * the data at valp. Adjust buffer counters.
  */
-void packmem(char *valp, uint32_t size_val, Buf buffer)
+extern void packmem(void *valp, uint32_t size_val, buf_t *buffer)
 {
 	uint32_t ns = htonl(size_val);
 
@@ -872,41 +871,6 @@ int unpackmem_ptr(char **valp, uint32_t * size_valp, Buf buffer)
 		buffer->processed += *size_valp;
 	} else
 		*valp = NULL;
-	return SLURM_SUCCESS;
-}
-
-
-/*
- * Given a buffer containing a network byte order 16-bit integer,
- * and an arbitrary data string, copy the data string into the location
- * specified by valp.  Also return the sizes of 'valp' in bytes.
- * Adjust buffer counters.
- * NOTE: The caller is responsible for the management of valp and
- * insuring it has sufficient size
- */
-int unpackmem(char *valp, uint32_t * size_valp, Buf buffer)
-{
-	uint32_t ns;
-
-	if (remaining_buf(buffer) < sizeof(ns))
-		return SLURM_ERROR;
-
-	memcpy(&ns, &buffer->head[buffer->processed], sizeof(ns));
-	*size_valp = ntohl(ns);
-	buffer->processed += sizeof(ns);
-
-	if (*size_valp > MAX_ARRAY_LEN_LARGE) {
-		error("%s: Buffer to be unpacked is too large (%u > %u)",
-		      __func__, *size_valp, MAX_ARRAY_LEN_LARGE);
-		return SLURM_ERROR;
-	}
-	else if (*size_valp > 0) {
-		if (remaining_buf(buffer) < *size_valp)
-			return SLURM_ERROR;
-		memcpy(valp, &buffer->head[buffer->processed], *size_valp);
-		buffer->processed += *size_valp;
-	} else
-		*valp = 0;
 	return SLURM_SUCCESS;
 }
 

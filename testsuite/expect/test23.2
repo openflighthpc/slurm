@@ -57,15 +57,15 @@ set nt		NTasks
 #
 # Check accounting config and bail if not found.
 #
-if { [test_account_storage] == 0 } {
+if {[get_config_param "AccountingStorageType"] ne "accounting_storage/slurmdbd"} {
 	skip "This test can't be run without a usable AccountStorageType"
 }
 
-if { [test_front_end] == 1 } {
+if {[get_config_param "FrontendName"] ne "MISSING"} {
 	skip "This test can't be run on a front-end system"
 }
 
-if { [string compare [check_accounting_admin_level] "Administrator"] } {
+if {[string compare [get_admin_level] "Administrator"]} {
 	skip "This test can't be run without being an Accounting administrator.\nUse: sacctmgr mod user \$USER set admin=admin"
 }
 
@@ -157,9 +157,9 @@ if {$real_memory < 100} {
 # Build input script file1
 #
 make_bash_script $file_in1 "
-  $srun $step_mem_opt --gres=craynetwork:0 sleep 60 &
-  $srun $step_mem_opt --gres=craynetwork:0 sleep 60 &
-  $srun $step_mem_opt --gres=craynetwork:0 sleep 60
+  $srun $step_mem_opt --gres=craynetwork:0 --overlap sleep 60 &
+  $srun $step_mem_opt --gres=craynetwork:0 --overlap sleep 60 &
+  $srun $step_mem_opt --gres=craynetwork:0 --overlap sleep 60
 "
 #
 # Spawn a job via srun using this account
@@ -241,12 +241,12 @@ proc sstat_job { soption job_id step_id } {
 				set not_support 1
 				exp_continue
 			}
-			-re "$job_id\.($number)" {
+			-re "$job_id\\.($number)" {
 				if {$debug} {log_debug "Match $expect_out(1,string)"}
 				incr matches
 				exp_continue
 			}
-			-re "$job_id\.batch" {
+			-re "$job_id\\.batch" {
 				if {$debug} {log_debug "Match batch"}
 				incr matches
 				exp_continue
@@ -321,7 +321,7 @@ proc sstat_job { soption job_id step_id } {
 				incr matches
 				exp_continue
 			}
-			-re "$job_id\.$step_id\\|" {
+			-re "$job_id\\.$step_id\\|" {
 				if {$debug} {log_debug "Match9"}
 				incr matches
 				exp_continue
@@ -362,7 +362,7 @@ proc sstat_job { soption job_id step_id } {
 				incr matches
 				exp_continue
 			}
-			-re "$job_id\.$step_id\\|" {
+			-re "$job_id\\.$step_id\\|" {
 				if {$debug} {log_debug "Match13"}
 				incr matches
 				exp_continue

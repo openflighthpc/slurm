@@ -1,5 +1,6 @@
 ETC_FILES = init.d.slurmdbd init.d.slurm \
-	    slurmctld.service slurmdbd.service slurmd.service
+	    slurmctld.service slurmdbd.service slurmd.service \
+	    slurmrestd.service
 
 CLEANFILES = $(ETC_FILES)
 
@@ -9,6 +10,8 @@ edit = sed \
         -e 's|@prefix[@]|$(prefix)|g' \
         -e 's|@sbindir[@]|$(sbindir)|g' \
         -e 's|@sysconfdir[@]|$(sysconfdir)|g' \
+	-e 's|@sharedstatedir[@]|$(sharedstatedir)|g' \
+	-e 's|@SLURMRESTD_PORT[@]|@SLURMRESTD_PORT@|g' \
 	-e 's|@SYSTEMD_TASKSMAX_OPTION[@]|$(SYSTEMD_TASKSMAX_OPTION)|g'
 
 noinst_DATA = $(ETC_FILES)
@@ -27,3 +30,6 @@ slurmdbd.service: Makefile $(srcdir)/slurmdbd.service.in
 
 slurmd.service: Makefile $(srcdir)/slurmd.service.in
 	$(edit) $(srcdir)/slurmd.service.in > slurmd.service
+
+slurmrestd.service: Makefile $(srcdir)/slurmrestd.service.in
+	$(edit) $(srcdir)/slurmrestd.service.in > slurmrestd.service
