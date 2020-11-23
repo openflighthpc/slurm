@@ -95,6 +95,7 @@ slurm_opt_t opt =
 List 	opt_list = NULL;
 int	pass_number = 0;
 time_t	srun_begin_time = 0;
+bool local_het_step = false;
 
 /*---- forward declarations of static variables and functions  ----*/
 
@@ -281,7 +282,7 @@ static slurm_opt_t *_opt_copy(void)
 	opt_dup->efname = xstrdup(opt.efname);
 	opt_dup->srun_opt->epilog = xstrdup(sropt.epilog);
 	opt_dup->exclude = xstrdup(opt.exclude);
-	opt_dup->srun_opt->export_env = xstrdup(sropt.export_env);
+	opt_dup->export_env = xstrdup(opt.export_env);
 	opt_dup->extra = xstrdup(opt.extra);
 	opt.gres = NULL;		/* Moved by memcpy */
 	opt.gpu_bind = NULL;		/* Moved by memcpy */
@@ -335,6 +336,7 @@ extern int initialize_and_process_args(int argc, char **argv, int *argc_off)
 	bitstr_t *het_grp_bits;
 	int i, i_first, i_last;
 	bool opt_found = false;
+	static bool check_het_step = false;
 
 	het_grp_bits = _get_het_group(argc, argv, default_het_job_offset++,
 				      &opt_found);
@@ -367,7 +369,7 @@ extern int initialize_and_process_args(int argc, char **argv, int *argc_off)
 		/* do not set adjust defaults in an active allocation */
 		if (!getenv("SLURM_JOB_ID")) {
 			bool first = (pass_number == 1);
-			if (cli_filter_plugin_setup_defaults(&opt, first)) {
+			if (cli_filter_g_setup_defaults(&opt, first)) {
 				error("cli_filter plugin terminated with error");
 				exit(error_exit);
 			}
@@ -389,7 +391,49 @@ extern int initialize_and_process_args(int argc, char **argv, int *argc_off)
 		if (argc_off)
 			*argc_off = optind;
 
-		if (cli_filter_plugin_pre_submit(&opt, i)) {
+		if (!check_het_step) {
+			/*
+			 * SLURM_JOB_NUM_NODES is only ever set on a normal
+			 * allocation, on a het job it is
+			 * SLURM_JOB_NUM_NODES_$PACKID.
+			 *
+			 * Here we are seeing if we are trying to run a het step
+			 * in the normal allocation.  If so and we didn't
+			 * request nodes on the command line we will clear this
+			 * env variable and figure it out later instead of
+			 * trying to use the whole allocation.
+			 */
+			if (getenv("SLURM_JOB_NUM_NODES") &&
+			    (optind >= 0) && (optind < argc)) {
+				for (int i2 = optind; i2 < argc; i2++) {
+					if (!xstrcmp(argv[i2], ":")) {
+						local_het_step = true;
+						break;
+					}
+				}
+			}
+			check_het_step = true;
+
+			if (local_het_step) {
+				/*
+				 * If we are a het step don't just unset the
+				 * JOB_NUM_NODES to avoid using it.
+				 */
+				unsetenv("SLURM_JOB_NUM_NODES");
+
+				/*
+				 * If we already set the nodes based off this
+				 * env var reset it.
+				 */
+				if (slurm_option_set_by_env(&opt, 'N')) {
+					opt.nodes_set = false;
+					opt.min_nodes = 1;
+					opt.max_nodes = 0;
+				}
+			}
+		}
+
+		if (cli_filter_g_pre_submit(&opt, i)) {
 			error("cli_filter plugin terminated with error");
 			exit(error_exit);
 		}
@@ -456,6 +500,7 @@ static void _opt_default(void)
 	 * of the job/step. Do not use xfree() as the pointers have been copied.
 	 * See initialize_and_process_args() above.
 	 */
+	sropt.exclusive = true;
 	opt.job_flags			= 0;
 	sropt.multi_prog_cmds		= 0;
 	sropt.het_group			= NULL;
@@ -532,8 +577,11 @@ env_vars_t env_vars[] = {
   { "SLURM_NTASKS", 'n' },
   { "SLURM_NSOCKETS_PER_NODE", LONG_OPT_SOCKETSPERNODE },
   { "SLURM_NTASKS_PER_NODE", LONG_OPT_NTASKSPERNODE },
+  { "SLURM_NTASKS_PER_GPU", LONG_OPT_NTASKSPERGPU },
+  { "SLURM_NTASKS_PER_TRES", LONG_OPT_NTASKSPERTRES },
   { "SLURM_OPEN_MODE", LONG_OPT_OPEN_MODE },
   { "SLURM_OVERCOMMIT", 'O' },
+  { "SLURM_OVERLAP", LONG_OPT_OVERLAP },
   { "SLURM_PARTITION", 'p' },
   { "SLURM_POWER", LONG_OPT_POWER },
   { "SLURM_PROFILE", LONG_OPT_PROFILE },
@@ -553,12 +601,14 @@ env_vars_t env_vars[] = {
   { "SLURM_TASK_PROLOG", LONG_OPT_TASK_PROLOG },
   { "SLURM_THREAD_SPEC", LONG_OPT_THREAD_SPEC },
   { "SLURM_THREADS", 'T' },
+  { "SLURM_THREADS_PER_CORE", LONG_OPT_THREADSPERCORE },
   { "SLURM_TIMELIMIT", 't' },
   { "SLURM_UNBUFFEREDIO", 'u' },
   { "SLURM_USE_MIN_NODES", LONG_OPT_USE_MIN_NODES },
   { "SLURM_WAIT", 'W' },
   { "SLURM_WAIT4SWITCH", LONG_OPT_SWITCH_WAIT },
   { "SLURM_WCKEY", LONG_OPT_WCKEY },
+  { "SLURM_WHOLE", LONG_OPT_WHOLE },
   { "SLURM_WORKING_DIR", 'D' },
   { "SLURMD_DEBUG", LONG_OPT_SLURMD_DEBUG },
   { NULL }
@@ -698,7 +748,7 @@ static void _opt_args(int argc, char **argv, int het_job_offset)
 {
 	int i, command_pos = 0, command_args = 0;
 	char **rest = NULL;
-	char *fullpath, *launch_params;
+	char *fullpath;
 
 	sropt.het_grp_bits = bit_alloc(MAX_HET_JOB_COMPONENTS);
 	bit_set(sropt.het_grp_bits, het_job_offset);
@@ -750,14 +800,9 @@ static void _opt_args(int argc, char **argv, int het_job_offset)
 	}
 	sropt.argv[i] = NULL;	/* End of argv's (for possible execv) */
 
-	if (getenv("SLURM_TEST_EXEC")) {
+	if (getenv("SLURM_TEST_EXEC") ||
+	    xstrstr(slurm_conf.launch_params, "test_exec"))
 		sropt.test_exec = true;
-	} else {
-		launch_params = slurm_get_launch_params();
-		if (launch_params && strstr(launch_params, "test_exec"))
-			sropt.test_exec = true;
-		xfree(launch_params);
-	}
 
 	if (sropt.test_exec) {
 		/* Validate command's existence */
@@ -821,6 +866,8 @@ static bool _opt_verify(void)
 	hostlist_t hl = NULL;
 	int hl_cnt = 0;
 
+	validate_options_salloc_sbatch_srun(&opt);
+
 	/*
 	 *  Do not set slurmd debug level higher than DEBUG2,
 	 *   as DEBUG3 is used for slurmd IO operations, which
@@ -875,9 +922,9 @@ static bool _opt_verify(void)
 	}
 
 	if (!sropt.epilog)
-		sropt.epilog = slurm_get_srun_epilog();
+		sropt.epilog = xstrdup(slurm_conf.srun_epilog);
 	if (!sropt.prolog)
-		sropt.prolog = slurm_get_srun_prolog();
+		sropt.prolog = xstrdup(slurm_conf.srun_prolog);
 
 	/*
 	 * This means --ntasks was read from the environment.
@@ -890,10 +937,12 @@ static bool _opt_verify(void)
 			opt.nodes_set = false;
 	}
 
-	if (opt.hint &&
-	    (!(sropt.cpu_bind_type & ~CPU_BIND_VERBOSE)) &&
-	    (opt.ntasks_per_core == NO_VAL) &&
-	    (opt.threads_per_core == NO_VAL)) {
+	validate_hint_option(&opt);
+	if (opt.hint) {
+		if(sropt.cpu_bind_type & ~CPU_BIND_VERBOSE)
+		       fatal("--hint and --cpu-bind (other than --cpu-bind=verbose) are mutually exclusive.");
+		xassert(opt.ntasks_per_core == NO_VAL);
+		xassert(opt.threads_per_core == NO_VAL);
 		if (verify_hint(opt.hint,
 				&opt.sockets_per_node,
 				&opt.cores_per_socket,
@@ -1174,7 +1223,7 @@ static bool _opt_verify(void)
 				     "requested nodes %u. Ignoring "
 				     "--ntasks-per-node.", opt.ntasks_per_node,
 				     opt.ntasks, opt.min_nodes);
-			opt.ntasks_per_node = NO_VAL;
+			slurm_option_reset(&opt, "ntasks-per-node");
 		}
 
 	} /* else if (opt.ntasks_set && !opt.nodes_set) */
@@ -1193,7 +1242,7 @@ static bool _opt_verify(void)
 	}
 
 	if (!sropt.mpi_type)
-		sropt.mpi_type = slurm_get_mpi_default();
+		sropt.mpi_type = xstrdup(slurm_conf.mpi_default);
 	if (mpi_hook_client_init(sropt.mpi_type) == SLURM_ERROR) {
 		error("invalid MPI type '%s', --mpi=list for acceptable types",
 		      sropt.mpi_type);
@@ -1361,7 +1410,7 @@ static void _usage(void)
  	printf(
 "Usage: srun [-N nnodes] [-n ntasks] [-i in] [-o out] [-e err]\n"
 "            [-c ncpus] [-r n] [-p partition] [--hold] [-t minutes]\n"
-"            [-D path] [--immediate[=secs]] [--overcommit] [--no-kill]\n"
+"            [-D path] [--immediate[=secs]] [--overcommit] [--overlap] [--no-kill]\n"
 "            [--oversubscribe] [--label] [--unbuffered] [-m dist] [-J jobname]\n"
 "            [--jobid=id] [--verbose] [--slurmd_debug=#] [--gres=list]\n"
 "            [-T threads] [-W sec] [--gres-flags=opts]\n"
@@ -1373,7 +1422,7 @@ static void _usage(void)
 "            [--cpu-bind=...] [--mem-bind=...] [--network=type]\n"
 "            [--ntasks-per-node=n] [--ntasks-per-socket=n] [reservation=name]\n"
 "            [--ntasks-per-core=n] [--mem-per-cpu=MB] [--preserve-env]\n"
-"            [--profile=...]\n"
+"            [--profile=...] [--whole]\n"
 "            [--mail-type=type] [--mail-user=user] [--nice[=value]]\n"
 "            [--prolog=fname] [--epilog=fname]\n"
 "            [--task-prolog=fname] [--task-epilog=fname]\n"
@@ -1395,7 +1444,7 @@ static void _usage(void)
 
 static void _help(void)
 {
-	slurm_ctl_conf_t *conf;
+	slurm_conf_t *conf = slurm_conf_lock();
 
         printf (
 "Usage: srun [OPTIONS(0)... [executable(0) [args(0)...]]] [ : [OPTIONS(N)...]] executable(N) [args(N)...]\n"
@@ -1456,6 +1505,7 @@ static void _help(void)
 "  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
 "  -o, --output=out            location of stdout redirection\n"
 "  -O, --overcommit            overcommit resources\n"
+"      --overlap               Allow other steps to overlap this step\n"
 "      --het-group=value       hetjob component allocation(s) in which to launch\n"
 "                              application\n"
 "  -p, --partition=partition   partition requested\n"
@@ -1494,6 +1544,8 @@ static void _help(void)
 "  -W, --wait=sec              seconds to wait after first task exits\n"
 "                              before killing job\n"
 "      --wckey=wckey           wckey to run job under\n"
+"      --whole                 Use entire node(s) in the allocation\n"
+"                              for the step\n"
 "  -X, --disable-status        Disable Ctrl-C status feature\n"
 "\n"
 "Constraint options:\n"
@@ -1532,7 +1584,6 @@ static void _help(void)
 "\n"
 "      --ntasks-per-core=n     number of tasks to invoke on each core\n"
 "      --ntasks-per-socket=n   number of tasks to invoke on each socket\n");
-	conf = slurm_conf_lock();
 	if (xstrstr(conf->task_plugin, "affinity") ||
 	    xstrstr(conf->task_plugin, "cgroup")) {
 		printf(

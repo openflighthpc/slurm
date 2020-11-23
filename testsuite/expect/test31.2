@@ -35,10 +35,10 @@ set job_id          0
 set job_list        {}
 set test_script     "test$test_id\.sh"
 
-if { [test_super_user] == 0 } {
+if {![is_super_user]} {
 	skip "Test can only be run as SlurmUser"
 }
-if {[test_front_end] != 0} {
+if {[get_config_param "FrontendName"] ne "MISSING"} {
         skip "This test is incompatible with front-end systems"
 }
 
@@ -47,7 +47,7 @@ proc cleanup { } {
 	global scontrol test_node test_script test_id scancel job_list
 
 	# Cancel any lingering jobs
-	spawn $scancel $job_list
+	cancel_job $job_list
 
 	restore_conf $config_file
 	exec $bin_rm $test_script $good_prolog $bad_prolog
@@ -207,7 +207,7 @@ if {[wait_job_reason $job_id] != 0} {
 set priority 0
 spawn $squeue -h -j$job_id -o%t.%Q
 expect {
-	-re "($re_word_str)\.($number)" {
+	-re "(\[A-Z\]+)\\.($number)" {
 		set priority $expect_out(2,string)
 	}
 	timeout {
@@ -218,7 +218,7 @@ expect {
 	}
 }
 
-assert_or_error {$priority != 0} "Job $job_id is held, while it shouldn't be"
+subtest {$priority != 0} "Job with nohold_on_prolog_fail should not be held"
 
 if {$exit_code != 0} {
 	fail "Test failed due to previous errors (\$exit_code = $exit_code)"

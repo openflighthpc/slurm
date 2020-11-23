@@ -72,7 +72,7 @@
 		data_set_string(				\
 			data_key_set(err, "error"), str);	\
 		data_set_int(					\
-			data_key_set(err, "errno"), rc);	\
+			data_key_set(err, "error_code"), rc);	\
 	} while (0)
 
 #define COMMON_STRING_OPTION(field)	\
@@ -329,7 +329,7 @@ COMMON_OPTION_RESET(field, NO_VAL64)
 #define COMMON_MBYTES_OPTION_SET(field, option)			\
 static int arg_set_##field(slurm_opt_t *opt, const char *arg)	\
 {								\
-	if ((opt->field = str_to_mbytes2(arg)) == NO_VAL64) {	\
+	if ((opt->field = str_to_mbytes(arg)) == NO_VAL64) {	\
 		error("Invalid " #option " specification");	\
 		exit(-1);					\
 	}							\
@@ -345,7 +345,7 @@ static int arg_set_data_##field(slurm_opt_t *opt, const data_t *arg,	\
 	if ((rc = data_get_string_converted(arg, &str)))		\
 		ADD_DATA_ERROR("Invalid " #option " specification string", \
 			       rc);					\
-	else if ((opt->field = str_to_mbytes2(str)) == NO_VAL64)	\
+	else if ((opt->field = str_to_mbytes(str)) == NO_VAL64)		\
 		ADD_DATA_ERROR("Invalid " #option " specification",	\
 			       (rc = SLURM_ERROR));			\
 	xfree(str);							\
@@ -357,7 +357,7 @@ COMMON_OPTION_RESET(field, NO_VAL64)
 #define COMMON_MBYTES_OPTION_GET(field)				\
 static char *arg_get_##field(slurm_opt_t *opt)			\
 {								\
-	return mbytes2_to_str(opt->field);			\
+	return mbytes_to_str(opt->field);			\
 }
 
 #define COMMON_TIME_DURATION_OPTION_GET_AND_RESET(field)	\
@@ -398,6 +398,7 @@ typedef struct {
 	int (*set_func)(slurm_opt_t *, const char *);
 	int (*set_func_salloc)(slurm_opt_t *, const char *);
 	int (*set_func_sbatch)(slurm_opt_t *, const char *);
+	int (*set_func_scron)(slurm_opt_t *, const char *);
 	int (*set_func_srun)(slurm_opt_t *, const char *);
 
 	/*
@@ -423,17 +424,23 @@ typedef struct {
  * These should be alphabetized by the slurm_cli_opt_t name.
  */
 
-static int arg_set__unknown_(slurm_opt_t *opt, const char *arg)
+static int arg_set__unknown_salloc(slurm_opt_t *opt, const char *arg)
 {
-	if (opt->salloc_opt)
-		fprintf(stderr,
-			"Try \"salloc --help\" for more information\n");
-	else if (opt->sbatch_opt)
-		fprintf(stderr,
-			"Try \"sbatch --help\" for more information\n");
-	else if (opt->srun_opt)
-		fprintf(stderr,
-			"Try \"srun --help\" for more information\n");
+	fprintf(stderr, "Try \"salloc --help\" for more information\n");
+
+	exit(-1);
+	return SLURM_SUCCESS;
+}
+static int arg_set__unknown_sbatch(slurm_opt_t *opt, const char *arg)
+{
+	fprintf(stderr,	"Try \"sbatch --help\" for more information\n");
+
+	exit(-1);
+	return SLURM_SUCCESS;
+}
+static int arg_set__unknown_srun(slurm_opt_t *opt, const char *arg)
+{
+	fprintf(stderr,	"Try \"srun --help\" for more information\n");
 
 	exit(-1);
 	return SLURM_SUCCESS;
@@ -450,7 +457,9 @@ static slurm_cli_opt_t slurm_opt__unknown_ = {
 	.name = NULL,
 	.has_arg = no_argument,
 	.val = '?',
-	.set_func = arg_set__unknown_,
+	.set_func_salloc = arg_set__unknown_salloc,
+	.set_func_sbatch = arg_set__unknown_sbatch,
+	.set_func_srun = arg_set__unknown_srun,
 	.get_func = arg_get__unknown_,
 	.reset_func = arg_reset__unknown_,
 };
@@ -600,7 +609,9 @@ static slurm_cli_opt_t slurm_opt_bbf = {
 	.name = "bbf",
 	.has_arg = required_argument,
 	.val = LONG_OPT_BURST_BUFFER_FILE,
-	.set_func = arg_set_burst_buffer_file,
+	.set_func_salloc = arg_set_burst_buffer_file,
+	.set_func_sbatch = arg_set_burst_buffer_file,
+	.set_func_srun = arg_set_burst_buffer_file,
 	.set_func_data = arg_set_data_burst_buffer_file,
 	.get_func = arg_get_burst_buffer_file,
 	.reset_func = arg_reset_burst_buffer_file,
@@ -680,7 +691,9 @@ static slurm_cli_opt_t slurm_opt_begin = {
 	.name = "begin",
 	.has_arg = required_argument,
 	.val = 'b',
-	.set_func = arg_set_begin,
+	.set_func_salloc = arg_set_begin,
+	.set_func_sbatch = arg_set_begin,
+	.set_func_srun = arg_set_begin,
 	.set_func_data = arg_set_data_begin,
 	.get_func = arg_get_begin,
 	.reset_func = arg_reset_begin,
@@ -726,7 +739,9 @@ static slurm_cli_opt_t slurm_opt_bb = {
 	.name = "bb",
 	.has_arg = required_argument,
 	.val = LONG_OPT_BURST_BUFFER_SPEC,
-	.set_func = arg_set_burst_buffer,
+	.set_func_salloc = arg_set_burst_buffer,
+	.set_func_sbatch = arg_set_burst_buffer,
+	.set_func_srun = arg_set_burst_buffer,
 	.set_func_data = arg_set_data_burst_buffer,
 	.get_func = arg_get_burst_buffer,
 	.reset_func = arg_reset_burst_buffer,
@@ -738,7 +753,9 @@ static slurm_cli_opt_t slurm_opt_c_constraint = {
 	.name = "cluster-constraint",
 	.has_arg = required_argument,
 	.val = LONG_OPT_CLUSTER_CONSTRAINT,
-	.set_func = arg_set_c_constraint,
+	.set_func_salloc = arg_set_c_constraint,
+	.set_func_sbatch = arg_set_c_constraint,
+	.set_func_srun = arg_set_c_constraint,
 	.set_func_data = arg_set_data_c_constraint,
 	.get_func = arg_get_c_constraint,
 	.reset_func = arg_reset_c_constraint,
@@ -776,7 +793,7 @@ static void arg_reset_chdir(slurm_opt_t *opt)
 {
 	char buf[MAXPATHLEN + 1];
 	xfree(opt->chdir);
-	if (opt->salloc_opt)
+	if (opt->salloc_opt || opt->scron_opt)
 		return;
 
 	if (!(getcwd(buf, MAXPATHLEN))) {
@@ -801,7 +818,9 @@ static slurm_cli_opt_t slurm_opt_clusters = {
 	.name = "clusters",
 	.has_arg = required_argument,
 	.val = 'M',
-	.set_func = arg_set_clusters,
+	.set_func_salloc = arg_set_clusters,
+	.set_func_sbatch = arg_set_clusters,
+	.set_func_srun = arg_set_clusters,
 	.set_func_data = arg_set_data_clusters,
 	.get_func = arg_get_clusters,
 	.reset_func = arg_reset_clusters,
@@ -810,7 +829,9 @@ static slurm_cli_opt_t slurm_opt_cluster = {
 	.name = "cluster",
 	.has_arg = required_argument,
 	.val = LONG_OPT_CLUSTER,
-	.set_func = arg_set_clusters,
+	.set_func_salloc = arg_set_clusters,
+	.set_func_sbatch = arg_set_clusters,
+	.set_func_srun = arg_set_clusters,
 	.set_func_data = arg_set_data_clusters,
 	.get_func = arg_get_clusters,
 	.reset_func = arg_reset_clusters,
@@ -1393,7 +1414,7 @@ static slurm_cli_opt_t slurm_opt_epilog = {
 
 static int arg_set_efname(slurm_opt_t *opt, const char *arg)
 {
-	if (!opt->sbatch_opt && !opt->srun_opt)
+	if (!opt->sbatch_opt && !opt->scron_opt && !opt->srun_opt)
 		return SLURM_ERROR;
 
 	xfree(opt->efname);
@@ -1432,6 +1453,7 @@ static slurm_cli_opt_t slurm_opt_error = {
 	.has_arg = required_argument,
 	.val = 'e',
 	.set_func_sbatch = arg_set_efname,
+	.set_func_scron = arg_set_efname,
 	.set_func_srun = arg_set_efname,
 	.set_func_data = arg_set_data_efname,
 	.get_func = arg_get_efname,
@@ -1514,7 +1536,7 @@ static char *arg_get_exclusive(slurm_opt_t *opt)
 static void arg_reset_shared(slurm_opt_t *opt)
 {
 	if (opt->srun_opt)
-		opt->srun_opt->exclusive = false;
+		opt->srun_opt->exclusive = true;
 	opt->shared = NO_VAL16;
 }
 static slurm_cli_opt_t slurm_opt_exclusive = {
@@ -1530,40 +1552,32 @@ static slurm_cli_opt_t slurm_opt_exclusive = {
 
 static int arg_set_export(slurm_opt_t *opt, const char *arg)
 {
-	if (!opt->sbatch_opt && !opt->srun_opt)
+	if (!opt->sbatch_opt && !opt->scron_opt && !opt->srun_opt)
 		return SLURM_ERROR;
 
-	if (opt->sbatch_opt)
-		opt->sbatch_opt->export_env = xstrdup(arg);
-	if (opt->srun_opt)
-		opt->srun_opt->export_env = xstrdup(arg);
+	opt->export_env = xstrdup(arg);
 
 	return SLURM_SUCCESS;
 }
 static char *arg_get_export(slurm_opt_t *opt)
 {
-	if (!opt->sbatch_opt && !opt->srun_opt)
+	if (!opt->sbatch_opt && !opt->scron_opt && !opt->srun_opt)
 		return xstrdup("invalid-context");
 
-	if (opt->sbatch_opt)
-		return xstrdup(opt->sbatch_opt->export_env);
-	if (opt->srun_opt)
-		return xstrdup(opt->srun_opt->export_env);
+	return xstrdup(opt->export_env);
 
 	return NULL;
 }
 static void arg_reset_export(slurm_opt_t *opt)
 {
-	if (opt->sbatch_opt)
-		xfree(opt->sbatch_opt->export_env);
-	if (opt->srun_opt)
-		xfree(opt->srun_opt->export_env);
+	xfree(opt->export_env);
 }
 static slurm_cli_opt_t slurm_opt_export = {
 	.name = "export",
 	.has_arg = required_argument,
 	.val = LONG_OPT_EXPORT,
 	.set_func_sbatch = arg_set_export,
+	.set_func_scron = arg_set_export,
 	.set_func_srun = arg_set_export,
 	.get_func = arg_get_export,
 	.reset_func = arg_reset_export,
@@ -2061,7 +2075,9 @@ static slurm_cli_opt_t slurm_opt_hold = {
 	.name = "hold",
 	.has_arg = no_argument,
 	.val = 'H',
-	.set_func = arg_set_hold,
+	.set_func_salloc = arg_set_hold,
+	.set_func_sbatch = arg_set_hold,
+	.set_func_srun = arg_set_hold,
 	.set_func_data = arg_set_data_hold,
 	.get_func = arg_get_hold,
 	.reset_func = arg_reset_hold,
@@ -2139,7 +2155,7 @@ static int arg_set_data_ifname(slurm_opt_t *opt, const data_t *arg,
 	int rc;
 	char *str = NULL;
 
-	if (!opt->sbatch_opt && !opt->srun_opt)
+	if (!opt->sbatch_opt && !opt->scron_opt && !opt->srun_opt)
 		return SLURM_ERROR;
 
 	if ((rc = data_get_string_converted(arg, &str)))
@@ -2164,10 +2180,21 @@ static slurm_cli_opt_t slurm_opt_input = {
 	.has_arg = required_argument,
 	.val = 'i',
 	.set_func_sbatch = arg_set_ifname,
+	.set_func_scron = arg_set_ifname,
 	.set_func_srun = arg_set_ifname,
 	.set_func_data = arg_set_data_ifname,
 	.get_func = arg_get_ifname,
 	.reset_func = arg_reset_ifname,
+};
+
+COMMON_SRUN_BOOL_OPTION(interactive);
+static slurm_cli_opt_t slurm_opt_interactive = {
+	.name = "interactive",
+	.has_arg = no_argument,
+	.val = LONG_OPT_INTERACTIVE,
+	.set_func_srun = arg_set_interactive,
+	.get_func = arg_get_interactive,
+	.reset_func = arg_reset_interactive,
 };
 
 static int arg_set_jobid(slurm_opt_t *opt, const char *arg)
@@ -2463,7 +2490,7 @@ static slurm_cli_opt_t slurm_opt_mcs_label = {
 
 static int arg_set_mem(slurm_opt_t *opt, const char *arg)
 {
-	if ((opt->pn_min_memory = str_to_mbytes2(arg)) == NO_VAL64) {
+	if ((opt->pn_min_memory = str_to_mbytes(arg)) == NO_VAL64) {
 		error("Invalid --mem specification");
 		exit(-1);
 	}
@@ -2484,7 +2511,7 @@ static int arg_set_data_mem(slurm_opt_t *opt, const data_t *arg, data_t *errors)
 
 	if ((rc = data_get_string_converted(arg, &str)))
 		ADD_DATA_ERROR("Unable to read string", rc);
-	else if ((opt->pn_min_memory = str_to_mbytes2(str)) == NO_VAL64) {
+	else if ((opt->pn_min_memory = str_to_mbytes(str)) == NO_VAL64) {
 		rc = SLURM_ERROR;
 		ADD_DATA_ERROR("Invalid memory specification", rc);
 	}
@@ -2547,10 +2574,8 @@ static void arg_reset_mem_bind(slurm_opt_t *opt)
 	opt->mem_bind_type = 0;
 
 	if (opt->srun_opt) {
-		char *launch_params = slurm_get_launch_params();
-		if (xstrstr(launch_params, "mem_sort"))
+		if (xstrstr(slurm_conf.launch_params, "mem_sort"))
 			opt->mem_bind_type |= MEM_BIND_SORT;
-		xfree(launch_params);
 	}
 }
 static slurm_cli_opt_t slurm_opt_mem_bind = {
@@ -2632,7 +2657,7 @@ static char *arg_get_msg_timeout(slurm_opt_t *opt)
 static void arg_reset_msg_timeout(slurm_opt_t *opt)
 {
 	if (opt->srun_opt)
-		opt->srun_opt->msg_timeout = slurm_get_msg_timeout();
+		opt->srun_opt->msg_timeout = slurm_conf.msg_timeout;
 }
 static slurm_cli_opt_t slurm_opt_msg_timeout = {
 	.name = "msg-timeout",
@@ -3102,6 +3127,36 @@ static slurm_cli_opt_t slurm_opt_ntasks_per_socket = {
 	.reset_each_pass = true,
 };
 
+COMMON_INT_OPTION_SET(ntasks_per_tres, "--ntasks-per-tres");
+COMMON_INT_OPTION_SET_DATA(ntasks_per_tres);
+COMMON_INT_OPTION_GET(ntasks_per_tres);
+COMMON_OPTION_RESET(ntasks_per_tres, NO_VAL);
+static slurm_cli_opt_t slurm_opt_ntasks_per_tres = {
+	.name = "ntasks-per-tres",
+	.has_arg = required_argument,
+	.val = LONG_OPT_NTASKSPERTRES,
+	.set_func = arg_set_ntasks_per_tres,
+	.set_func_data = arg_set_data_ntasks_per_tres,
+	.get_func = arg_get_ntasks_per_tres,
+	.reset_func = arg_reset_ntasks_per_tres,
+	.reset_each_pass = true,
+};
+
+COMMON_INT_OPTION_SET(ntasks_per_gpu, "--ntasks-per-gpu");
+COMMON_INT_OPTION_SET_DATA(ntasks_per_gpu);
+COMMON_INT_OPTION_GET(ntasks_per_gpu);
+COMMON_OPTION_RESET(ntasks_per_gpu, NO_VAL);
+static slurm_cli_opt_t slurm_opt_ntasks_per_gpu = {
+	.name = "ntasks-per-gpu",
+	.has_arg = required_argument,
+	.val = LONG_OPT_NTASKSPERGPU,
+	.set_func = arg_set_ntasks_per_gpu,
+	.set_func_data = arg_set_data_ntasks_per_gpu,
+	.get_func = arg_get_ntasks_per_gpu,
+	.reset_func = arg_reset_ntasks_per_gpu,
+	.reset_each_pass = true,
+};
+
 static int arg_set_open_mode(slurm_opt_t *opt, const char *arg)
 {
 	uint8_t tmp = 0;
@@ -3197,7 +3252,7 @@ static slurm_cli_opt_t slurm_opt_open_mode = {
 
 static int arg_set_ofname(slurm_opt_t *opt, const char *arg)
 {
-	if (!opt->sbatch_opt && !opt->srun_opt)
+	if (!opt->sbatch_opt && !opt->scron_opt && !opt->srun_opt)
 		return SLURM_ERROR;
 
 	xfree(opt->ofname);
@@ -3214,7 +3269,7 @@ static int arg_set_data_ofname(slurm_opt_t *opt, const data_t *arg,
 	int rc;
 	char *str = NULL;
 
-	if (!opt->sbatch_opt && !opt->srun_opt)
+	if (!opt->sbatch_opt && !opt->scron_opt && !opt->srun_opt)
 		return SLURM_ERROR;
 
 	if ((rc = data_get_string_converted(arg, &str)))
@@ -3239,6 +3294,7 @@ static slurm_cli_opt_t slurm_opt_output = {
 	.has_arg = required_argument,
 	.val = 'o',
 	.set_func_sbatch = arg_set_ofname,
+	.set_func_scron = arg_set_ofname,
 	.set_func_srun = arg_set_ofname,
 	.set_func_data = arg_set_data_ofname,
 	.get_func = arg_get_ofname,
@@ -3255,6 +3311,35 @@ static slurm_cli_opt_t slurm_opt_overcommit = {
 	.get_func = arg_get_overcommit,
 	.reset_func = arg_reset_overcommit,
 	.reset_each_pass = true,
+};
+
+static int arg_set_overlap(slurm_opt_t *opt, const char *arg)
+{
+	if (opt->srun_opt)
+		opt->srun_opt->exclusive = false;
+
+	return SLURM_SUCCESS;
+}
+static char *arg_get_overlap(slurm_opt_t *opt)
+{
+	if (!opt->srun_opt)
+		return xstrdup("invalid-context");
+
+	return xstrdup(opt->srun_opt->exclusive ? "unset" : "set");
+}
+static void arg_reset_overlap(slurm_opt_t *opt)
+{
+	if (opt->srun_opt)
+		opt->srun_opt->exclusive = true;
+}
+
+static slurm_cli_opt_t slurm_opt_overlap = {
+	.name = "overlap",
+	.has_arg = no_argument,
+	.val = LONG_OPT_OVERLAP,
+	.set_func_srun = arg_set_overlap,
+	.get_func = arg_get_overlap,
+	.reset_func = arg_reset_overlap,
 };
 
 /*
@@ -4235,7 +4320,15 @@ static slurm_cli_opt_t slurm_opt_thread_spec = {
 	.reset_each_pass = true,
 };
 
-COMMON_INT_OPTION_SET(threads_per_core, "--threads-per-core");
+static int arg_set_threads_per_core(slurm_opt_t *opt, const char *arg)
+{
+	opt->threads_per_core = parse_int("--threads-per-core", arg, true);
+	if (opt->srun_opt)
+		slurm_verify_cpu_bind("threads", &opt->srun_opt->cpu_bind,
+				      &opt->srun_opt->cpu_bind_type, 0);
+
+	return SLURM_SUCCESS;
+}
 COMMON_INT_OPTION_SET_DATA(threads_per_core);
 COMMON_INT_OPTION_GET(threads_per_core);
 COMMON_OPTION_RESET(threads_per_core, NO_VAL);
@@ -4643,7 +4736,7 @@ static char *arg_get_wait_srun(slurm_opt_t *opt)
 static void arg_reset_wait_srun(slurm_opt_t *opt)
 {
 	if (opt->srun_opt)
-		opt->srun_opt->max_wait = slurm_get_wait_time();
+		opt->srun_opt->max_wait = slurm_conf.wait_time;
 }
 static slurm_cli_opt_t slurm_opt_wait_srun = {
 	.name = "wait",
@@ -4737,6 +4830,16 @@ static slurm_cli_opt_t slurm_opt_wckey = {
 	.set_func_data = arg_set_data_wckey,
 	.get_func = arg_get_wckey,
 	.reset_func = arg_reset_wckey,
+};
+
+COMMON_SRUN_BOOL_OPTION(whole);
+static slurm_cli_opt_t slurm_opt_whole = {
+	.name = "whole",
+	.has_arg = no_argument,
+	.val = LONG_OPT_WHOLE,
+	.set_func_srun = arg_set_whole,
+	.get_func = arg_get_whole,
+	.reset_func = arg_reset_whole,
 };
 
 COMMON_SBATCH_STRING_OPTION(wrap);
@@ -4842,6 +4945,7 @@ static const slurm_cli_opt_t *common_options[] = {
 	&slurm_opt_ignore_pbs,
 	&slurm_opt_immediate,
 	&slurm_opt_input,
+	&slurm_opt_interactive,
 	&slurm_opt_jobid,
 	&slurm_opt_job_name,
 	&slurm_opt_kill_command,
@@ -4873,11 +4977,14 @@ static const slurm_cli_opt_t *common_options[] = {
 	&slurm_opt_nodes,
 	&slurm_opt_ntasks,
 	&slurm_opt_ntasks_per_core,
+	&slurm_opt_ntasks_per_gpu,
 	&slurm_opt_ntasks_per_node,
 	&slurm_opt_ntasks_per_socket,
+	&slurm_opt_ntasks_per_tres,
 	&slurm_opt_open_mode,
 	&slurm_opt_output,
 	&slurm_opt_overcommit,
+	&slurm_opt_overlap,
 	&slurm_opt_oversubscribe,
 	&slurm_opt_pack_group,
 	&slurm_opt_parsable,
@@ -4924,6 +5031,7 @@ static const slurm_cli_opt_t *common_options[] = {
 	&slurm_opt_wait_all_nodes,
 	&slurm_opt_wait_srun,
 	&slurm_opt_wckey,
+	&slurm_opt_whole,
 	&slurm_opt_wrap,
 	&slurm_opt_x11,
 	NULL /* END */
@@ -4954,6 +5062,7 @@ struct option *slurm_option_table_create(slurm_opt_t *opt,
 		xassert((common_options[i]->set_func
 			 && !common_options[i]->set_func_salloc
 			 && !common_options[i]->set_func_sbatch
+			 && !common_options[i]->set_func_scron
 			 && !common_options[i]->set_func_srun) ||
 			!common_options[i]->set_func);
 		/*
@@ -4975,6 +5084,8 @@ struct option *slurm_option_table_create(slurm_opt_t *opt,
 		else if (opt->salloc_opt && common_options[i]->set_func_salloc)
 			optz_add(&optz, (struct option *) common_options[i]);
 		else if (opt->sbatch_opt && common_options[i]->set_func_sbatch)
+			optz_add(&optz, (struct option *) common_options[i]);
+		else if (opt->scron_opt && common_options[i]->set_func_scron)
 			optz_add(&optz, (struct option *) common_options[i]);
 		else if (opt->srun_opt && common_options[i]->set_func_srun)
 			optz_add(&optz, (struct option *) common_options[i]);
@@ -5080,6 +5191,7 @@ int slurm_process_option(slurm_opt_t *opt, int optval, const char *arg,
 		if (!common_options[i]->set_func &&
 		    !(opt->salloc_opt && common_options[i]->set_func_salloc) &&
 		    !(opt->sbatch_opt && common_options[i]->set_func_sbatch) &&
+		    !(opt->scron_opt && common_options[i]->set_func_scron) &&
 		    !(opt->srun_opt && common_options[i]->set_func_srun))
 			continue;
 
@@ -5094,7 +5206,7 @@ int slurm_process_option(slurm_opt_t *opt, int optval, const char *arg,
 	 */
 	if (!common_options[i] && !early_pass) {
 		if (spank_process_option(optval, arg))
-			exit(-1);
+			return SLURM_ERROR;
 		return SLURM_SUCCESS;
 	} else if (!common_options[i]) {
 		/* early pass, assume it is a SPANK option and skip */
@@ -5182,6 +5294,13 @@ int slurm_process_option(slurm_opt_t *opt, int optval, const char *arg,
 		}
 	} else if (opt->sbatch_opt && common_options[i]->set_func_sbatch) {
 		if (!(common_options[i]->set_func_sbatch)(opt, setarg)) {
+			opt->state[i].set = true;
+			opt->state[i].set_by_data = false;
+			opt->state[i].set_by_env = set_by_env;
+			return SLURM_SUCCESS;
+		}
+	} else if (opt->scron_opt && common_options[i]->set_func_scron) {
+		if (!(common_options[i]->set_func_scron)(opt, setarg)) {
 			opt->state[i].set = true;
 			opt->state[i].set_by_data = false;
 			opt->state[i].set_by_env = set_by_env;
@@ -5384,6 +5503,8 @@ extern int slurm_option_set(slurm_opt_t *opt, const char *name,
 		rc = common_options[i]->set_func_salloc(opt, value);
 	else if (common_options[i]->set_func_sbatch && opt->sbatch_opt)
 		rc = common_options[i]->set_func_sbatch(opt, value);
+	else if (common_options[i]->set_func_scron && opt->scron_opt)
+		rc = common_options[i]->set_func_scron(opt, value);
 	else if (common_options[i]->set_func_srun && opt->srun_opt)
 		rc = common_options[i]->set_func_srun(opt, value);
 
@@ -5462,4 +5583,74 @@ extern void validate_memory_options(slurm_opt_t *opt)
 		    slurm_option_set_by_env(opt, LONG_OPT_MEM_PER_GPU)) > 1) {
 		fatal("SLURM_MEM_PER_CPU, SLURM_MEM_PER_GPU, and SLURM_MEM_PER_NODE are mutually exclusive.");
 	}
+}
+
+extern void validate_hint_option(slurm_opt_t *opt)
+{
+	if (slurm_option_set_by_cli(opt, LONG_OPT_HINT) &&
+	    (slurm_option_set_by_cli(opt, LONG_OPT_NTASKSPERCORE) ||
+	     slurm_option_set_by_cli(opt, LONG_OPT_THREADSPERCORE) ||
+	     slurm_option_set_by_cli(opt, 'B')) ) {
+		fatal("Following options are mutually exclusive: --hint, --ntasks-per-core, --threads-per-core, -B.");
+	} else if (slurm_option_set_by_cli(opt, LONG_OPT_HINT)) {
+		slurm_option_reset(opt, "ntasks-per-core");
+		slurm_option_reset(opt, "threads-per-core");
+		slurm_option_reset(opt, "extra-node-info");
+	} else if (slurm_option_set_by_cli(opt, LONG_OPT_NTASKSPERCORE) ||
+		   slurm_option_set_by_cli(opt, LONG_OPT_THREADSPERCORE) ||
+		   slurm_option_set_by_cli(opt, 'B')) {
+		slurm_option_reset(opt, "hint");
+	} else if (slurm_option_set_by_env(opt, LONG_OPT_HINT) &&
+		   (slurm_option_set_by_env(opt, LONG_OPT_NTASKSPERCORE) ||
+		    slurm_option_set_by_env(opt, LONG_OPT_THREADSPERCORE) ||
+		    slurm_option_set_by_env(opt, 'B'))) {
+		fatal("Following options are mutually exclusive: --hint, --ntasks-per-core, --threads-per-core, -B, but more than one set by environment variables.");
+	}
+}
+
+static void _validate_ntasks_per_gpu(slurm_opt_t *opt)
+{
+	bool tres = slurm_option_set_by_cli(opt, LONG_OPT_NTASKSPERTRES);
+	bool gpu = slurm_option_set_by_cli(opt, LONG_OPT_NTASKSPERGPU);
+	bool tres_env = slurm_option_set_by_env(opt, LONG_OPT_NTASKSPERTRES);
+	bool gpu_env = slurm_option_set_by_env(opt, LONG_OPT_NTASKSPERGPU);
+	bool any = (tres || gpu || tres_env || gpu_env);
+
+	if (!any)
+		return;
+
+	/* Validate --ntasks-per-gpu and --ntasks-per-gpu */
+	if (gpu && tres) {
+		fatal("--ntasks-per-gpu and --ntasks-per-tres are mutually exclusive");
+	} else if (gpu && tres_env) {
+		fatal("--ntasks-per-gpu and SLURM_NTASKS_PER_TRES are mutually exclusive");
+	} else if (tres && gpu_env) {
+		fatal("--ntasks-per-tres and SLURM_NTASKS_PER_GPU are mutually exclusive");
+	} else if (gpu_env && tres_env) {
+		fatal("SLURM_NTASKS_PER_GPU and SLURM_NTASKS_PER_TRES are mutually exclusive");
+	}
+
+	if (slurm_option_set_by_cli(opt, LONG_OPT_GPUS_PER_TASK))
+		fatal("--gpus-per-task is mutually exclusive with --ntasks-per-gpu and SLURM_NTASKS_PER_GPU");
+
+	if (slurm_option_set_by_env(opt, LONG_OPT_GPUS_PER_TASK))
+		fatal("SLURM_GPUS_PER_TASK is mutually exclusive with --ntasks-per-gpu and SLURM_NTASKS_PER_GPU");
+
+	if (slurm_option_set_by_cli(opt, LONG_OPT_GPUS_PER_SOCKET))
+		fatal("--gpus-per-socket is mutually exclusive with --ntasks-per-gpu and SLURM_NTASKS_PER_GPU");
+
+	if (slurm_option_set_by_env(opt, LONG_OPT_GPUS_PER_SOCKET))
+		fatal("SLURM_GPUS_PER_SOCKET is mutually exclusive with --ntasks-per-gpu and SLURM_NTASKS_PER_GPU");
+
+	if (slurm_option_set_by_cli(opt, LONG_OPT_NTASKSPERNODE))
+		fatal("--ntasks-per-node is mutually exclusive with --ntasks-per-gpu and SLURM_NTASKS_PER_GPU");
+
+	if (slurm_option_set_by_env(opt, LONG_OPT_NTASKSPERNODE))
+		fatal("SLURM_NTASKS_PER_NODE is mutually exclusive with --ntasks-per-gpu and SLURM_NTASKS_PER_GPU");
+}
+
+/* Validate shared options between srun, salloc, and sbatch */
+extern void validate_options_salloc_sbatch_srun(slurm_opt_t *opt)
+{
+	_validate_ntasks_per_gpu(opt);
 }

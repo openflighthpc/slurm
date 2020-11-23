@@ -497,11 +497,10 @@ void pmixp_server_cleanup(void)
 static int _auth_cred_create(Buf buf)
 {
 	void *auth_cred = NULL;
-	char *auth_info = slurm_get_auth_info();
 	int rc = SLURM_SUCCESS;
 
-	auth_cred = g_slurm_auth_create(AUTH_DEFAULT_INDEX, auth_info);
-	xfree(auth_info);
+	auth_cred = g_slurm_auth_create(AUTH_DEFAULT_INDEX,
+					slurm_conf.authinfo);
 	if (!auth_cred) {
 		PMIXP_ERROR("Creating authentication credential: %m");
 		return errno;
@@ -523,7 +522,6 @@ static int _auth_cred_create(Buf buf)
 static int _auth_cred_verify(Buf buf)
 {
 	void *auth_cred = NULL;
-	char *auth_info = NULL;
 	int rc = SLURM_SUCCESS;
 
 	/*
@@ -536,9 +534,7 @@ static int _auth_cred_verify(Buf buf)
 		return SLURM_ERROR;
 	}
 
-	auth_info = slurm_get_auth_info();
-	rc = g_slurm_auth_verify(auth_cred, auth_info);
-	xfree(auth_info);
+	rc = g_slurm_auth_verify(auth_cred, slurm_conf.authinfo);
 
 	if (rc)
 		PMIXP_ERROR("Verifying authentication credential: %m");
@@ -1962,7 +1958,7 @@ void pmixp_server_run_cperf(void)
 
 		PMIXP_ERROR("coll perf %d", size);
 
-		bzero(times, (sizeof(double) * iters));
+		memset(times, 0, (sizeof(double) * iters));
 		for(j=0; j<iters && !rc; j++){
 			switch (mode) {
 			case PMIXP_COLL_CPERF_MIXED:

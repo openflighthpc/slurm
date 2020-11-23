@@ -214,7 +214,7 @@ static void spank_stack_destroy (struct spank_stack *stack)
 static struct spank_stack *
 spank_stack_create (const char *file, enum spank_context_type type)
 {
-	slurm_ctl_conf_t *conf;
+	slurm_conf_t *conf;
 	struct spank_stack *stack = xmalloc (sizeof (*stack));
 
 	conf = slurm_conf_lock();
@@ -760,7 +760,7 @@ struct spank_stack *spank_stack_init(enum spank_context_type context)
 	char *path;
 	struct spank_stack *stack = NULL;
 
-	if (!(path = xstrdup(slurmctld_conf.plugstack)))
+	if (!(path = xstrdup(slurm_conf.plugstack)))
 		path = get_extra_conf_path("plugstack.conf");
 
 	stack = spank_stack_create(path, context);
@@ -1180,7 +1180,7 @@ extern int spank_process_option(int optval, const char *arg)
 	List option_cache = get_global_option_cache();
 
 	if (option_cache == NULL || (list_count(option_cache) == 0)) {
-		error("No spank option cache");
+		debug("No spank option cache");
 		return (-1);
 	}
 
@@ -2018,7 +2018,7 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		if (spank->stack->type == S_TYPE_LOCAL)
 			*p2uint32 = launcher_job->jobid;
 		else if (spank->stack->type == S_TYPE_REMOTE)
-			*p2uint32 = slurmd_job->jobid;
+			*p2uint32 = slurmd_job->step_id.job_id;
 		else if (spank->stack->type == S_TYPE_JOB_SCRIPT)
 			*p2uint32 = s_job_info->jobid;
 		break;
@@ -2027,7 +2027,7 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		if (spank->stack->type == S_TYPE_LOCAL)
 			*p2uint32 = launcher_job->stepid;
 		else if (slurmd_job)
-			*p2uint32 = slurmd_job->stepid;
+			*p2uint32 = slurmd_job->step_id.step_id;
 		else
 			*p2uint32 = 0;
 		break;

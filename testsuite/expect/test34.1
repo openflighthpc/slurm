@@ -37,7 +37,7 @@ set job_id         0
 set nodes          ""
 set file_in        "test$test_id\_sc"
 
-if {[test_preempttype_part] == 0} {
+if {[get_config_param "PreemptType"] ne "preempt/partition_prio"} {
 	skip "This test requires that PreemptType=preempt/partition_prio"
 }
 
@@ -208,7 +208,7 @@ proc clean_up { rc } {
 	}
 }
 
-if {[is_super_user] == 0} {
+if {![is_super_user]} {
 	skip "This test can't be run except as SlurmUser"
 }
 
@@ -282,12 +282,15 @@ if { [wait_for_job $part_id_2 "RUNNING"] != 0} {
 }
 
 sleep 5
-check_job_state $part_id_1 PREEMPTED
+if {![check_job_state $part_id_1 PREEMPTED]} {
+	log_error "Job was not on the desired state"
+	set exit_code 1
+}
 cancel_job $part_id_2
 cancel_job $part_id_1
 
 ###################### Test preempt suspend ######################
-if { [test_gang] == 1 } {
+if [param_contains [get_config_param "PreemptMode"] "GANG"] {
 	log_info "*** TEST PREEMPT SUSPEND ***"
 
 	mod_part $part_name_1 suspend
@@ -305,7 +308,10 @@ if { [test_gang] == 1 } {
 	}
 
 	sleep 5
-	check_job_state $part_id_1 SUSPENDED
+	if {![check_job_state $part_id_1 SUSPENDED]} {
+		log_error "Job was not on the desired state"
+		clean_up 1
+	}
 
 	if { [wait_for_job $part_id_2 "DONE"] != 0} {
 		log_error "Job $part_id_2 failed to complete"
@@ -337,7 +343,10 @@ if { [wait_for_job $part_id_2 "RUNNING"] != 0} {
 }
 
 sleep 5
-check_job_state $part_id_1 PENDING
+if {![check_job_state $part_id_1 PENDING]} {
+	log_error "Job was not on the desired state"
+	clean_up 1
+}
 
 # Wait for job 1 to be requeued
 if { [wait_for_job $part_id_2 "DONE"] != 0} {
@@ -350,7 +359,10 @@ if { [wait_for_job $part_id_1 "RUNNING"] != 0} {
 }
 
 sleep 5
-check_job_state $part_id_1 RUNNING
+if {![check_job_state $part_id_1 RUNNING]} {
+	log_error "Job was not on the desired state"
+	clean_up 1
+}
 
 clean_up 0
 

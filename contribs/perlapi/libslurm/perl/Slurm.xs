@@ -12,7 +12,7 @@
 #include "slurm-perl.h"
 #include "bitstr.h"
 
-extern void slurm_conf_reinit(char *pathname);
+extern void slurm_conf_init(char *pathname);
 
 /* Custom typemap that free's memory after copying to perl stack. */
 typedef char char_xfree;
@@ -51,6 +51,11 @@ free_slurm(slurm_t self)
 MODULE = Slurm		PACKAGE = Slurm		PREFIX=slurm_
 PROTOTYPES: ENABLE
 
+BOOT:
+{
+	slurm_conf_init(NULL);
+}
+
 ######################################################################
 # 	CONSTRUCTOR/DESTRUCTOR FUNCTIONS
 ######################################################################
@@ -61,9 +66,7 @@ PROTOTYPES: ENABLE
 slurm_t
 slurm_new(char *conf_file=NULL)
 	CODE:
-		if(conf_file) {
-			slurm_conf_reinit(conf_file);
-		}
+		slurm_conf_init(conf_file);
 		RETVAL = new_slurm();
 		if (RETVAL == NULL) {
 			XSRETURN_UNDEF;
@@ -435,19 +438,23 @@ slurm_job_will_run(slurm_t self, HV *job_desc)
 		RETVAL
 
 HV *
-slurm_sbcast_lookup(slurm_t self, uint32_t job_id, uint32_t step_id)
+slurm_sbcast_lookup(slurm_t self, uint32_t job_id, uint32_t step_id_in)
 	PREINIT:
 		job_sbcast_cred_msg_t *info;
 		int rc;
-		uint32_t het_job_offset = NO_VAL;
+		slurm_selected_step_t selected_step;
 	CODE:
 		if (self); /* this is needed to avoid a warning about
 			      unused variables.  But if we take slurm_t self
 			      out of the mix Slurm-> doesn't work,
 			      only Slurm::
 			    */
-		rc = slurm_sbcast_lookup(job_id, het_job_offset, step_id,
-					 &info);
+		selected_step.het_job_offset = NO_VAL;
+		selected_step.array_task_id = NO_VAL;
+		selected_step.step_id.job_id = job_id;
+		selected_step.step_id.step_id = step_id_in;
+		selected_step.step_id.step_het_comp = NO_VAL;
+		rc = slurm_sbcast_lookup(&selected_step, &info);
 		if (rc == SLURM_SUCCESS) {
 			RETVAL = newHV();
 			sv_2mortal((SV*)RETVAL);
@@ -829,7 +836,7 @@ slurm_api_version(slurm_t self, OUTLIST int major, OUTLIST int minor, OUTLIST in
 HV *
 slurm_load_ctl_conf(slurm_t self, time_t update_time=0)
 	PREINIT:
-		slurm_ctl_conf_t *ctl_conf;
+		slurm_conf_t *ctl_conf;
 		int rc;
 	CODE:
 		if (self); /* this is needed to avoid a warning about
@@ -855,7 +862,7 @@ slurm_load_ctl_conf(slurm_t self, time_t update_time=0)
 void
 slurm_print_ctl_conf(slurm_t self, FILE *out, HV *conf)
 	PREINIT:
-		slurm_ctl_conf_t cc;
+		slurm_conf_t cc;
 	INIT:
 		if (out == NULL) {
 			Perl_croak (aTHX_ "Invalid output stream specified: FILE not found");
@@ -878,7 +885,7 @@ slurm_print_ctl_conf(slurm_t self, FILE *out, HV *conf)
 List
 slurm_ctl_conf_2_key_pairs(slurm_t self, HV *conf)
 	PREINIT:
-		slurm_ctl_conf_t cc;
+		slurm_conf_t cc;
 	CODE:
 		if (self); /* this is needed to avoid a warning about
 			      unused variables.  But if we take slurm_t self
@@ -1347,17 +1354,20 @@ slurm_sprint_job_step_info(slurm_t self, HV *step_info, int one_liner=0)
 		RETVAL
 
 HV *
-slurm_job_step_layout_get(slurm_t self, uint32_t job_id, uint32_t step_id)
+slurm_job_step_layout_get(slurm_t self, uint32_t job_id, uint32_t step_id_in)
 	PREINIT:
 		int rc;
 		slurm_step_layout_t *layout;
+		slurm_step_id_t step_id;
 	CODE:
 		if (self); /* this is needed to avoid a warning about
 			      unused variables.  But if we take slurm_t self
 			      out of the mix Slurm-> doesn't work,
 			      only Slurm::
 			    */
-		layout = slurm_job_step_layout_get(job_id, step_id);
+		step_id.job_id = job_id;
+		step_id.step_id = step_id_in;
+		layout = slurm_job_step_layout_get(&step_id);
 		if(layout == NULL) {
 			XSRETURN_UNDEF;
 		} else {
@@ -1373,17 +1383,20 @@ slurm_job_step_layout_get(slurm_t self, uint32_t job_id, uint32_t step_id)
 		RETVAL
 
 HV *
-slurm_job_step_stat(slurm_t self, uint32_t job_id, uint32_t step_id, char *nodelist=NULL, uint16_t protocol_version)
+slurm_job_step_stat(slurm_t self, uint32_t job_id, uint32_t step_id_in, char *nodelist=NULL, uint16_t protocol_version)
 	PREINIT:
 		int rc;
 		job_step_stat_response_msg_t *resp_msg;
+		slurm_step_id_t step_id;
 	CODE:
 		if (self); /* this is needed to avoid a warning about
 			      unused variables.  But if we take slurm_t self
 			      out of the mix Slurm-> doesn't work,
 			      only Slurm::
 			    */
-                rc = slurm_job_step_stat(job_id, step_id, nodelist,
+		step_id.job_id = job_id;
+		step_id.step_id = step_id_in;
+                rc = slurm_job_step_stat(&step_id, nodelist,
 					 protocol_version, &resp_msg);
 		if (rc == SLURM_SUCCESS) {
 			RETVAL = newHV();
@@ -1401,17 +1414,20 @@ slurm_job_step_stat(slurm_t self, uint32_t job_id, uint32_t step_id, char *nodel
 		RETVAL
 
 HV *
-slurm_job_step_get_pids(slurm_t self, uint32_t job_id, uint32_t step_id, char *nodelist=NULL)
+slurm_job_step_get_pids(slurm_t self, uint32_t job_id, uint32_t step_id_in, char *nodelist=NULL)
 	PREINIT:
 		int rc;
 		job_step_pids_response_msg_t *resp_msg = NULL;
+		slurm_step_id_t step_id;
 	CODE:
 		if (self); /* this is needed to avoid a warning about
 			      unused variables.  But if we take slurm_t self
 			      out of the mix Slurm-> doesn't work,
 			      only Slurm::
 			    */
-		rc = slurm_job_step_get_pids(job_id, step_id, nodelist, &resp_msg);
+		step_id.job_id = job_id;
+		step_id.step_id = step_id_in;
+		rc = slurm_job_step_get_pids(&step_id, nodelist, &resp_msg);
 		if (rc == SLURM_SUCCESS) {
 			RETVAL = newHV();
 			sv_2mortal((SV*)RETVAL);

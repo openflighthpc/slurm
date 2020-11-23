@@ -64,6 +64,11 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
+enum {
+	RESV_NEW, /* It is a new reservation */
+	RESV_ADD, /* It is a reservation update with += */
+	RESV_REM, /* It is an reservation  update with -= */
+};
 
 /* print this version of Slurm */
 void print_slurm_version(void)
@@ -493,7 +498,11 @@ char *base_name(const char *command)
 	return xstrdup(char_ptr);
 }
 
-static uint64_t _str_to_mbytes(const char *arg, int use_gbytes)
+/*
+ * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
+ * or "T" at end and return the number in mega-bytes. Default units are MB.
+ */
+uint64_t str_to_mbytes(const char *arg)
 {
 	long long result;
 	char *endptr;
@@ -502,20 +511,24 @@ static uint64_t _str_to_mbytes(const char *arg, int use_gbytes)
 	result = strtoll(arg, &endptr, 10);
 	if ((errno != 0) && ((result == LLONG_MIN) || (result == LLONG_MAX)))
 		return NO_VAL64;
-	if (result < 0)
+	if (arg == endptr)
 		return NO_VAL64;
 
-	else if ((endptr[0] == '\0') && (use_gbytes == 1))  /* GB default */
-		result *= 1024;
+	if (result < 0)
+		return NO_VAL64;
 	else if (endptr[0] == '\0')	/* MB default */
 		;
-	else if ((endptr[0] == 'k') || (endptr[0] == 'K'))
+	else if (((endptr[0] == 'k') || (endptr[0] == 'K')) &&
+	         (endptr[1] == '\0'))
 		result = (result + 1023) / 1024;	/* round up */
-	else if ((endptr[0] == 'm') || (endptr[0] == 'M'))
+	else if (((endptr[0] == 'm') || (endptr[0] == 'M')) &&
+	         (endptr[1] == '\0'))
 		;
-	else if ((endptr[0] == 'g') || (endptr[0] == 'G'))
+	else if (((endptr[0] == 'g') || (endptr[0] == 'G')) &&
+	         (endptr[1] == '\0'))
 		result *= 1024;
-	else if ((endptr[0] == 't') || (endptr[0] == 'T'))
+	else if (((endptr[0] == 't') || (endptr[0] == 'T')) &&
+	         (endptr[1] == '\0'))
 		result *= (1024 * 1024);
 	else
 		return NO_VAL64;
@@ -523,53 +536,13 @@ static uint64_t _str_to_mbytes(const char *arg, int use_gbytes)
 	return (uint64_t) result;
 }
 
-/*
- * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
- * or "T" at end and return the number in mega-bytes. Default units are MB.
- */
-uint64_t str_to_mbytes(const char *arg)
-{
-	return _str_to_mbytes(arg, 0);
-}
-
-/*
- * str_to_mbytes2(): verify that arg is numeric with optional "K", "M", "G"
- * or "T" at end and return the number in mega-bytes. Default units are GB
- * if "SchedulerParameters=default_gbytes" is configured, otherwise MB.
- */
-uint64_t str_to_mbytes2(const char *arg)
-{
-	static int use_gbytes = -1;
-
-	if (use_gbytes == -1) {
-		char *sched_params = slurm_get_sched_params();
-		if (xstrcasestr(sched_params, "default_gbytes"))
-			use_gbytes = 1;
-		else
-			use_gbytes = 0;
-		xfree(sched_params);
-	}
-
-	return _str_to_mbytes(arg, use_gbytes);
-}
-
-extern char *mbytes2_to_str(uint64_t mbytes)
+extern char *mbytes_to_str(uint64_t mbytes)
 {
 	int i = 0;
 	char *unit = "MGTP?";
-	static int use_gbytes = -1;
 
 	if (mbytes == NO_VAL64)
 		return NULL;
-
-	if (use_gbytes == -1) {
-		char *sched_params = slurm_get_sched_params();
-		if (xstrcasestr(sched_params, "default_gbytes"))
-			use_gbytes = 1;
-		else
-			use_gbytes = 0;
-		xfree(sched_params);
-	}
 
 	for (i = 0; unit[i] != '?'; i++) {
 		if (mbytes && (mbytes % 1024))
@@ -578,7 +551,7 @@ extern char *mbytes2_to_str(uint64_t mbytes)
 	}
 
 	/* no need to display the default unit */
-	if ((unit[i] == 'G' && use_gbytes) || (unit[i] == 'M' && !use_gbytes))
+	if (unit[i] == 'M')
 		return xstrdup_printf("%"PRIu64, mbytes);
 
 	return xstrdup_printf("%"PRIu64"%c", mbytes, unit[i]);
@@ -901,8 +874,7 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 				*cpu_bind_type &=
 					(~CPU_BIND_ONE_THREAD_PER_CORE);
 			}
-			if (*ntasks_per_core == NO_VAL)
-				*ntasks_per_core = INFINITE16;
+			*ntasks_per_core = INFINITE16;
 		} else if (xstrcasecmp(tok, "nomultithread") == 0) {
 			*min_threads = 1;
 			if (cpu_bind_type) {
@@ -949,11 +921,14 @@ uint16_t parse_mail_type(const char *arg)
 			rc |= MAIL_JOB_END;
 		else if (xstrcasecmp(tok, "FAIL") == 0)
 			rc |= MAIL_JOB_FAIL;
+		else if (xstrcasecmp(tok, "INVALID_DEPEND") == 0)
+			rc |= MAIL_INVALID_DEPEND;
 		else if (xstrcasecmp(tok, "REQUEUE") == 0)
 			rc |= MAIL_JOB_REQUEUE;
 		else if (xstrcasecmp(tok, "ALL") == 0)
-			rc |= MAIL_JOB_BEGIN |  MAIL_JOB_END |  MAIL_JOB_FAIL |
-			      MAIL_JOB_REQUEUE | MAIL_JOB_STAGE_OUT;
+			rc |= MAIL_INVALID_DEPEND | MAIL_JOB_BEGIN |
+			      MAIL_JOB_END | MAIL_JOB_FAIL | MAIL_JOB_REQUEUE |
+			      MAIL_JOB_STAGE_OUT;
 		else if (!xstrcasecmp(tok, "STAGE_OUT"))
 			rc |= MAIL_JOB_STAGE_OUT;
 		else if (xstrcasecmp(tok, "TIME_LIMIT") == 0)
@@ -985,6 +960,11 @@ char *print_mail_type(const uint16_t type)
 		if (buf[0])
 			strcat(buf, ",");
 		strcat(buf, "ARRAY_TASKS");
+	}
+	if (type & MAIL_INVALID_DEPEND) {
+		if (buf[0])
+			strcat(buf, ",");
+		strcat(buf, "INVALID_DEPEND");
 	}
 	if (type & MAIL_JOB_BEGIN) {
 		if (buf[0])
@@ -1514,17 +1494,17 @@ void print_db_notok(const char *cname, bool isenv)
 extern uint64_t parse_resv_flags(const char *flagstr, const char *msg,
 				 resv_desc_msg_t  *resv_msg_ptr)
 {
-	int flip;
+	int op = RESV_NEW;
 	uint64_t outflags = 0;
 	char *curr = xstrdup(flagstr), *start = curr;
 	int taglen = 0;
 
 	while (*curr != '\0') {
-		flip = 0;
 		if (*curr == '+') {
+			op = RESV_ADD;
 			curr++;
 		} else if (*curr == '-') {
-			flip = 1;
+			op = RESV_REM;
 			curr++;
 		}
 		taglen = 0;
@@ -1534,12 +1514,12 @@ extern uint64_t parse_resv_flags(const char *flagstr, const char *msg,
 
 		if (xstrncasecmp(curr, "Maintenance", MAX(taglen,3)) == 0) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_MAINT;
 			else
 				outflags |= RESERVE_FLAG_MAINT;
 		} else if ((xstrncasecmp(curr, "Overlap", MAX(taglen,1))
-			    == 0) && (!flip)) {
+			    == 0) && (op != RESV_REM)) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_OVERLAP;
 			/*
@@ -1549,69 +1529,70 @@ extern uint64_t parse_resv_flags(const char *flagstr, const char *msg,
 			 */
 		} else if (xstrncasecmp(curr, "Flex", MAX(taglen,1)) == 0) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_FLEX;
 			else
 				outflags |= RESERVE_FLAG_FLEX;
 		} else if (xstrncasecmp(curr, "Ignore_Jobs", MAX(taglen,1))
 			   == 0) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_IGN_JOB;
 			else
 				outflags |= RESERVE_FLAG_IGN_JOBS;
 		} else if (xstrncasecmp(curr, "Daily", MAX(taglen,1)) == 0) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_DAILY;
 			else
 				outflags |= RESERVE_FLAG_DAILY;
 		} else if (xstrncasecmp(curr, "Weekday", MAX(taglen,1)) == 0) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_WEEKDAY;
 			else
 				outflags |= RESERVE_FLAG_WEEKDAY;
 		} else if (xstrncasecmp(curr, "Weekend", MAX(taglen,1)) == 0) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_WEEKEND;
 			else
 				outflags |= RESERVE_FLAG_WEEKEND;
 		} else if (xstrncasecmp(curr, "Weekly", MAX(taglen,1)) == 0) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_WEEKLY;
 			else
 				outflags |= RESERVE_FLAG_WEEKLY;
 		} else if (!xstrncasecmp(curr, "Any_Nodes", MAX(taglen,1)) ||
 			   !xstrncasecmp(curr, "License_Only", MAX(taglen,1))) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_ANY_NODES;
 			else
 				outflags |= RESERVE_FLAG_ANY_NODES;
 		} else if (xstrncasecmp(curr, "Static_Alloc", MAX(taglen,1))
 			   == 0) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_STATIC;
 			else
 				outflags |= RESERVE_FLAG_STATIC;
 		} else if (xstrncasecmp(curr, "Part_Nodes", MAX(taglen, 2))
 			   == 0) {
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_PART_NODES;
 			else
 				outflags |= RESERVE_FLAG_PART_NODES;
 		} else if (!xstrncasecmp(curr, "magnetic", MAX(taglen, 3)) ||
 			   !xstrncasecmp(curr, "promiscuous", MAX(taglen, 2))) {
 			curr += taglen;
-			if (flip)
-				outflags |= RESERVE_FLAG_NO_PROM;
+
+			if (op == RESV_REM)
+				outflags |= RESERVE_FLAG_NO_MAGNETIC;
 			else
-				outflags |= RESERVE_FLAG_PROM;
+				outflags |= RESERVE_FLAG_MAGNETIC;
 		} else if (!xstrncasecmp(curr, "PURGE_COMP", MAX(taglen, 2))) {
 			if (curr[taglen] == '=') {
 				int num_end;
@@ -1631,28 +1612,28 @@ extern uint64_t parse_resv_flags(const char *flagstr, const char *msg,
 				taglen = num_end;
 			}
 			curr += taglen;
-			if (flip)
+			if (op == RESV_REM)
 				outflags |= RESERVE_FLAG_NO_PURGE_COMP;
 			else
 				outflags |= RESERVE_FLAG_PURGE_COMP;
 		} else if (!xstrncasecmp(curr, "First_Cores", MAX(taglen,1)) &&
-			   !flip) {
+			   op != RESV_REM) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_FIRST_CORES;
 		} else if (!xstrncasecmp(curr, "Time_Float", MAX(taglen,1)) &&
-			   !flip) {
+			   op == RESV_NEW) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_TIME_FLOAT;
 		} else if (!xstrncasecmp(curr, "Replace", MAX(taglen, 1)) &&
-			   !flip) {
+			   op != RESV_REM) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_REPLACE;
 		} else if (!xstrncasecmp(curr, "Replace_Down", MAX(taglen, 8))
-			   && !flip) {
+			   && op != RESV_REM) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_REPLACE_DOWN;
 		} else if (!xstrncasecmp(curr, "NO_HOLD_JOBS_AFTER_END",
-					 MAX(taglen, 1)) && !flip) {
+					 MAX(taglen, 1)) && op != RESV_REM) {
 			curr += taglen;
 			outflags |= RESERVE_FLAG_NO_HOLD_JOBS;
 		} else {

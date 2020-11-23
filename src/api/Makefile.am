@@ -8,12 +8,25 @@ AM_CPPFLAGS = -I$(top_srcdir)
 if WITH_GNU_LD
 VERSION_SCRIPT = \
 	version.map
+# With libslurm we have magic init/fini callers so the linker does not have to
+# worry about knowing to call slurm_conf_init()
 OTHER_FLAGS = \
-	-Wl,--version-script=$(VERSION_SCRIPT)
+	-Wl,--version-script=$(VERSION_SCRIPT) \
+	-Wl,-init,slurm_library_init \
+	-Wl,-fini,slurm_library_fini
 FULL_VERSION_SCRIPT = \
 	full_version.map
+# With libslurmfull we expect the process to know they have to call
+# slurm_conf_init() since they are inside of slurm at this point.
+# We do not have the init/fini that libslurm has.
 FULL_OTHER_FLAGS = \
 	-Wl,--version-script=$(FULL_VERSION_SCRIPT)
+# With libslurm_pmi we have magic init/fini callers so the linker does not
+# have to worry about knowing to call slurm_conf_init()
+SLURM_PMI_OTHER_FLAGS = \
+	-Wl,--version-script=$(VERSION_SCRIPT) \
+	-Wl,-init,slurm_library_init \
+	-Wl,-fini,slurm_library_fini
 endif
 
 # libslurm version information :
@@ -49,11 +62,14 @@ lib_LTLIBRARIES = libslurm.la
 # The ABI of libslurmfull can easily change from 1 micro version to another.
 # To avoid issue we will install this lib alongside the plugins to protect
 # from version issues.
-pkglib_LTLIBRARIES = libslurmfull.la
+#
+# The unversioned libslurm_pmi is hidden there as well.
+pkglib_LTLIBRARIES = libslurmfull.la libslurm_pmi.la
 
 # BUILT_SOURCES tells automake that when "make" is called, these targets
 # need to be built before anything else.
-BUILT_SOURCES = $(VERSION_SCRIPT) $(FULL_VERSION_SCRIPT) libslurm.la
+BUILT_SOURCES = $(VERSION_SCRIPT) $(FULL_VERSION_SCRIPT)\
+		$(SLURM_PMI_VERSION_SCRIPT) libslurm.la
 
 # Note that libslurmhelper is mostly the same as libslurm, except that
 # it exports ALL symbols used by the process, libcommon, libeio, etc.
@@ -95,18 +111,18 @@ slurmapi_src =           \
 	cancel.c         \
 	complete.c       \
 	config_info.c    \
+	crontab.c        \
 	federation_info.c \
 	front_end_info.c \
+	init.c           \
 	init_msg.c       \
 	job_info.c       \
 	job_step_info.c  \
-	layout_info.c    \
 	license_info.c   \
 	node_info.c      \
 	partition_info.c \
 	pmi_server.c     \
 	pmi_server.h     \
-	powercap_info.c  \
 	reservation_info.c \
 	signal.c         \
 	slurm_get_statistics.c \
@@ -137,9 +153,7 @@ slurmapi_add = 			 \
 
 libslurmhelper_la_SOURCES = $(slurmapi_src)
 libslurmhelper_la_LIBADD = $(slurmapi_add)
-libslurmhelper_la_LDFLAGS = \
-	$(LIB_LDFLAGS) \
-	-version-info $(current):$(rev):$(age)
+libslurmhelper_la_LDFLAGS = $(LIB_LDFLAGS)
 
 convenience_libs = \
 	$(top_builddir)/src/api/libslurmhelper.la
@@ -157,6 +171,13 @@ libslurmfull_la_LDFLAGS        = \
         $(LIB_LDFLAGS) \
 	-avoid-version \
         $(FULL_OTHER_FLAGS)
+
+libslurm_pmi_la_SOURCES =
+libslurm_pmi_la_LIBADD = $(convenience_libs)
+libslurm_pmi_la_LDFLAGS        = \
+        $(LIB_LDFLAGS) \
+	-avoid-version \
+        $(SLURM_PMI_OTHER_FLAGS)
 
 # This was made so we could export all symbols from libcommon
 # on multiple platforms
@@ -188,7 +209,7 @@ $(FULL_VERSION_SCRIPT) :
 	(echo "{ global: *; };") > $(FULL_VERSION_SCRIPT)
 
 CLEANFILES = \
-	$(VERSION_SCRIPT) $(FULL_VERSION_SCRIPT)
+	$(VERSION_SCRIPT) $(FULL_VERSION_SCRIPT) $(SLURM_PMI_VERSION_SCRIPT)
 
 DISTCLEANFILES = \
-	$(VERSION_SCRIPT) $(FULL_VERSION_SCRIPT)
+	$(VERSION_SCRIPT) $(FULL_VERSION_SCRIPT) $(SLURM_PMI_VERSION_SCRIPT)

@@ -36,6 +36,10 @@ set exit_code    0
 set file_in      "test$test_id.in"
 set job_id       0
 
+if {[get_config_param "SchedulerType"] ne "sched/backfill"} {
+	skip "This test requires SchedulerType = sched/backfill"
+}
+
 proc salloc {} {
 	global number salloc bin_sleep job_id
 
@@ -124,7 +128,7 @@ set id_regex "\[0-9,-\]+"
 # first set (hetjob leader).
 spawn $scontrol show job $job_id
 expect {
-	-re "JobId=$job_id\\s+HetJobId=$job_id\\s+HetJobOffset=0\\s+JobName=sleep\\s+HetJobIdSet=($id_regex)" {
+	-re "JobId=$job_id\\s+HetJobId=$job_id\\s+HetJobOffset=0\\s+JobName=interactive\\s+HetJobIdSet=($id_regex)" {
 		incr matches
 		set id_set $expect_out(1,string)
 		exp_continue

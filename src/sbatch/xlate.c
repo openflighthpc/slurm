@@ -213,6 +213,9 @@ static void _set_bsub_options(int argc, char **argv) {
 		case 'M':
 			xlate_val = LONG_OPT_MEM_PER_CPU;
 			xlate_arg = xstrdup(optarg);
+			/* set the default unit to KB to match LSF behavior */
+			if (isdigit(optarg[strlen(optarg) - 1]))
+				xstrcat(xlate_arg, "K");
 			break;
 		case 'n':
 			/* Since it is valid in bsub to give a min and
@@ -371,7 +374,7 @@ static void _set_pbs_options(int argc, char **argv)
 			break;
 		case 'v':
 			xlate_val = LONG_OPT_EXPORT;
-			xlate_arg = xstrdup(sbopt.export_env);
+			xlate_arg = xstrdup(opt.export_env);
 			if (xlate_arg)
 				xstrcat(xlate_arg, ",");
 			xstrcat(xlate_arg, optarg);
@@ -449,7 +452,13 @@ static void _parse_pbs_nodes_opts(char *node_opts)
 	hostlist_t hl = hostlist_create(NULL);
 
 	while (node_opts[i]) {
-		if (!xstrncmp(node_opts+i, "ppn=", 4)) {
+		if (!xstrncmp(node_opts+i, "gpus=", 5)) {
+			i += 5;
+			temp = _get_pbs_node_name(node_opts, &i);
+			slurm_process_option(&opt, LONG_OPT_GPUS_PER_NODE,
+					     temp, false, false);
+			xfree(temp);
+		} else if (!xstrncmp(node_opts+i, "ppn=", 4)) {
 			i+=4;
 			ppn += strtol(node_opts+i, NULL, 10);
 			_get_next_pbs_node_part(node_opts, &i);
@@ -636,8 +645,7 @@ static void _parse_pbs_resource_list(char *rl)
 			i += 14;
 			temp = _get_pbs_option_value(rl, &i, ',');
 			if (temp) {
-				slurm_process_option(&opt, 'G', temp,
-						     false, false);
+				gpus = parse_int("naccelerators", temp, true);
 				xfree(temp);
 			}
 		} else if (!xstrncasecmp(rl+i, "ncpus=", 6)) {

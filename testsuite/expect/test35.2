@@ -82,7 +82,7 @@ set cwd [$bin_pwd]
 exec $bin_rm -f $input_data $output_data $output_use
 exec $bin_echo $data_in >$cwd/$input_data
 
-if {[get_bb_emulate] != 0} {
+if {[get_config_param "EmulateCray"] ne "MISSING"} {
 make_bash_script $script_use "#DW jobdw type=scratch capacity=1GiB access_mode=striped,private type=scratch
 #DW stage_in type=file source=$cwd/$input_data destination=\$DW_JOB_STRIPED/$tmp_file
 #DW stage_out type=file destination=$cwd/$output_data source=\$DW_JOB_STRIPED/$tmp_file
@@ -100,7 +100,6 @@ $scontrol show burst
 exit 0"
 }
 
-incr max_job_state_delay 300
 set job_id_use 0
 spawn $sbatch -t1 -N1 --output=$output_use $script_use
 expect {
@@ -120,11 +119,11 @@ expect {
 if {$job_id_use == 0} {
 	log_error "Job did not launch"
 	set exit_code 1
-} elseif {[wait_for_job $job_id_use "DONE"] != 0} {
+} elseif {[wait_for_job -timeout 660 $job_id_use "DONE"] != 0} {
 	log_error "Job did not complete"
 	set exit_code 1
 	cancel_job $job_id_use
-} elseif {[wait_for_file $output_use] != 0} {
+} elseif {[wait_for_file -timeout 660 $output_use] != 0} {
 	set exit_code 1
 } elseif {[find_bb_jobid $output_use $job_id_use] == 0} {
 	log_error "Job burst buffer not found"

@@ -181,11 +181,9 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 
 	update_object = xmalloc(sizeof(slurmdb_update_object_t));
 
-	list_append(update_list, update_object);
 
 	update_object->type = type;
 
-	list_sort(update_list, (ListCmpF)_sort_update_object_dec);
 
 	switch(type) {
 	case SLURMDB_MODIFY_USER:
@@ -275,15 +273,24 @@ extern int addto_update_list(List update_list, slurmdb_update_type_t type,
 			slurmdb_destroy_res_rec);
 		break;
 	case SLURMDB_UPDATE_FEDS:
+		/*
+		 * object is already a list of slurmdb_federation_rec_t's. Just
+		 * assign update_job->objects to object. fed_mgr_update_feds()
+		 * knows to treat object as a list of federations.
+		 */
 		update_object->objects = object;
-		return SLURM_SUCCESS;
+		break;
 	case SLURMDB_UPDATE_NOTSET:
 	default:
+		slurmdb_destroy_update_object(update_object);
 		error("unknown type set in update_object: %d", type);
 		return SLURM_ERROR;
 	}
 	debug4("XXX: update object with type %d added", type);
-	list_append(update_object->objects, object);
+	if (type != SLURMDB_UPDATE_FEDS)
+		list_append(update_object->objects, object);
+	list_append(update_list, update_object);
+	list_sort(update_list, (ListCmpF)_sort_update_object_dec);
 	return SLURM_SUCCESS;
 }
 
@@ -370,7 +377,8 @@ extern int cluster_first_reg(char *host, uint16_t port, uint16_t rpc_version)
 	info("First time to register cluster requesting "
 	     "running jobs and system information.");
 
-	slurm_set_addr_char(&ctld_address, port, host);
+	memset(&ctld_address, 0, sizeof(ctld_address));
+	slurm_set_addr(&ctld_address, port, host);
 	fd = slurm_open_msg_conn(&ctld_address);
 	if (fd < 0) {
 		error("can not open socket back to slurmctld "
@@ -561,16 +569,13 @@ extern bool is_user_min_admin_level(void *db_conn, uid_t uid,
 	if (drop_priv)
 		return false;
 #endif
-	if (slurmdbd_conf) {
-		/* We have to check the authentication here in the
-		 * plugin since we don't know what accounts are being
-		 * referenced until after the query.
-		 */
-		if ((uid != slurmdbd_conf->slurm_user_id && uid != 0)
-		   && assoc_mgr_get_admin_level(db_conn, uid) < min_level)
-			is_admin = 0;
-	} else if ((uid != 0) && (uid != slurmctld_conf.slurm_user_id))
-		is_admin = 0;
+	/* We have to check the authentication here in the
+	 * plugin since we don't know what accounts are being
+	 * referenced until after the query.
+	 */
+	if ((uid != slurm_conf.slurm_user_id && uid != 0) &&
+	    assoc_mgr_get_admin_level(db_conn, uid) < min_level)
+		is_admin = false;
 
 	return is_admin;
 }
@@ -614,7 +619,7 @@ extern bool is_user_any_coord(void *db_conn, slurmdb_user_rec_t *user)
 extern char *acct_get_db_name(void)
 {
 	char *db_name = NULL;
-	char *location = slurm_get_accounting_storage_loc();
+	char *location = slurmdbd_conf->storage_loc;
 
 	if (!location)
 		db_name = xstrdup(DEFAULT_ACCOUNTING_DB);
@@ -631,9 +636,8 @@ extern char *acct_get_db_name(void)
 		}
 		if (location[i]) {
 			db_name = xstrdup(DEFAULT_ACCOUNTING_DB);
-			xfree(location);
 		} else
-			db_name = location;
+			db_name = xstrdup(location);
 	}
 	return db_name;
 }

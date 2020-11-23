@@ -1,5 +1,5 @@
 Name:		slurm
-Version:	20.02.5
+Version:	20.11.0
 %define rel	1
 Release:	%{rel}.flight1%{?dist}
 Summary:	Slurm Workload Manager
@@ -360,7 +360,7 @@ export QA_RPATHS=0x5
 # Strip out some dependencies
 
 cat > find-requires.sh <<'EOF'
-exec %{__find_requires} "$@" | egrep -v '^libpmix.so|libevent'
+exec %{__find_requires} "$@" | egrep -v '^libpmix.so|libevent|libnvidia-ml'
 EOF
 chmod +x find-requires.sh
 %global _use_internal_dependency_generator 0
@@ -373,6 +373,10 @@ make install-contrib DESTDIR=%{buildroot}
 install -D -m644 etc/slurmctld.service %{buildroot}/%{_unitdir}/slurmctld.service
 install -D -m644 etc/slurmd.service    %{buildroot}/%{_unitdir}/slurmd.service
 install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/slurmdbd.service
+
+%if %{with slurmrestd}
+install -D -m644 etc/slurmrestd.service  %{buildroot}/%{_unitdir}/slurmrestd.service
+%endif
 
 # Do not package Slurm's version of libpmi on Cray systems in the usual location.
 # Cray's version of libpmi should be used. Move it elsewhere if the site still
@@ -406,9 +410,6 @@ install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/slurmdbd.service
 %endif
 
 install -D -m644 etc/cgroup.conf.example %{buildroot}/%{_sysconfdir}/cgroup.conf.example
-install -D -m644 etc/layouts.d.power.conf.example %{buildroot}/%{_sysconfdir}/layouts.d/power.conf.example
-install -D -m644 etc/layouts.d.power_cpufreq.conf.example %{buildroot}/%{_sysconfdir}/layouts.d/power_cpufreq.conf.example
-install -D -m644 etc/layouts.d.unit.conf.example %{buildroot}/%{_sysconfdir}/layouts.d/unit.conf.example
 install -D -m644 etc/slurm.conf.example %{buildroot}/%{_sysconfdir}/slurm.conf.example
 install -D -m600 etc/slurmdbd.conf.example %{buildroot}/%{_sysconfdir}/slurmdbd.conf.example
 install -D -m755 contribs/sjstat %{buildroot}/%{_bindir}/sjstat
@@ -537,9 +538,6 @@ rm -rf %{buildroot}
 %config %{_sysconfdir}/slurm.conf.template
 %endif
 %config %{_sysconfdir}/cgroup.conf.example
-%config %{_sysconfdir}/layouts.d/power.conf.example
-%config %{_sysconfdir}/layouts.d/power_cpufreq.conf.example
-%config %{_sysconfdir}/layouts.d/unit.conf.example
 %config %{_sysconfdir}/slurm.conf.example
 %config %{_sysconfdir}/slurmdbd.conf.example
 #############################################################################
@@ -640,6 +638,7 @@ rm -rf %{buildroot}
 %if %{with slurmrestd}
 %files slurmrestd
 %{_sbindir}/slurmrestd
+%{_unitdir}/slurmrestd.service
 %endif
 #############################################################################
 

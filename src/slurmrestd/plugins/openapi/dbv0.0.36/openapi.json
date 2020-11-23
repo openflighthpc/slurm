@@ -1,0 +1,3132 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "description": "API to access and control Slurm DB.",
+    "license": {
+      "name": "Apache 2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0.html"
+    },
+    "termsOfService": "https://github.com/SchedMD/slurm/blob/master/DISCLAIMER",
+    "contact": {
+      "name": "SchedMD LLC",
+      "url": "https://www.schedmd.com/",
+      "email": "sales@schedmd.com"
+    },
+    "title": "Slurm Rest API",
+    "version": "dbv0.0.36"
+  },
+  "tags": [
+    {
+      "name": "slurm",
+      "description": "methods that query slurmdbd"
+    },
+    {
+      "name": "openapi",
+      "description": "methods that query for OpenAPI specifications"
+    }
+  ],
+  "servers": [
+    {
+      "url": "/slurmdb/v0.0.36/"
+    }
+  ],
+  "security": [
+    {
+      "user": [],
+      "token": []
+    }
+  ],
+  "paths": {
+    "/job/{job_id}": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_job",
+        "summary": "get job info",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "description": "Slurm Job ID",
+            "required": true,
+            "style": "label",
+            "explode": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_job_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_job_info"
+                }
+              }
+            },
+            "description": "Job description"
+          },
+          "default": {
+            "description": "unable to find job"
+          }
+        }
+      }
+    },
+    "/config": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_db_config",
+        "summary": "dump all config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_config_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_config_info"
+                }
+              }
+            },
+            "description": "slurmdbd configuration"
+          },
+          "default": {
+            "description": "unable to dump config"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_set_db_config",
+        "summary": "load all config",
+        "responses": {
+          "200": {
+            "description": "load config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_config_response"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_config_response"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unable to set config"
+          }
+        }
+      }
+    },
+    "/tres/": {
+      "post": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_update_tres",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_tres"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_tres"
+                }
+              }
+            },
+            "description": "list of TRES"
+          },
+          "default": {
+            "description": "Unable to update TRES"
+          }
+        },
+        "summary": "get slurmdb TRES"
+      },
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_tres",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_tres_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_tres_info"
+                }
+              }
+            },
+            "description": "list of TRES"
+          },
+          "default": {
+            "description": "Unable to retrieve TRES"
+          }
+        },
+        "summary": "get slurmdb TRES"
+      }
+    },
+    "/qos/{qos_name}": {
+      "delete": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_delete_qos",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_qos_delete"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_qos_delete"
+                }
+              }
+            },
+            "description": "delete qos"
+          },
+          "default": {
+            "description": "Unable to delete QOS"
+          }
+        },
+        "parameters": [
+          {
+            "name": "qos_name",
+            "in": "path",
+            "description": "Slurm QOS Name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_single_qos",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_qos_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_qos_info"
+                }
+              }
+            },
+            "description": "list of QOS"
+          },
+          "default": {
+            "description": "QOS not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "qos_name",
+            "in": "path",
+            "description": "Slurm QOS Name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/qos/": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_qos",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_qos_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_qos_info"
+                }
+              }
+            },
+            "description": "list of qos"
+          },
+          "default": {
+            "description": "QOS not found"
+          }
+        },
+        "summary": "get slurmdb QOS list"
+      }
+    },
+    "/associations/": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_associations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_associations_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_associations_info"
+                }
+              }
+            },
+            "description": "list of associations"
+          },
+          "default": {
+            "description": "Association not found"
+          }
+        },
+        "summary": "get slurmdb associations"
+      }
+    },
+    "/association/": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_association",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cluster",
+            "description": "cluster name",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account",
+            "description": "account name",
+            "required": true,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "description": "User name",
+            "required": true,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "partition",
+            "description": "Partition Name",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_associations_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_associations_info"
+                }
+              }
+            },
+            "description": "list of associations"
+          },
+          "default": {
+            "description": "Association not found"
+          }
+        },
+        "summary": "get slurmdb associations"
+      },
+      "delete": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_delete_association",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cluster",
+            "description": "cluster name",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account",
+            "description": "account name",
+            "required": true,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "description": "User name",
+            "required": true,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "partition",
+            "description": "Partition Name",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_association_delete"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_association_delete"
+                }
+              }
+            },
+            "description": "delete associations"
+          },
+          "default": {
+            "description": "Association not found or unable to delete association"
+          }
+        },
+        "summary": "delete slurmdb associations"
+      }
+    },
+    "/user/{user_name}": {
+      "delete": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_delete_user",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_user_delete"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_user_delete"
+                }
+              }
+            },
+            "description": "delete user"
+          },
+          "default": {
+            "description": "user not found or unable to delete user"
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_name",
+            "in": "path",
+            "description": "Slurm User Name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_user",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_user_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_user_info"
+                }
+              }
+            },
+            "description": "list of users"
+          },
+          "default": {
+            "description": "user not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "user_name",
+            "in": "path",
+            "description": "Slurm User Name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/users/": {
+      "post": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_update_users",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_user_update"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_user_update"
+                }
+              }
+            },
+            "description": "update users"
+          },
+          "default": {
+            "description": "user not found or not able to update user"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_users",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_user_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_user_info"
+                }
+              }
+            },
+            "description": "list of users"
+          },
+          "default": {
+            "description": "user not found"
+          }
+        }
+      }
+    },
+    "/cluster/{cluster_name}": {
+      "delete": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_delete_cluster",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_cluster_delete"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_cluster_delete"
+                }
+              }
+            },
+            "description": "delete cluster"
+          },
+          "default": {
+            "description": "cluster not found or unable to delete cluster"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cluster_name",
+            "in": "path",
+            "description": "Slurm cluster name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_cluster",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_cluster_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_cluster_info"
+                }
+              }
+            },
+            "description": "list of cluster"
+          },
+          "default": {
+            "description": "cluster not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cluster_name",
+            "in": "path",
+            "description": "Slurm cluster name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/clusters/": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_clusters",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_cluster_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_cluster_info"
+                }
+              }
+            },
+            "description": "list of clusters"
+          },
+          "default": {
+            "description": "cluster not found"
+          }
+        },
+        "summary": "get slurmdb clusters"
+      },
+      "post": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_add_clusters",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_cluster_add"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_cluster_add"
+                }
+              }
+            },
+            "description": "list of clusters"
+          },
+          "default": {
+            "description": "unable to add cluster"
+          }
+        },
+        "summary": "add slurmdb clusters"
+      }
+    },
+    "/wckey/{wckey}": {
+      "delete": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_delete_wckey",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_wckey_delete"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_wckey_delete"
+                }
+              }
+            },
+            "description": "delete wckey"
+          },
+          "default": {
+            "description": "wckey not found or unable to delete wckey"
+          }
+        },
+        "parameters": [
+          {
+            "name": "wckey",
+            "in": "path",
+            "description": "Slurm wckey name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_wckey",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_wckey_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_wckey_info"
+                }
+              }
+            },
+            "description": "list of wckey"
+          },
+          "default": {
+            "description": "wckey not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "wckey",
+            "in": "path",
+            "description": "Slurm wckey name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/wckeys/": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_wckeys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_wckey_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_wckey_info"
+                }
+              }
+            },
+            "description": "list of wckeys"
+          },
+          "default": {
+            "description": "wckey not found"
+          }
+        },
+        "summary": "get slurmdb wckeys"
+      },
+      "post": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_add_wckeys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_wckey_add"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_wckey_add"
+                }
+              }
+            },
+            "description": "list of wckeys"
+          },
+          "default": {
+            "description": "unable to add wckey"
+          }
+        },
+        "summary": "add slurmdb wckeys"
+      }
+    },
+    "/account/{account_name}": {
+      "delete": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_delete_account",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_account_delete"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_response_account_delete"
+                }
+              }
+            },
+            "description": "delete account"
+          },
+          "default": {
+            "description": "unable to delete account"
+          }
+        },
+        "parameters": [
+          {
+            "name": "account_name",
+            "in": "path",
+            "description": "Slurm Account Name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_account",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_account_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_account_info"
+                }
+              }
+            },
+            "description": "list of account"
+          },
+          "default": {
+            "description": "account not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "account_name",
+            "in": "path",
+            "description": "Slurm Account Name",
+            "required": true,
+            "style": "simple",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/accounts/": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_accounts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_account_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_account_info"
+                }
+              }
+            },
+            "description": "list of accounts"
+          },
+          "default": {
+            "description": "account not found"
+          }
+        },
+        "summary": "get slurmdb accounts"
+      },
+      "post": {
+        "tags": [
+          "slurmdbd"
+        ],
+        "operationId": "slurmdbd_update_account",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_account_response"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_account_response"
+                }
+              }
+            },
+            "description": "add/update list of accounts"
+          },
+          "default": {
+            "description": "unable to add or update accounts"
+          }
+        },
+        "summary": "update slurmdb accounts"
+      }
+    },
+    "/jobs/": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_get_jobs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "submit_time",
+            "description": "filter by submission time\n Accepted formats:\n HH:MM[:SS] [AM|PM]\r\nMMDD[YY] or MM/DD[/YY] or MM.DD[.YY]\r\nMM/DD[/YY]-HH:MM[:SS]\r\nYYYY-MM-DD[THH:MM[:SS]]",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "filter by start time\n Accepted formats:\n HH:MM[:SS] [AM|PM]\r\nMMDD[YY] or MM/DD[/YY] or MM.DD[.YY]\r\nMM/DD[/YY]-HH:MM[:SS]\r\nYYYY-MM-DD[THH:MM[:SS]]",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "filter by end time\n Accepted formats:\n HH:MM[:SS] [AM|PM]\r\nMMDD[YY] or MM/DD[/YY] or MM.DD[.YY]\r\nMM/DD[/YY]-HH:MM[:SS]\r\nYYYY-MM-DD[THH:MM[:SS]]",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account",
+            "description": "Comma delimited list of accounts to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "association",
+            "description": "Comma delimited list of associations to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cluster",
+            "description": "Comma delimited list of cluster to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "constraints",
+            "description": "Comma delimited list of constraints to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cpus_max",
+            "description": "number of CPUs high range",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cpus_min",
+            "description": "number of CPUs low range",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip_steps",
+            "description": "report job step information",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "disable_wait_for_result",
+            "description": "disable waiting for result from slurmdbd",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exit_code",
+            "description": "exit code of job",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "description": "Comma delimited list of formats to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group",
+            "description": "Comma delimited list of groups to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_name",
+            "description": "Comma delimited list of job names to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "nodes_max",
+            "description": "number of nodes high range",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "nodes_min",
+            "description": "number of nodes low range",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "partition",
+            "description": "Comma delimited list of partitions to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "qos",
+            "description": "Comma delimited list of QOS to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "description": "Comma delimited list of job reasons to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reservation",
+            "description": "Comma delimited list of reservations to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "description": "Comma delimited list of states to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "step",
+            "description": "Comma delimited list of job steps to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "node",
+            "description": "Comma delimited list of used nodes to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "users",
+            "description": "Comma delimited list of users to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "wckey",
+            "description": "Comma delimited list of wckeys to match",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_job_info"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_job_info"
+                }
+              }
+            },
+            "description": "list of jobs"
+          },
+          "default": {
+            "description": "unable to query jobs"
+          }
+        },
+        "summary": "get slurmdb jobs"
+      }
+    },
+    "/diag/": {
+      "get": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_diag",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_diag"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.36_diag"
+                }
+              }
+            },
+            "description": "dictionary of statistics"
+          },
+          "default": {
+            "description": "unable to query diagnostics"
+          }
+        },
+        "summary": "get slurmdb diagnostics"
+      }
+    },
+    "/openapi": {
+      "get": {
+        "tags": [
+          "openapi"
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAPI Specification"
+          }
+        },
+        "summary": "Retrieve OpenAPI Specification"
+      },
+      "servers": [
+        {
+          "url": "/"
+        }
+      ]
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "openapi"
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAPI Specification"
+          }
+        },
+        "summary": "Retrieve OpenAPI Specification"
+      },
+      "servers": [
+        {
+          "url": "/"
+        }
+      ]
+    },
+    "/openapi.yaml": {
+      "get": {
+        "tags": [
+          "openapi"
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAPI Specification"
+          }
+        },
+        "summary": "Retrieve OpenAPI Specification"
+      },
+      "servers": [
+        {
+          "url": "/"
+        }
+      ]
+    },
+    "/openapi/v3": {
+      "get": {
+        "tags": [
+          "openapi"
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAPI Specification"
+          }
+        },
+        "summary": "Retrieve OpenAPI Specification"
+      },
+      "servers": [
+        {
+          "url": "/"
+        }
+      ]
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "user": {
+        "type": "apiKey",
+        "description": "User name",
+        "name": "X-SLURM-USER-NAME",
+        "in": "header"
+      },
+      "token": {
+        "type": "apiKey",
+        "description": "User access token",
+        "name": "X-SLURM-USER-TOKEN",
+        "in": "header"
+      }
+    },
+    "schemas": {
+      "dbv0.0.36_diag": {
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          },
+          "time_start": {
+            "type": "integer",
+            "description": "Unix timestamp of start time"
+          },
+          "rollups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "rollup statistics",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "Type of rollup"
+                },
+                "last_run": {
+                  "type": "integer",
+                  "description": "timestamp of last rollup"
+                },
+                "last_cycle": {
+                  "type": "integer",
+                  "description": "timestamp of last cycle"
+                },
+                "max_cycle": {
+                  "type": "integer",
+                  "description": "max time of all cycles"
+                },
+                "total_time": {
+                  "type": "integer",
+                  "description": "total time (s) spend doing rollup"
+                },
+                "mean_cycles": {
+                  "type": "integer",
+                  "description": "average time (s) of cycle"
+                }
+              }
+            }
+          },
+          "RPCs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "statistics by RPC type",
+              "properties": {
+                "rpc": {
+                  "type": "string",
+                  "description": "RPC type"
+                },
+                "count": {
+                  "type": "integer",
+                  "description": "number of RPCs"
+                },
+                "time": {
+                  "type": "object",
+                  "description": "time values",
+                  "properties": {
+                    "average": {
+                      "type": "integer",
+                      "description": "Average time spent processing this RPC type"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "description": "Total time spent processing this RPC type"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "statistics by user RPCs",
+              "properties": {
+                "user": {
+                  "type": "string",
+                  "description": "user name"
+                },
+                "count": {
+                  "type": "integer",
+                  "description": "number of RPCs"
+                },
+                "time": {
+                  "type": "object",
+                  "description": "time values",
+                  "properties": {
+                    "average": {
+                      "type": "integer",
+                      "description": "Average time spent processing each user RPC"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "description": "Total time spent processing each user RPC"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "dbv0.0.36_account": {
+        "type": "object",
+        "description": "account description",
+        "properties": {
+          "associations": {
+            "type": "array",
+            "description": "list of assigned associations",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_association_short_info"
+            }
+          },
+          "coordinators": {
+            "type": "array",
+            "description": "list of assigned coordinators",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_coordinator_info"
+            }
+          },
+          "description": {
+            "type": "string",
+            "description": "description of account"
+          },
+          "name": {
+            "type": "string",
+            "description": "name of account"
+          },
+          "organization": {
+            "type": "string",
+            "description": "assigned organization of account"
+          },
+          "flags": {
+            "type": "array",
+            "description": "List of properties of account",
+            "items": {
+              "type": "string",
+              "description": "string of property name"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_account_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          },
+          "accounts": {
+            "type": "array",
+            "description": "list of accounts",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_account"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_coordinator_info": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "name of user"
+          },
+          "direct": {
+            "type": "integer",
+            "description": "if user is coordinator of this account directly or coordinator status was inheirted from a higher account in the tree"
+          }
+        }
+      },
+      "dbv0.0.36_association_short_info": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "account name"
+          },
+          "cluster": {
+            "type": "string",
+            "description": "cluster name"
+          },
+          "partition": {
+            "type": "string",
+            "description": "partition name (optional)"
+          },
+          "user": {
+            "type": "string",
+            "description": "user name"
+          }
+        }
+      },
+      "dbv0.0.36_response_account_delete": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_response_wckey_add": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_wckey_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          },
+          "wckeys": {
+            "type": "array",
+            "description": "list of wckeys",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_wckey"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_wckey": {
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "description": "list of assigned accounts",
+            "items": {
+              "type": "string",
+              "description": "account name"
+            }
+          },
+          "cluster": {
+            "type": "string",
+            "description": "cluster name"
+          },
+          "id": {
+            "type": "integer",
+            "description": "wckey database unique id"
+          },
+          "name": {
+            "type": "string",
+            "description": "wckey name"
+          },
+          "user": {
+            "type": "string",
+            "description": "wckey user"
+          },
+          "flags": {
+            "type": "array",
+            "description": "List of properties of wckey",
+            "items": {
+              "type": "string",
+              "description": "string of property name"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_response_wckey_delete": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_response_cluster_add": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_cluster_info": {
+        "type": "object",
+        "properties": {
+          "controller": {
+            "type": "object",
+            "description": "information about controller",
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "hostname"
+              },
+              "port": {
+                "type": "integer",
+                "description": "port number"
+              }
+            }
+          },
+          "flags": {
+            "type": "array",
+            "description": "List of properties of cluster",
+            "items": {
+              "type": "string",
+              "description": "string of property name"
+            }
+          },
+          "name": {
+            "type": "string",
+            "description": "cluster name"
+          },
+          "nodes": {
+            "type": "string",
+            "description": "assigned nodes"
+          },
+          "select_plugin": {
+            "type": "string",
+            "description": "configured select plugin"
+          },
+          "associations": {
+            "type": "object",
+            "description": "information about associations",
+            "properties": {
+              "root": {
+                "$ref": "#/components/schemas/dbv0.0.36_association_short_info"
+              }
+            }
+          },
+          "rpc_version": {
+            "type": "integer",
+            "description": "number rpc version"
+          },
+          "tres": {
+            "type": "array",
+            "description": "list of TRES in cluster",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_response_tres"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_response_cluster_delete": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_response_user_update": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_user": {
+        "type": "object",
+        "description": "user description",
+        "properties": {
+          "administrator_level": {
+            "type": "string",
+            "description": "description of administrator level"
+          },
+          "associations": {
+            "type": "object",
+            "description": "assigned associations",
+            "properties": {
+              "root": {
+                "$ref": "#/components/schemas/dbv0.0.36_association_short_info"
+              }
+            }
+          },
+          "coordinators": {
+            "type": "array",
+            "description": "list of assigned coordinators",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_coordinator_info"
+            }
+          },
+          "default": {
+            "type": "object",
+            "description": "default settings",
+            "properties": {
+              "account": {
+                "type": "string",
+                "description": "default account name"
+              },
+              "wckey": {
+                "type": "string",
+                "description": "default wckey"
+              }
+            }
+          },
+          "name": {
+            "type": "string",
+            "description": "user name"
+          }
+        }
+      },
+      "dbv0.0.36_user_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          },
+          "users": {
+            "type": "array",
+            "description": "array of users",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_user"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_response_user_delete": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_response_association_delete": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_association": {
+        "type": "object",
+        "description": "association description",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "assigned account"
+          },
+          "cluster": {
+            "type": "string",
+            "description": "assigned cluster"
+          },
+          "default": {
+            "type": "object",
+            "description": "default settings",
+            "properties": {
+              "qos": {
+                "type": "string",
+                "description": "default QOS"
+              }
+            }
+          },
+          "flags": {
+            "type": "array",
+            "description": "List of properties of association",
+            "items": {
+              "type": "string",
+              "description": "string of property name"
+            }
+          },
+          "max": {
+            "type": "object",
+            "description": "max settings",
+            "properties": {
+              "jobs": {
+                "type": "object",
+                "description": "max jobs settings",
+                "properties": {
+                  "per": {
+                    "type": "object",
+                    "description": "max jobs per settings",
+                    "properties": {
+                      "wall_clock": {
+                        "type": "integer",
+                        "description": "max wallclock per job"
+                      }
+                    }
+                  }
+                }
+              },
+              "per": {
+                "type": "object",
+                "description": "max per settings",
+                "properties": {
+                  "account": {
+                    "type": "object",
+                    "description": "max per accounting settings",
+                    "properties": {
+                      "wall_clock": {
+                        "type": "integer",
+                        "description": "max wallclock per account"
+                      }
+                    }
+                  }
+                }
+              },
+              "tres": {
+                "type": "object",
+                "description": "max TRES settings",
+                "properties": {
+                  "per": {
+                    "type": "object",
+                    "description": "max TRES per settings",
+                    "properties": {
+                      "job": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      },
+                      "node": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      }
+                    }
+                  },
+                  "total": {
+                    "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                  },
+                  "minutes": {
+                    "type": "object",
+                    "description": "max TRES minutes settings",
+                    "properties": {
+                      "per": {
+                        "type": "object",
+                        "description": "max TRES minutes per settings",
+                        "properties": {
+                          "job": {
+                            "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                          }
+                        }
+                      },
+                      "total": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "min": {
+            "type": "object",
+            "description": "min settings",
+            "properties": {
+              "priority_threshold": {
+                "type": "integer",
+                "description": "min priority threshold"
+              }
+            }
+          },
+          "parent_account": {
+            "type": "string",
+            "description": "parent account name"
+          },
+          "partition": {
+            "type": "string",
+            "description": "assigned partition"
+          },
+          "priority": {
+            "type": "integer",
+            "description": "assigned priority"
+          },
+          "qos": {
+            "type": "array",
+            "description": "assigned QOS",
+            "items": {
+              "type": "string",
+              "description": "assigned single QOS name"
+            }
+          },
+          "shares_raw": {
+            "type": "integer",
+            "description": "raw fairshare shares"
+          },
+          "usage": {
+            "type": "object",
+            "description": "association usage",
+            "properties": {
+              "accrue_job_count": {
+                "type": "integer",
+                "description": "jobs accuring priority"
+              },
+              "group_used_wallclock": {
+                "type": "number",
+                "description": "group used wallclock time (s)"
+              },
+              "fairshare_factor": {
+                "type": "number",
+                "description": "fairshare factor"
+              },
+              "fairshare_shares": {
+                "type": "integer",
+                "description": "fairshare shares"
+              },
+              "normalized_priority": {
+                "type": "integer",
+                "description": "currently active jobs"
+              },
+              "normalized_shares": {
+                "type": "number",
+                "description": "normalized shares"
+              },
+              "effective_normalized_usage": {
+                "type": "number",
+                "description": "effective normalized usage"
+              },
+              "raw_usage": {
+                "type": "integer",
+                "description": "raw usage"
+              },
+              "job_count": {
+                "type": "integer",
+                "description": "total jobs submitted"
+              },
+              "fairshare_level": {
+                "type": "number",
+                "description": "fairshare level"
+              }
+            }
+          },
+          "user": {
+            "type": "string",
+            "description": "assigned user"
+          }
+        }
+      },
+      "dbv0.0.36_associations_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          },
+          "associations": {
+            "type": "array",
+            "description": "array of associations",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_association"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_qos": {
+        "type": "object",
+        "description": "qos description",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "QOS description"
+          },
+          "flags": {
+            "type": "array",
+            "description": "List of properties of qos",
+            "items": {
+              "type": "string",
+              "description": "string of property name"
+            }
+          },
+          "id": {
+            "type": "string",
+            "description": "database id"
+          },
+          "limits": {
+            "type": "object",
+            "description": "assigned limits",
+            "properties": {
+              "max": {
+                "type": "object",
+                "description": "limits on max settings",
+                "properties": {
+                  "wall_clock": {
+                    "type": "object",
+                    "description": "limit on wallclock settings",
+                    "properties": {
+                      "per": {
+                        "type": "object",
+                        "description": "limit on wallclock per settings",
+                        "properties": {
+                          "qos": {
+                            "type": "integer",
+                            "description": "max wallclock per QOS"
+                          },
+                          "job": {
+                            "type": "integer",
+                            "description": "max wallclock per job"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "jobs": {
+                    "type": "object",
+                    "description": "limits on jobs settings",
+                    "properties": {
+                      "per": {
+                        "type": "object",
+                        "description": "limits on jobs per settings",
+                        "properties": {
+                          "account": {
+                            "type": "integer",
+                            "description": "max jobs per account"
+                          },
+                          "user": {
+                            "type": "integer",
+                            "description": "max jobs per user"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "accruing": {
+                    "type": "object",
+                    "description": "limits on accruing priority",
+                    "properties": {
+                      "per": {
+                        "type": "object",
+                        "description": "max accuring priority per setting",
+                        "properties": {
+                          "account": {
+                            "type": "integer",
+                            "description": "max accuring priority per account"
+                          },
+                          "user": {
+                            "type": "integer",
+                            "description": "max accuring priority per user"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "tres": {
+                    "type": "object",
+                    "description": "limits on TRES",
+                    "properties": {
+                      "minutes": {
+                        "type": "object",
+                        "description": "max TRES minutes settings",
+                        "properties": {
+                          "per": {
+                            "type": "object",
+                            "description": "max TRES minutes per settings",
+                            "properties": {
+                              "job": {
+                                "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                              },
+                              "account": {
+                                "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                              },
+                              "user": {
+                                "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "per": {
+                        "type": "object",
+                        "description": "max TRES per settings",
+                        "properties": {
+                          "account": {
+                            "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                          },
+                          "job": {
+                            "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                          },
+                          "node": {
+                            "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                          },
+                          "user": {
+                            "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "min": {
+                "type": "object",
+                "description": "min limit settings",
+                "properties": {
+                  "priority_threshold": {
+                    "type": "integer",
+                    "description": "min priority threshold"
+                  },
+                  "tres": {
+                    "type": "object",
+                    "description": "min tres settings",
+                    "properties": {
+                      "per": {
+                        "type": "object",
+                        "description": "min tres per settings",
+                        "properties": {
+                          "job": {
+                            "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "preempt": {
+            "type": "object",
+            "description": "pre-emption settings",
+            "properties": {
+              "list": {
+                "type": "array",
+                "description": "list of pre-emptable QOS",
+                "items": {
+                  "type": "string",
+                  "description": "pre-emptable QOS"
+                }
+              },
+              "mode": {
+                "type": "array",
+                "description": "list of pre-emption modes",
+                "items": {
+                  "type": "string",
+                  "description": "pre-emption mode"
+                }
+              },
+              "exempt_time": {
+                "type": "integer",
+                "description": "grace period (s) before jobs can pre-empted"
+              }
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "description": "QOS priority"
+          },
+          "usage_factor": {
+            "type": "number",
+            "description": "usage factor"
+          },
+          "usage_threshold": {
+            "type": "number",
+            "description": "usage threshold"
+          }
+        }
+      },
+      "dbv0.0.36_qos_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          },
+          "qos": {
+            "type": "array",
+            "description": "array of qos",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_qos"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_response_qos_delete": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_response_tres": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_tres_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          },
+          "tres": {
+            "type": "array",
+            "description": "array of tres",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_tres_list": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "TRES type"
+          },
+          "name": {
+            "type": "string",
+            "description": "TRES name (optional)"
+          },
+          "id": {
+            "type": "integer",
+            "description": "database id"
+          },
+          "count": {
+            "type": "integer",
+            "description": "count of TRES"
+          }
+        }
+      },
+      "dbv0.0.36_job_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          },
+          "jobs": {
+            "type": "array",
+            "description": "array of jobs",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_job"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_job": {
+        "type": "object",
+        "description": "single job description",
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "account charged by job"
+          },
+          "comment": {
+            "type": "object",
+            "description": "job comments by type",
+            "properties": {
+              "administrator": {
+                "type": "string",
+                "description": "administrator set comment"
+              },
+              "job": {
+                "type": "string",
+                "description": "job comment"
+              },
+              "system": {
+                "type": "string",
+                "description": "system set comment"
+              }
+            }
+          },
+          "allocation_nodes": {
+            "type": "string",
+            "description": "nodes allocated to job"
+          },
+          "array": {
+            "type": "object",
+            "description": "array properties (optional)",
+            "properties": {
+              "job_id": {
+                "type": "integer",
+                "description": "job id of array"
+              },
+              "limits": {
+                "type": "object",
+                "description": "limits on array settings",
+                "properties": {
+                  "max": {
+                    "type": "object",
+                    "description": "limits on array settings",
+                    "properties": {
+                      "running": {
+                        "type": "object",
+                        "description": "limits on array settings",
+                        "properties": {
+                          "tasks": {
+                            "type": "integer",
+                            "description": "max running tasks in array at any one time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "task": {
+                "type": "string",
+                "description": "array task"
+              },
+              "task_id": {
+                "type": "integer",
+                "description": "array task id"
+              }
+            }
+          },
+          "time": {
+            "type": "object",
+            "description": "time properties",
+            "properties": {
+              "elapsed": {
+                "type": "integer",
+                "description": "total time elapsed"
+              },
+              "eligible": {
+                "type": "integer",
+                "description": "total time eligible to run"
+              },
+              "end": {
+                "type": "integer",
+                "description": "timestamp of when job ended"
+              },
+              "start": {
+                "type": "integer",
+                "description": "timestamp of when job started"
+              },
+              "submission": {
+                "type": "integer",
+                "description": "timestamp of when job submitted"
+              },
+              "suspended": {
+                "type": "integer",
+                "description": "timestamp of when job last suspended"
+              },
+              "system": {
+                "type": "object",
+                "description": "system time values",
+                "properties": {
+                  "seconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the system on behalf of the process (in kernel mode), in seconds"
+                  },
+                  "microseconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the system on behalf of the process (in kernel mode), in microseconds"
+                  }
+                }
+              },
+              "total": {
+                "type": "object",
+                "description": "system time values",
+                "properties": {
+                  "seconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the job, in seconds"
+                  },
+                  "microseconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the job, in microseconds"
+                  }
+                }
+              },
+              "user": {
+                "type": "object",
+                "description": "user land time values",
+                "properties": {
+                  "seconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the job in user land, in seconds"
+                  },
+                  "microseconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the job in user land, in microseconds"
+                  }
+                }
+              },
+              "limit": {
+                "type": "integer",
+                "description": "Job wall clock time limit"
+              }
+            }
+          },
+          "association": {
+            "$ref": "#/components/schemas/dbv0.0.36_association_short_info"
+          },
+          "cluster": {
+            "type": "string",
+            "description": "assigned cluster"
+          },
+          "constraints": {
+            "type": "string",
+            "description": "constraints on job"
+          },
+          "derived_exit_code": {
+            "$ref": "#/components/schemas/dbv0.0.36_job_exit_code"
+          },
+          "exit_code": {
+            "$ref": "#/components/schemas/dbv0.0.36_job_exit_code"
+          },
+          "flags": {
+            "type": "array",
+            "description": "List of properties of job",
+            "items": {
+              "type": "string",
+              "description": "string of property name"
+            }
+          },
+          "group": {
+            "type": "string",
+            "description": "user's group to run job"
+          },
+          "het": {
+            "type": "object",
+            "description": "Heterogeneous Job details (optional)",
+            "properties": {
+              "job_id": {
+                "type": "object",
+                "description": "parent HetJob id"
+              },
+              "job_offset": {
+                "type": "object",
+                "description": "offset of this job to parent"
+              }
+            }
+          },
+          "job_id": {
+            "type": "integer",
+            "description": "job id"
+          },
+          "name": {
+            "type": "string",
+            "description": "assigned job name"
+          },
+          "mcs": {
+            "type": "object",
+            "description": "Multi-Category Security",
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "assigned MCS label"
+              }
+            }
+          },
+          "nodes": {
+            "type": "string",
+            "description": "List of nodes allocated for job"
+          },
+          "partition": {
+            "type": "string",
+            "description": "assigned job's partition"
+          },
+          "priority": {
+            "type": "integer",
+            "description": "priority"
+          },
+          "qos": {
+            "type": "string",
+            "description": "assigned qos name"
+          },
+          "required": {
+            "type": "object",
+            "description": "job run requirements",
+            "properties": {
+              "CPUs": {
+                "type": "integer",
+                "description": "required number of CPUs"
+              },
+              "memory": {
+                "type": "integer",
+                "description": "required amount of memory (MiB)"
+              }
+            }
+          },
+          "kill_request_user": {
+            "type": "string",
+            "description": "user who requested job killed"
+          },
+          "reservation": {
+            "type": "object",
+            "description": "reservation usage details",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "description": "database id of reservation"
+              },
+              "name": {
+                "type": "integer",
+                "description": "name of reservation"
+              }
+            }
+          },
+          "state": {
+            "type": "object",
+            "description": "state properties of job",
+            "properties": {
+              "current": {
+                "type": "string",
+                "description": "current state of job"
+              },
+              "previous": {
+                "type": "string",
+                "description": "previous state of job"
+              }
+            }
+          },
+          "steps": {
+            "type": "array",
+            "description": "job step description",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_job_step"
+            }
+          },
+          "tres": {
+            "type": "object",
+            "description": "TRES settings",
+            "properties": {
+              "allocated": {
+                "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+              },
+              "requested": {
+                "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+              }
+            }
+          },
+          "user": {
+            "type": "string",
+            "description": "job user"
+          },
+          "wckey": {
+            "type": "object",
+            "description": "job assigned wckey details",
+            "properties": {
+              "wckey": {
+                "type": "string",
+                "description": "job assigned wckey"
+              },
+              "flags": {
+                "type": "array",
+                "description": "wckey flags",
+                "items": {
+                  "type": "string",
+                  "description": "flag string"
+                }
+              }
+            }
+          },
+          "working_directory": {
+            "type": "string",
+            "description": "directory where job was initially started"
+          }
+        }
+      },
+      "dbv0.0.36_job_exit_code": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "job exit status"
+          },
+          "return_code": {
+            "type": "integer",
+            "description": "return code from parent process"
+          },
+          "signal": {
+            "type": "object",
+            "description": "signal details (if signaled)",
+            "properties": {
+              "signal_id": {
+                "type": "integer",
+                "description": "signal number process received"
+              },
+              "name": {
+                "type": "string",
+                "description": "name of signal received"
+              }
+            }
+          }
+        }
+      },
+      "dbv0.0.36_job_step": {
+        "type": "object",
+        "properties": {
+          "time": {
+            "type": "object",
+            "description": "time properties",
+            "properties": {
+              "elapsed": {
+                "type": "integer",
+                "description": "total time elapsed"
+              },
+              "end": {
+                "type": "integer",
+                "description": "timestamp of when job ended"
+              },
+              "start": {
+                "type": "integer",
+                "description": "timestamp of when job started"
+              },
+              "suspended": {
+                "type": "integer",
+                "description": "timestamp of when job last suspended"
+              },
+              "system": {
+                "type": "object",
+                "description": "system time values",
+                "properties": {
+                  "seconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the system on behalf of the process (in kernel mode), in seconds"
+                  },
+                  "microseconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the system on behalf of the process (in kernel mode), in microseconds"
+                  }
+                }
+              },
+              "total": {
+                "type": "object",
+                "description": "system time values",
+                "properties": {
+                  "seconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the job, in seconds"
+                  },
+                  "microseconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the job, in microseconds"
+                  }
+                }
+              },
+              "user": {
+                "type": "object",
+                "description": "user land time values",
+                "properties": {
+                  "seconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the job in user land, in seconds"
+                  },
+                  "microseconds": {
+                    "type": "integer",
+                    "description": "Total number of CPU-seconds used by the job in user land, in microseconds"
+                  }
+                }
+              }
+            }
+          },
+          "exit_code": {
+            "$ref": "#/components/schemas/dbv0.0.36_job_exit_code"
+          },
+          "nodes": {
+            "type": "object",
+            "description": "node details",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "description": "total number of nodes in step"
+              },
+              "range": {
+                "type": "string",
+                "description": "nodes in step"
+              }
+            }
+          },
+          "tasks": {
+            "type": "object",
+            "description": "task properties",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "description": "number of tasks in step"
+              }
+            }
+          },
+          "pid": {
+            "type": "string",
+            "description": "first process PID"
+          },
+          "CPU": {
+            "type": "object",
+            "description": "CPU properties",
+            "properties": {
+              "requested_frequency": {
+                "type": "object",
+                "description": "CPU frequency requested",
+                "properties": {
+                  "min": {
+                    "type": "integer",
+                    "description": "Min CPU frequency"
+                  },
+                  "max": {
+                    "type": "integer",
+                    "description": "Max CPU frequency"
+                  }
+                }
+              },
+              "governor": {
+                "type": "array",
+                "description": "CPU governor",
+                "items": {
+                  "type": "string",
+                  "description": "CPU governor type"
+                }
+              }
+            }
+          },
+          "kill_request_user": {
+            "type": "string",
+            "description": "user who requested job killed"
+          },
+          "state": {
+            "type": "string",
+            "description": "state of job step"
+          },
+          "statistics": {
+            "type": "object",
+            "description": "statistics of job step",
+            "properties": {
+              "CPU": {
+                "type": "object",
+                "description": "statistics of CPU",
+                "properties": {
+                  "actual_frequency": {
+                    "type": "integer",
+                    "description": "Actual frequency of CPU during step"
+                  }
+                }
+              },
+              "energy": {
+                "type": "object",
+                "description": "statistics of energy",
+                "properties": {
+                  "consumed": {
+                    "type": "integer",
+                    "description": "Energy consumed during step"
+                  }
+                }
+              }
+            }
+          },
+          "step": {
+            "type": "object",
+            "description": "step details",
+            "properties": {
+              "job_id": {
+                "type": "integer",
+                "description": "parent job id"
+              },
+              "het": {
+                "type": "object",
+                "description": "Heterogeneous job details",
+                "properties": {
+                  "component": {
+                    "type": "integer",
+                    "description": "parent HetJob component id"
+                  }
+                }
+              },
+              "id": {
+                "type": "string",
+                "description": "step id"
+              },
+              "name": {
+                "type": "string",
+                "description": "step name"
+              },
+              "task": {
+                "type": "object",
+                "description": "task properties",
+                "properties": {
+                  "distribution": {
+                    "type": "string",
+                    "description": "task distribution type"
+                  }
+                }
+              },
+              "tres": {
+                "type": "object",
+                "description": "tres usage",
+                "properties": {
+                  "requested": {
+                    "type": "object",
+                    "description": "Tres requested for job",
+                    "properties": {
+                      "average": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      },
+                      "max": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      },
+                      "min": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      },
+                      "total": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      }
+                    }
+                  },
+                  "consumed": {
+                    "type": "object",
+                    "description": "Tres requested for job",
+                    "properties": {
+                      "average": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      },
+                      "max": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      },
+                      "min": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      },
+                      "total": {
+                        "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                      }
+                    }
+                  },
+                  "allocated": {
+                    "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "dbv0.0.36_config_info": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          },
+          "tres": {
+            "type": "array",
+            "description": "array of tres",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_tres_list"
+            }
+          },
+          "accounts": {
+            "type": "array",
+            "description": "array of accounts",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_account"
+            }
+          },
+          "associations": {
+            "type": "array",
+            "description": "array of associations",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_association"
+            }
+          },
+          "users": {
+            "type": "array",
+            "description": "array of users",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_user"
+            }
+          },
+          "qos": {
+            "type": "array",
+            "description": "array of qos",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_qos"
+            }
+          },
+          "wckeys": {
+            "type": "array",
+            "description": "array of wckeys",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_wckey"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_account_response": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_config_response": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.36_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.36_error": {
+        "properties": {
+          "errno": {
+            "description": "error number",
+            "type": "integer"
+          },
+          "error": {
+            "description": "error message",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+}

@@ -1,7 +1,6 @@
 /*****************************************************************************\
  *  as_mysql_qos.c - functions dealing with qos.
  *****************************************************************************
- *
  *  Copyright (C) 2004-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
@@ -680,8 +679,7 @@ extern int as_mysql_add_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 			   qos_table, cols, vals, extra);
 
 
-		if (debug_flags & DEBUG_FLAG_DB_QOS)
-			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+		DB_DEBUG(DB_QOS, mysql_conn->conn, "query\n%s", query);
 		object->id = (uint32_t)mysql_db_insert_ret_id(
 			mysql_conn, query);
 		xfree(query);
@@ -1003,9 +1001,8 @@ extern List as_mysql_modify_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	if (!list_count(ret_list)) {
 		errno = SLURM_NO_CHANGE_IN_DATA;
-		if (debug_flags & DEBUG_FLAG_DB_QOS)
-			DB_DEBUG(mysql_conn->conn,
-				 "didn't effect anything\n%s", query);
+		DB_DEBUG(DB_QOS, mysql_conn->conn,
+		         "didn't affect anything\n%s", query);
 		xfree(vals);
 		xfree(query);
 		return ret_list;
@@ -1152,28 +1149,12 @@ extern List as_mysql_remove_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	if (!list_count(ret_list)) {
 		errno = SLURM_NO_CHANGE_IN_DATA;
-		if (debug_flags & DEBUG_FLAG_DB_QOS)
-			DB_DEBUG(mysql_conn->conn, "didn't effect anything\n%s", query);
+		DB_DEBUG(DB_QOS, mysql_conn->conn,
+		         "didn't affect anything\n%s", query);
 		xfree(query);
 		return ret_list;
 	}
 	xfree(query);
-
-	/* remove this qos from all the users/accts that have it */
-	query = xstrdup_printf("update %s set mod_time=%ld %s where deleted=0;",
-			       assoc_table, now, extra);
-	xfree(extra);
-	if (debug_flags & DEBUG_FLAG_DB_QOS)
-		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
-	rc = mysql_db_query(mysql_conn, query);
-	xfree(query);
-	if (rc != SLURM_SUCCESS) {
-		reset_mysql_conn(mysql_conn);
-		xfree(assoc_char);
-		xfree(name_char);
-		FREE_NULL_LIST(ret_list);
-		return NULL;
-	}
 
 	user_name = uid_to_string((uid_t) uid);
 
@@ -1181,6 +1162,22 @@ extern List as_mysql_remove_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 	if (list_count(as_mysql_cluster_list)) {
 		itr = list_iterator_create(as_mysql_cluster_list);
 		while ((object = list_next(itr))) {
+			/*
+			 * remove this qos from all the associations
+			 * that have it
+			 */
+			query = xstrdup_printf("update \"%s_%s\" set mod_time=%ld %s where deleted=0;",
+					       object, assoc_table,
+					       now, extra);
+			DB_DEBUG(DB_QOS, mysql_conn->conn, "query\n%s", query);
+			rc = mysql_db_query(mysql_conn, query);
+			xfree(query);
+
+			if (rc != SLURM_SUCCESS) {
+				reset_mysql_conn(mysql_conn);
+				break;
+			}
+
 			if ((rc = remove_common(mysql_conn, DBD_REMOVE_QOS, now,
 						user_name, qos_table, name_char,
 						assoc_char, object, NULL, NULL))
@@ -1195,10 +1192,11 @@ extern List as_mysql_remove_qos(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	slurm_mutex_unlock(&as_mysql_cluster_list_lock);
 
+	xfree(extra);
 	xfree(assoc_char);
 	xfree(name_char);
 	xfree(user_name);
-	if (rc == SLURM_ERROR) {
+	if (rc != SLURM_SUCCESS) {
 		FREE_NULL_LIST(ret_list);
 		return NULL;
 	}
@@ -1369,8 +1367,7 @@ empty:
 	xfree(tmp);
 	xfree(extra);
 
-	if (debug_flags & DEBUG_FLAG_DB_QOS)
-		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+	DB_DEBUG(DB_QOS, mysql_conn->conn, "query\n%s", query);
 	if (!(result = mysql_db_query_ret(
 		      mysql_conn, query, 0))) {
 		xfree(query);

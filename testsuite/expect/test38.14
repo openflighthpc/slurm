@@ -30,8 +30,8 @@ set exit_code	0
 set file_out    test${test_id}.output
 set het_job_id	0
 
-if {[test_hetjob_step] == 0} {
-	skip "Heterogeneous steps not currently supported"
+if {[get_config_param "SchedulerType"] ne "sched/backfill"} {
+	skip "This test requires SchedulerType = sched/backfill"
 }
 
 set nb_nodes [get_node_cnt_in_part]

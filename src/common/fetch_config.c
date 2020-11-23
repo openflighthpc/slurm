@@ -102,7 +102,7 @@ static void _fetch_child(List controllers, uint32_t flags)
 
 	if (!config) {
 		error("%s: failed to fetch remote configs", __func__);
-		exit(1);
+		_exit(1);
 	}
 
 	pack_config_response_msg(config, buffer, SLURM_PROTOCOL_VERSION);
@@ -111,11 +111,11 @@ static void _fetch_child(List controllers, uint32_t flags)
 	safe_write(to_parent[1], &len, sizeof(int));
 	safe_write(to_parent[1], buffer->head, len);
 
-	exit(0);
+	_exit(0);
 
 rwfail:
 	error("%s: failed to write to parent: %m", __func__);
-	exit(1);
+	_exit(1);
 }
 
 extern config_response_msg_t *fetch_config(char *conf_server, uint32_t flags)
@@ -177,7 +177,7 @@ extern config_response_msg_t *fetch_config(char *conf_server, uint32_t flags)
 	}
 
 	_fetch_child(controllers, flags);
-	return NULL;
+	_exit(0);
 }
 
 extern config_response_msg_t *fetch_config_from_controller(uint32_t flags)
@@ -404,7 +404,7 @@ extern void load_config_response_msg(config_response_msg_t *msg, int flags)
 	_load_conf(dir, "plugstack.conf", &msg->plugstack_config);
 	_load_conf(dir, "topology.conf", &msg->topology_config);
 
-	msg->slurmd_spooldir = xstrdup(slurmctld_conf.slurmd_spooldir);
+	msg->slurmd_spooldir = xstrdup(slurm_conf.slurmd_spooldir);
 
 	xfree(dir);
 }

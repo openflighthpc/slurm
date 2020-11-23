@@ -33,7 +33,7 @@ set dep_id        0
 set exit_code     0
 
 set nb_nodes [get_node_cnt_in_part]
-if {[test_linear]} {
+if {[check_config_select "linear"]} {
 	if {$nb_nodes < 2} {
 		skip "This test is incompatible with select/linear and only one node"
 	}
@@ -137,10 +137,16 @@ if {[wait_for_job $dep_id RUNNING]} {
 	set exit_code 1
 }
 
-check_job_state $dep_id RUNNING
+if {![check_job_state $dep_id RUNNING]} {
+	log_error "Job was not on the desired state"
+	set exit_code 1
+}
 
 # Slow job should still be running
-check_job_state $slow_id RUNNING
+if {![check_job_state $slow_id RUNNING]} {
+	log_error "Job was not on the desired state"
+	set exit_code 1
+}
 
 # Cancel leftover jobs
 cancel_job $fast_id

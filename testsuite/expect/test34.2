@@ -47,17 +47,17 @@ set running_state   "RUNNING"
 
 set eligible_now_job_directive "EligibleTime=now"
 
-if {[test_preempttype_qos] == 0} {
+if {[get_config_param "PreemptType"] ne "preempt/qos"} {
 	skip "This test requires that PreemptType=preempt/qos"
 }
-if {[test_using_slurmdbd] == 0} {
+if {[get_config_param "AccountingStorageType"] ne "accounting_storage/slurmdbd"} {
 	skip "This test requires use of Slurmdbd"
 }
 if {$nodes < 2} {
 	skip "Not enough available nodes ($nodes < 2)"
 }
 
-set min_job_age [get_min_job_age]
+regexp "($number)" [get_config_param "MinJobAge"] {} min_job_age
 if {$min_job_age < 10} {
 	skip "MinJobAge configured too low for this test ($min_job_age < 10)"
 }
@@ -250,26 +250,18 @@ foreach preempt_mode $preempt_mode_list {
 		}
 
 		if { $preempt_mode == $preempt_mode_cancel } {
-			set jobs_ok 0
-			wait_for { $jobs_ok > 0 } {
+			set jobs_ok false
+			wait_for {$jobs_ok} {
 				set jobs_ok [check_job_state $qos_1_id $preempted_state $have_het_job]
 			}
-			if {$have_het_job} {
-				assert_or_fail {$jobs_ok == 2} "HetJob $qos_1_id was not on $preempted_state ($jobs_ok != 2)"
-			} else {
-				assert_or_fail {$jobs_ok == 1} "Job $qos_1_id was not on $preempted_state"
-			}
+			subtest {$jobs_ok} "Job $qos_1_id should be (fully) on $preempted_state state"
 		} else {
 			# requeue state
-			set jobs_ok 0
-			wait_for { $jobs_ok > 0 } {
+			set jobs_ok false
+			wait_for {$jobs_ok} {
 				set jobs_ok [check_job_state $qos_1_id $pending_state $have_het_job]
 			}
-			if {$have_het_job} {
-				assert_or_fail {$jobs_ok == 2} "HetJob $qos_1_id was not on $pending_state ($jobs_ok != 2)"
-			} else {
-				assert_or_fail {$jobs_ok == 1} "Job $qos_1_id was not on $pending_state"
-			}
+			subtest {$jobs_ok} "Job $qos_1_id should be (fully) on $pending_state state"
 
 			# make job eligible to run now to avoid delay
 			run_command "$scontrol update job $qos_2_id $eligible_now_job_directive"
@@ -284,15 +276,11 @@ foreach preempt_mode $preempt_mode_list {
 				fail "Job $qos_1_id failed to start"
 			}
 
-			set jobs_ok 0
-			wait_for { $jobs_ok > 0 } {
+			set jobs_ok false
+			wait_for {$jobs_ok} {
 				set jobs_ok [check_job_state $qos_1_id $running_state $have_het_job]
 			}
-			if {$have_het_job} {
-				assert_or_fail {$jobs_ok == 2} "HetJob $qos_1_id was not on $running_state ($jobs_ok != 2)"
-			} else {
-				assert_or_fail {$jobs_ok == 1} "Job $qos_1_id was not on $running_state"
-			}
+			subtest {$jobs_ok} "Job $qos_1_id should be (fully) on $running_state state"
 		}
 
 		wait_for_account_done $acct_1,$acct_2

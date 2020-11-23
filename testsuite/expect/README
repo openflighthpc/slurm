@@ -32,12 +32,12 @@ configure several testsuite variables, for example:
 
 slurm_dir:                    slurm installation directory (prefix) [/usr]
 build_dir:                    slurm build directory [../..]
-max_file_delay:               maximum file propogation delay (e.g. nfs) [90]
-testsuite_cleanup_on_failure: run cleanup and remove test_dir on failure [false]
+testsuite_cleanup_on_failure: run cleanup and remove test_dir on failure [true]
 testsuite_shared_dir:         cluster-wide shared directory [.]
 testsuite_log_level:          logging threshold [$LOG_LEVEL_DEBUG]
 testsuite_log_format:         specifies the tracing fields used in logging
 testsuite_colorize:           boolean that turns colorization on or off
+testsuite_subtest_fatal:      first failing subtest aborts the test [false]
 
 The testsuite needs at least one cluster-wide shared file system.
 By default, we assume that it's the testsuite/expect directory (i.e. ".").
@@ -67,20 +67,15 @@ test_dir:   a temporary subdirectory created within the testsuite_shared_dir *
   and testsuite_cleanup_on_failure was set to false. The test_dir will be
   (removed and) recreated the next time the test is run.
 
-The script "regression" will execute all of the tests and summarize the
+The script "regression.py" will execute all of the tests and summarize the
 results. Standard output contains detailed logging of all events, which is
 quite verbose. Failure information is written to standard error. A good
-way to run "regression" is to write its standard output to one file and
+way to run "regression.py" is to write its standard output to one file and
 either write standard error to another file or print it to the terminal.
 Execution time of the full test suite is roughly 80 minutes, but can vary
 considerably with the architecture, configuration, and system load. Some
 tests send e-mail, so check for four e-mail messages sent to the user
-running the tests. Here is an example.
-    $ ./regression >slurm.test.tux.Aug3
-    Completions:357
-    Failures:   0
-    Time (sec): 4375
-    Remember to check for mail send by tests
+running the tests.
 
 When failures do occur, check the standard output for details. Searching
 for the keyword "FAILURE" will typically locate the failing test. Note
@@ -235,6 +230,7 @@ test1.114  Test of srun --spread-job option.
 test1.115  Test of srun not hanging on ignored stdin.
 test1.116  Extended MPI functionality tests via srun.
 test1.117  Test of standalone srun not ignoring --mem-per-cpu
+test1.118  Test --hint mutual exclusion properties.
 
 test2.#    Testing of scontrol options (to be run as unprivileged user).
 ========================================================================
@@ -387,6 +383,10 @@ test7.19   Test sbatch/srun/salloc path resolving
 test7.20   Test lua JobSubmitPlugin
 test7.21   Test SPANK plugins that link against libslurm
 test7.23   Test time_str2secs parsing of different formats
+
+test8.#    Testing of advanced reservation functionality.
+=========================================================
+test8.12   Test reservation with flags=FLEX
 
 test9.#    System stress testing. Exercises all commands and daemons.
 =====================================================================
@@ -593,6 +593,7 @@ test20.10  Test for the qrerun --help option
 test20.11  Test for the qrerun --man option
 test20.12  Test for qsub -V/-v arguments and their interaction with sbatch scripts
 test20.13  Test to test Grid Engine specific options
+test20.14  Test PBS/qsub -l gpu options
 
 test21.#   Testing of sacctmgr commands and options.
 ====================================================
