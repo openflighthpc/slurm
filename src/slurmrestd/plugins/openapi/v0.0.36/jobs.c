@@ -208,7 +208,9 @@ const params_t job_params[] = {
 	{ "sockets_per_node", LONG_OPT_SOCKETSPERNODE },
 	{ "spread_job", LONG_OPT_SPREAD_JOB },
 	{ "standard_error", 'e' },
+	{ "standard_in", 'i' },
 	{ "standard_input", 'i' },
+	{ "standard_out", 'o' },
 	{ "standard_output", 'o' },
 	{ "task_epilog", LONG_OPT_TASK_EPILOG, true },
 	{ "task_prolog", LONG_OPT_TASK_PROLOG, true },
@@ -498,8 +500,8 @@ static int _fill_job_desc_from_sbatch_opts(slurm_opt_t *opt,
 	desc->work_dir = xstrdup(opt->chdir);
 	if (sbopt->requeue != NO_VAL)
 		desc->requeue = sbopt->requeue;
-	if (sbopt->open_mode)
-		desc->open_mode = sbopt->open_mode;
+	if (opt->open_mode)
+		desc->open_mode = opt->open_mode;
 	if (opt->acctg_freq)
 		desc->acctg_freq = xstrdup(opt->acctg_freq);
 

@@ -173,6 +173,8 @@ extern int slurm_pmi_send_kvs_comm_set(kvs_comm_set_t *kvs_set_ptr,
 	if (kvs_set_ptr == NULL)
 		return EINVAL;
 
+	slurm_conf_init(NULL);
+
 	if ((rc = _get_addr()) != SLURM_SUCCESS)
 		return rc;
 	_set_pmi_time();
@@ -225,6 +227,9 @@ extern int slurm_pmi_get_kvs_comm_set(kvs_comm_set_t **kvs_set_ptr,
 
 	if (kvs_set_ptr == NULL)
 		return EINVAL;
+
+	slurm_conf_init(NULL);
+
 	*kvs_set_ptr = NULL;	/* initialization */
 
 	if ((rc = _get_addr()) != SLURM_SUCCESS) {

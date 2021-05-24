@@ -244,7 +244,8 @@ static void _opt_env(void)
 
 	while (e->var) {
 		if ((val = getenv(e->var)) != NULL)
-			slurm_process_option(&opt, e->type, val, true, false);
+			slurm_process_option_or_exit(&opt, e->type, val, true,
+						     false);
 		e++;
 	}
 
@@ -262,7 +263,8 @@ static void _set_options(int argc, char **argv)
 	optind = 0;
 	while ((opt_char = getopt_long(argc, argv, opt_string,
 				       optz, &option_index)) != -1) {
-		slurm_process_option(&opt, opt_char, optarg, false, false);
+		slurm_process_option_or_exit(&opt, opt_char, optarg, false,
+					     false);
 	}
 
 	slurm_option_table_destroy(optz);
@@ -381,8 +383,8 @@ static bool _opt_verify(void)
 		xfree(opt.burst_buffer_file);
 	}
 
-	validate_hint_option(&opt);
-	if (opt.hint) {
+	if (opt.hint &&
+	    !validate_hint_option(&opt)) {
 		xassert(opt.ntasks_per_core == NO_VAL);
 		xassert(opt.threads_per_core == NO_VAL);
 		if (verify_hint(opt.hint,
@@ -782,7 +784,7 @@ static void _usage(void)
 {
  	printf(
 "Usage: salloc [-N numnodes|[min nodes]-[max nodes]] [-n num-processors]\n"
-"              [[-c cpus-per-node] [-r n] [-p partition] [--hold] [-t minutes]\n"
+"              [-c cpus-per-node] [-r n] [-p partition] [--hold] [-t minutes]\n"
 "              [--immediate[=secs]] [--no-kill] [--overcommit] [-D path]\n"
 "              [--oversubscribe] [-J jobname]\n"
 "              [--verbose] [--gid=group] [--uid=user] [--licenses=names]\n"
@@ -795,13 +797,13 @@ static void _usage(void)
 "              [--network=type] [--mem-per-cpu=MB] [--qos=qos]\n"
 "              [--mem-bind=...] [--reservation=name] [--mcs-label=mcs]\n"
 "              [--time-min=minutes] [--gres=list] [--gres-flags=opts]\n"
-"              [--cpu-freq=min[-max[:gov]] [--power=flags] [--profile=...]\n"
+"              [--cpu-freq=min[-max[:gov]]] [--power=flags] [--profile=...]\n"
 "              [--switches=max-switches[@max-time-to-wait]]\n"
 "              [--core-spec=cores] [--thread-spec=threads] [--reboot]\n"
 "              [--bb=burst_buffer_spec] [--bbf=burst_buffer_file]\n"
 "              [--delay-boot=mins] [--use-min-nodes]\n"
 "              [--cpus-per-gpu=n] [--gpus=n] [--gpu-bind=...] [--gpu-freq=...]\n"
-"              [--gpus-per-node=n] [--gpus-per-socket=n]  [--gpus-per-task=n]\n"
+"              [--gpus-per-node=n] [--gpus-per-socket=n] [--gpus-per-task=n]\n"
 "              [--mem-per-gpu=MB]\n"
 "              [command [args...]]\n");
 }
@@ -901,12 +903,16 @@ static void _help(void)
 "                              --mem >= --mem-per-cpu if --mem is specified.\n"
 "\n"
 "Affinity/Multi-core options: (when the task/affinity plugin is enabled)\n"
-"  -B  --extra-node-info=S[:C[:T]]            Expands to:\n"
-"       --sockets-per-node=S   number of sockets per node to allocate\n"
-"       --cores-per-socket=C   number of cores per socket to allocate\n"
-"       --threads-per-core=T   number of threads per core to allocate\n"
-"                              each field can be 'min' or wildcard '*'\n"
-"                              total cpus requested = (N x S x C x T)\n"
+"                              For the following 4 options, you are\n"
+"                              specifying the minimum resources available for\n"
+"                              the node(s) allocated to the job.\n"
+"      --sockets-per-node=S    number of sockets per node to allocate\n"
+"      --cores-per-socket=C    number of cores per socket to allocate\n"
+"      --threads-per-core=T    number of threads per core to allocate\n"
+"  -B  --extra-node-info=S[:C[:T]]  combine request of sockets per node,\n"
+"                              cores per socket and threads per core.\n"
+"                              Specify an asterisk (*) as a placeholder,\n"
+"                              a minimum value, or a min-max range.\n"
 "\n"
 "      --ntasks-per-core=n     number of tasks to invoke on each core\n"
 "      --ntasks-per-socket=n   number of tasks to invoke on each socket\n");

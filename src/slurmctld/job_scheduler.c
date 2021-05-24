@@ -834,7 +834,6 @@ extern int schedule(bool full_queue)
 		sched_last.tv_sec  = now.tv_sec;
 		sched_last.tv_usec = now.tv_usec;
 		sched_running = true;
-		sched_full_queue = false;
 		slurm_mutex_unlock(&sched_mutex);
 
 		job_count = _schedule(sched_full_queue);
@@ -843,6 +842,7 @@ extern int schedule(bool full_queue)
 		gettimeofday(&now, NULL);
 		sched_last.tv_sec  = now.tv_sec;
 		sched_last.tv_usec = now.tv_usec;
+		sched_full_queue = false;
 		sched_running = false;
 		slurm_mutex_unlock(&sched_mutex);
 	} else if (sched_pend_thread == 0) {
@@ -1151,12 +1151,12 @@ static int _schedule(bool full_queue)
 		bf_hetjob_prio = 0;
 		if ((tmp_ptr = xstrcasestr(slurm_conf.sched_params,
 		                           "bf_hetjob_prio="))) {
-			tmp_ptr = strtok(tmp_ptr + 15, ",");
-			if (!xstrcasecmp(tmp_ptr, "min"))
+			tmp_ptr += 15;
+			if (!xstrncasecmp(tmp_ptr, "min", 3))
 				bf_hetjob_prio |= HETJOB_PRIO_MIN;
-			else if (!xstrcasecmp(tmp_ptr, "max"))
+			else if (!xstrncasecmp(tmp_ptr, "max", 3))
 				bf_hetjob_prio |= HETJOB_PRIO_MAX;
-			else if (!xstrcasecmp(tmp_ptr, "avg"))
+			else if (!xstrncasecmp(tmp_ptr, "avg", 3))
 				bf_hetjob_prio |= HETJOB_PRIO_AVG;
 			else
 				error("Invalid SchedulerParameters bf_hetjob_prio: %s",
@@ -1842,8 +1842,10 @@ skip_start:
 			if (is_job_array_head &&
 			    (job_ptr->array_task_id != NO_VAL)) {
 				/* Try starting another task of the job array */
+				job_record_t *tmp = job_ptr;
 				job_ptr = find_job_record(job_ptr->array_job_id);
-				if (job_ptr && IS_JOB_PENDING(job_ptr) &&
+				if (job_ptr && (job_ptr != tmp) &&
+				    IS_JOB_PENDING(job_ptr) &&
 				    (bb_g_job_test_stage_in(job_ptr,false) ==1))
 					goto next_task;
 			}

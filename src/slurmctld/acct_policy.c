@@ -1050,10 +1050,21 @@ static void _qos_alter_job(job_record_t *job_ptr,
 	for (i=0; i<slurmctld_tres_cnt; i++) {
 		if (used_tres_run_secs[i] == new_used_tres_run_secs[i])
 			continue;
-		qos_ptr->usage->grp_used_tres_run_secs[i] -=
-			used_tres_run_secs[i];
-		qos_ptr->usage->grp_used_tres_run_secs[i] +=
+		/*
+		 * Handle the case when remaining usage is less than
+		 * the original job request.
+		 */
+		int64_t used_tres_run_sec_decr =
+			used_tres_run_secs[i] -
 			new_used_tres_run_secs[i];
+		if ((used_tres_run_sec_decr < 0) ||
+		    (used_tres_run_sec_decr <
+		     qos_ptr->usage->grp_used_tres_run_secs[i]))
+			qos_ptr->usage->grp_used_tres_run_secs[i] -=
+				used_tres_run_sec_decr;
+		else
+			qos_ptr->usage->grp_used_tres_run_secs[i] = 0;
+
 		debug2("altering %pJ QOS %s got %"PRIu64" just removed %"PRIu64" and added %"PRIu64,
 		       job_ptr, qos_ptr->name,
 		       qos_ptr->usage->grp_used_tres_run_secs[i],
@@ -1410,7 +1421,7 @@ static acct_policy_tres_usage_t _validate_tres_usage_limits(
 
 			if (curr_usage)
 				usage = curr_usage[i];
-			if (tres_usage &&
+			if (tres_usage && tres_req_cnt[i] &&
 			    ((tres_req_cnt[i] + tres_usage[i]) >
 			     (tres_limit_array[i] - usage)))
 				return TRES_USAGE_REQ_NOT_SAFE_WITH_USAGE;
@@ -2681,10 +2692,21 @@ extern void acct_policy_alter_job(job_record_t *job_ptr,
 		for (i=0; i<slurmctld_tres_cnt; i++) {
 			if (used_tres_run_secs[i] == new_used_tres_run_secs[i])
 				continue;
-			assoc_ptr->usage->grp_used_tres_run_secs[i] -=
-				used_tres_run_secs[i];
-			assoc_ptr->usage->grp_used_tres_run_secs[i] +=
+			/*
+			 * Handle the case when remaining usage is less than
+			 * the original job request.
+			 */
+			int64_t used_tres_run_sec_decr =
+				used_tres_run_secs[i] -
 				new_used_tres_run_secs[i];
+			if ((used_tres_run_sec_decr < 0) ||
+			    (used_tres_run_sec_decr <
+			     assoc_ptr->usage->grp_used_tres_run_secs[i]))
+				assoc_ptr->usage->grp_used_tres_run_secs[i] -=
+					used_tres_run_sec_decr;
+			else
+				assoc_ptr->usage->grp_used_tres_run_secs[i] = 0;
+
 			debug2("altering %pJ assoc %u(%s/%s/%s) got %"PRIu64" just removed %"PRIu64" and added %"PRIu64,
 			       job_ptr, assoc_ptr->id, assoc_ptr->acct,
 			       assoc_ptr->user, assoc_ptr->partition,
@@ -3875,11 +3897,11 @@ extern bool acct_policy_job_runnable_post_select(job_record_t *job_ptr,
 			xfree(job_ptr->state_desc);
 			job_ptr->state_reason = _get_tres_state_reason(
 				tres_pos, WAIT_ASSOC_GRP_UNK_RUN_MIN);
-			debug2("%pJ is being held, assoc %u(%s/%s/%s) group max running tres(%s) minutes request limit %"PRIu64" exceeds limit %"PRIu64,
+			debug2("%pJ is being held, assoc %u(%s/%s/%s) group max running tres(%s) minutes request %"PRIu64" exceeds limit %"PRIu64,
 			       job_ptr, assoc_ptr->id, assoc_ptr->acct,
 			       assoc_ptr->user, assoc_ptr->partition,
 			       assoc_mgr_tres_name_array[tres_pos],
-			       tres_run_mins[tres_pos],
+			       job_tres_time_limit[tres_pos],
 			       assoc_ptr->grp_tres_run_mins_ctld[tres_pos]);
 			rc = false;
 			goto end_it;

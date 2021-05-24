@@ -79,20 +79,7 @@ strong_alias(stepd_getpw, slurm_stepd_getpw);
 strong_alias(xfree_struct_passwd, slurm_xfree_struct_passwd);
 strong_alias(stepd_getgr, slurm_stepd_getgr);
 strong_alias(xfree_struct_group_array, slurm_xfree_struct_group_array);
-
-static bool
-_slurm_authorized_user()
-{
-	uid_t uid, slurm_user_id;
-	slurm_conf_t *conf = slurm_conf_lock();
-
-	slurm_user_id = (uid_t)conf->slurm_user_id;
-	slurm_conf_unlock();
-
-	uid = getuid();
-
-	return ((uid == (uid_t)0) || (uid == slurm_user_id));
-}
+strong_alias(stepd_get_namespace_fd, slurm_stepd_get_namespace_fd);
 
 /*
  * Should be called when a connect() to a socket returns ECONNREFUSED.
@@ -108,8 +95,8 @@ _handle_stray_socket(const char *socket_name)
 	time_t now;
 
 	/* Only attempt to remove the stale socket if process is running
-	   as root or the SlurmUser. */
-	if (!_slurm_authorized_user())
+	   as root or the SlurmdUser. */
+	if (getuid() && (getuid() != slurm_conf.slurmd_user_id))
 		return;
 
 	if (stat(socket_name, &buf) == -1) {
@@ -160,9 +147,12 @@ _step_connect(const char *directory, const char *nodename,
 	int len;
 	struct sockaddr_un addr;
 	char *name = NULL, *pos = NULL;
+	uint32_t stepid = step_id->step_id;
+	bool old_id_tied = false;
 
+try_old_id:
 	xstrfmtcatat(name, &pos, "%s/%s_%u.%u",
-		     directory, nodename, step_id->job_id, step_id->step_id);
+		     directory, nodename, step_id->job_id, stepid);
 	if (step_id->step_het_comp != NO_VAL)
 		xstrfmtcatat(name, &pos, ".%u", step_id->step_het_comp);
 
@@ -195,10 +185,30 @@ _step_connect(const char *directory, const char *nodename,
 		      __func__, name);
 		if (errno == ECONNREFUSED && running_in_slurmd()) {
 			_handle_stray_socket(name);
-			if (step_id->step_id == SLURM_BATCH_SCRIPT)
+			/*
+			 * NOTE: Checking against NO_VAL can be removed after 21.08
+			 */
+			if ((step_id->step_id == SLURM_BATCH_SCRIPT) ||
+			    (step_id->step_id == NO_VAL))
 				_handle_stray_script(directory,
 						     step_id->job_id);
 		}
+
+		/* NOTE: This code can be removed after 21.08 */
+		if (errno == ENOENT && !old_id_tied &&
+		    ((step_id->step_id == SLURM_BATCH_SCRIPT) ||
+		     (step_id->step_id == SLURM_EXTERN_CONT))) {
+			debug("%s: Try to use old step_id", __func__);
+			close(fd);
+			if (stepid == SLURM_BATCH_SCRIPT)
+				stepid = NO_VAL;
+			else
+				stepid = INFINITE;
+			pos = name;
+			old_id_tied = true;
+			goto try_old_id;
+		}
+
 		xfree(name);
 		close(fd);
 		return -1;
@@ -398,6 +408,35 @@ rwfail:
 	return -1;
 }
 
+/*
+ * Request to enter namespace of a job
+ * -1 on error;
+ */
+extern int stepd_get_namespace_fd(int fd, uint16_t protocol_version)
+{
+	int req = REQUEST_GET_NS_FD;
+	int ns_fd = 0;
+
+	debug("entering %s", __func__);
+	safe_write(fd, &req, sizeof(int));
+
+	safe_read(fd, &ns_fd, sizeof(ns_fd));
+
+	/*
+	 * Receive the file descriptor of the namespace to be joined if valid fd
+	 * is coming. Note that the number of ns_fd will not be the same
+	 * returned from receive_fd_over_pipe().  The number we got from the
+	 * safe_read was the fd on the sender which will be different on our
+	 * end.
+	 */
+	if (ns_fd > 0)
+		ns_fd = receive_fd_over_pipe(fd);
+
+	return ns_fd;
+
+rwfail:
+	return -1;
+}
 
 /*
  * Attach a client to a running job step.

@@ -255,7 +255,8 @@ static void _set_gpu_defaults(job_record_t *job_ptr)
 
 	gres_plugin_job_set_defs(job_ptr->gres_list, "gpu", cpu_per_gpu,
 				 mem_per_gpu, &job_ptr->cpus_per_tres,
-				 &job_ptr->mem_per_tres);
+				 &job_ptr->mem_per_tres,
+				 &job_ptr->details->cpus_per_task);
 }
 
 /* Determine how many sockets per node this job requires for GRES */
@@ -1615,13 +1616,15 @@ alloc_job:
 				 * getting more memory than we are actually
 				 * expecting.
 				 */
-				if (job_ptr->details->mc_ptr->threads_per_core <
-				    select_node_record[i].vpus) {
+				if (((cr_type & CR_CORE) ||
+				     (cr_type & CR_SOCKET)) &&
+				    (job_ptr->details->mc_ptr->
+				     threads_per_core <
+				     select_node_record[i].vpus)) {
 					cpu_count /= select_node_record[i].vpus;
 					cpu_count *= job_ptr->details->
 						mc_ptr->threads_per_core;
 				}
-
 				needed_mem = cpu_count *
 					(save_mem & (~MEM_PER_CPU));
 			} else if (save_mem) {		/* Memory per node */

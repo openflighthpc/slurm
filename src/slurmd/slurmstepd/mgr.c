@@ -785,7 +785,14 @@ _one_step_complete_msg(stepd_step_rec_t *job, int first, int last)
 			if ((retcode == 0) && (rc == 0))
 				goto finished;
 		}
-		/* on error AGAIN, send to the slurmctld instead */
+		/*
+		 * On error AGAIN, send to the slurmctld instead.
+		 * This is useful if parent_rank gave up waiting for us
+		 * on stepd_wait_for_children_slurmstepd.
+		 * If it's just busy handeling our prev messages we'll need
+		 * to handle duplicated messages in both the parent and
+		 * slurmctld.
+		 */
 		debug3("Rank %d sending complete to slurmctld instead, range "
 		       "%d to %d", step_complete.rank, first, last);
 	}  else {
@@ -1062,8 +1069,8 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 		;	       /* Wait until above process exits from signal */
 	}
 
-	jobacct = jobacct_gather_remove_task(pid);
-	if (jobacct) {
+	/* remove all tracked tasks */
+	while ((jobacct = jobacct_gather_remove_task(0))) {
 		jobacctinfo_setinfo(jobacct,
 				    JOBACCT_DATA_RUSAGE, &rusage,
 				    SLURM_PROTOCOL_VERSION);
@@ -1083,6 +1090,25 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 	step_terminate_monitor_start(job);
 	proctrack_g_signal(job->cont_id, SIGKILL);
 	proctrack_g_wait(job->cont_id);
+	step_terminate_monitor_stop();
+
+	/*
+	 * When an event is registered using the cgroups notification API and
+	 * memory is constrained using task/cgroup, the following check needs to
+	 * happen before any memory cgroup hierarchy removal.
+	 *
+	 * The eventfd will be woken up by control file implementation *or*
+	 * when the cgroup is removed. Thus, for the second case (cgroup
+	 * removal) we could be notified with false positive oom events.
+	 *
+	 * acct_gather_profile_fini() and task_g_post_step() can remove the
+	 * cgroup hierarchy if the cgroup implementation of these plugins are
+	 * configured.
+	 */
+	for (uint32_t i = 0; i < job->node_tasks; i++)
+		if (task_g_post_term(job, job->task[i]) == ENOMEM)
+			job->oom_error = true;
+
 	/*
 	 * This function below calls jobacct_gather_fini(). For the case of
 	 * jobacct_gather/cgroup, it ends up doing the cgroup hierarchy cleanup
@@ -1090,11 +1116,6 @@ static int _spawn_job_container(stepd_step_rec_t *job)
 	 * children processes from the step are gone.
 	 */
 	acct_gather_profile_fini();
-
-	step_terminate_monitor_stop();
-	for (uint32_t i = 0; i < job->node_tasks; i++)
-		if (task_g_post_term(job, job->task[i]) == ENOMEM)
-			job->oom_error = true;
 
 	task_g_post_step(job);
 
@@ -1275,6 +1296,10 @@ job_manager(stepd_step_rec_t *job)
 		debug ("Unable to set dumpable to 1");
 #endif /* PR_SET_DUMPABLE */
 
+	/*
+	 * task_g_post_term() needs to be called before
+	 * acct_gather_profile_fini() and task_g_post_step().
+	 */
 	_wait_for_all_tasks(job);
 	acct_gather_profile_endpoll();
 	acct_gather_profile_g_node_step_end();
@@ -1400,14 +1425,52 @@ fail1:
 static int _pre_task_child_privileged(
 	stepd_step_rec_t *job, int taskid, struct priv_state *sp)
 {
+	int setwd = 0; /* set working dir */
+	int rc = 0;
+
 	if (_reclaim_privileges(sp) < 0)
 		return SLURM_ERROR;
+
+#ifndef HAVE_NATIVE_CRAY
+	/* Add job's pid to job container */
+
+	if (container_g_join(job->step_id.job_id, job->uid)) {
+		error("container_g_join failed: %u", job->step_id.job_id);
+		exit(1);
+	}
+
+	/*
+	 * tmpfs job container plugin changes the working directory
+	 * back to root working directory, so change it back to users
+	 * but after dropping privillege
+	 */
+	setwd = 1;
+#endif
 
 	if (spank_task_privileged(job, taskid) < 0)
 		return error("spank_task_init_privileged failed");
 
 	/* sp->gid_list should already be initialized */
-	return (_drop_privileges(job, true, sp, false));
+	rc = _drop_privileges(job, true, sp, false);
+	if (rc) {
+		error ("_drop_privileges: %m");
+		return rc;
+	}
+
+	if (setwd) {
+		if (chdir(job->cwd) < 0) {
+			error("couldn't chdir to `%s': %m: going to /tmp instead",
+			      job->cwd);
+			if (chdir("/tmp") < 0) {
+				error("couldn't chdir to /tmp either. dying.");
+				return SLURM_ERROR;
+			}
+		}
+
+	}
+
+	return rc;
+
 }
 
 struct exec_wait_info {
@@ -1750,6 +1813,7 @@ _fork_all_tasks(stepd_step_rec_t *job, bool *io_initialized)
 			 */
 			if (_pre_task_child_privileged(job, i, &sprivs) < 0)
 				_exit(1);
+
 
  			if (_become_user(job, &sprivs) < 0) {
  				error("_become_user failed: %m");

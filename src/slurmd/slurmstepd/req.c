@@ -76,6 +76,7 @@
 #include "src/slurmd/slurmstepd/step_terminate_monitor.h"
 
 #include "src/slurmd/common/task_plugin.h"
+#include "src/slurmd/common/job_container_plugin.h"
 
 static void *_handle_accept(void *arg);
 static int _handle_request(int fd, stepd_step_rec_t *job,
@@ -104,6 +105,7 @@ static int _handle_stat_jobacct(int fd, stepd_step_rec_t *job, uid_t uid);
 static int _handle_task_info(int fd, stepd_step_rec_t *job);
 static int _handle_list_pids(int fd, stepd_step_rec_t *job);
 static int _handle_reconfig(int fd, stepd_step_rec_t *job, uid_t uid);
+static int _handle_get_ns_fd(int fd, stepd_step_rec_t *job);
 static bool _msg_socket_readable(eio_obj_t *obj);
 static int _msg_socket_accept(eio_obj_t *obj, List objs);
 
@@ -584,6 +586,10 @@ int _handle_request(int fd, stepd_step_rec_t *job, uid_t uid, pid_t remote_pid)
 	case REQUEST_GETGR:
 		debug("Handling REQUEST_GETGR");
 		rc = _handle_getgr(fd, job, remote_pid);
+		break;
+	case REQUEST_GET_NS_FD:
+		debug("Handling REQUEST_GET_NS_FD");
+		rc = _handle_get_ns_fd(fd, job);
 		break;
 	default:
 		error("Unrecognized request: %d", req);
@@ -1081,6 +1087,32 @@ _handle_pid_in_container(int fd, stepd_step_rec_t *job)
 	safe_write(fd, &rc, sizeof(bool));
 
 	debug("Leaving _handle_pid_in_container");
+	return SLURM_SUCCESS;
+rwfail:
+	return SLURM_ERROR;
+}
+
+static int _handle_get_ns_fd(int fd, stepd_step_rec_t *job)
+{
+	int ns_fd = -1;
+
+	debug("%s: for job %u:%u",
+	      __func__, job->step_id.job_id, job->step_id.step_id);
+
+	ns_fd = container_g_join_external(job->step_id.job_id);
+
+	/*
+	 * We need to send the ns_fd as an int first to let the receiver know if
+	 * we have a valid fd or not as recv_fd_over_pipe() will always try to
+	 * set up the fd no matter if it is valid or not.
+	 */
+	safe_write(fd, &ns_fd, sizeof(ns_fd));
+	if (ns_fd > 0)
+		send_fd_over_pipe(fd, ns_fd);
+
+	debug("sent fd: %d", ns_fd);
+	debug("leaving %s", __func__);
+
 	return SLURM_SUCCESS;
 rwfail:
 	return SLURM_ERROR;
@@ -1637,17 +1669,34 @@ _handle_completion(int fd, stepd_step_rec_t *job, uid_t uid)
 	 *  without the hostlist from the credential.
 	 */
 	if (step_complete.bits && (step_complete.rank >= 0)) {
+		int32_t set_bits;
+		int32_t first_bit = first - (step_complete.rank + 1);
+		int32_t last_bit = last - (step_complete.rank + 1);
+		/* bit_set_count_range is [first, end) so +1 last_bit */
+		int32_t last_bit_range = last_bit + 1;
+
 #if 0
 		char bits_string[128];
 		debug2("Setting range %d (bit %d) through %d(bit %d)",
-		       first, first-(step_complete.rank+1),
-		       last, last-(step_complete.rank+1));
+		       first, first_bit,
+		       last, last_bit);
 		bit_fmt(bits_string, sizeof(bits_string), step_complete.bits);
 		debug2("  before bits: %s", bits_string);
 #endif
-		bit_nset(step_complete.bits,
-			 first - (step_complete.rank+1),
-			 last - (step_complete.rank+1));
+		if (!(set_bits = bit_set_count_range(step_complete.bits,
+						     first_bit,
+						     last_bit_range))) {
+			bit_nset(step_complete.bits, first_bit, last_bit);
+		} else if (set_bits == (last_bit_range - first_bit)) {
+			debug("Step complete from %d to %d was already processed on rank %d. Probably a RPC was resent from a child.",
+			      first, last, step_complete.rank);
+			goto timeout;
+		} else {
+			error("Step complete from %d to %d was half-way processed on rank %d. This should never happen.",
+			      first, last, step_complete.rank);
+			goto timeout;
+		}
+
 #if 0
 		bit_fmt(bits_string, sizeof(bits_string), step_complete.bits);
 		debug2("  after bits: %s", bits_string);

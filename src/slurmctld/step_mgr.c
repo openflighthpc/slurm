@@ -1041,12 +1041,6 @@ static bitstr_t *_pick_step_nodes(job_record_t *job_ptr,
 		step_spec->pn_min_memory = 0;	/* clear MEM_PER_CPU flag */
 
 	if (job_ptr->next_step_id == 0) {
-		if (job_ptr->details && job_ptr->details->prolog_running) {
-			*return_code = ESLURM_PROLOG_RUNNING;
-			FREE_NULL_BITMAP(nodes_avail);
-			FREE_NULL_BITMAP(select_nodes_avail);
-			return NULL;
-		}
 		i_first = bit_ffs(job_ptr->node_bitmap);
 		if (i_first >= 0)
 			i_last  = bit_fls(job_ptr->node_bitmap);
@@ -1132,12 +1126,15 @@ static bitstr_t *_pick_step_nodes(job_record_t *job_ptr,
 						cpus_used[node_inx];
 					job_blocked_cpus += job_resrcs_ptr->
 						cpus_used[node_inx];
+					if (!total_cpus)
+						job_blocked_nodes++;
 				}
 			}
 
 			if (!total_cpus) {
 				log_flag(STEPS, "%s: %pJ Skipping node. Not enough CPUs to run step here.",
 					 __func__, job_ptr);
+				bit_clear(nodes_avail, i);
 				continue;
 			}
 
@@ -1438,6 +1435,12 @@ static bitstr_t *_pick_step_nodes(job_record_t *job_ptr,
 				usable_cpu_cnt[i] =
 					job_resrcs_ptr->cpus[node_inx];
 
+				log_flag(STEPS, "%s: %pJ Currently running steps use %d of allocated %d CPUs on node %s",
+					 __func__, job_ptr,
+					 job_resrcs_ptr->cpus_used[node_inx],
+					 usable_cpu_cnt[i],
+					 node_record_table_ptr[i].name);
+
 				if (step_spec->flags & SSF_EXCLUSIVE) {
 					/*
 					 * If whole is given and
@@ -1459,7 +1462,14 @@ static bitstr_t *_pick_step_nodes(job_record_t *job_ptr,
 						usable_cpu_cnt[i] -=
 							job_resrcs_ptr->
 							cpus_used[node_inx];
+						if (!usable_cpu_cnt[i])
+							job_blocked_nodes++;
 					}
+				}
+				if (!usable_cpu_cnt[i]) {
+					log_flag(STEPS, "%s: %pJ Skipping node. Not enough CPUs to run step here.",
+						 __func__, job_ptr);
+					bit_clear(nodes_avail, i);
 				}
 			}
 
@@ -1729,8 +1739,9 @@ static void _pick_step_cores(step_record_t *step_ptr,
 		use_all_cores = false;
 
 		if (step_ptr->cpus_per_task > 0) {
-			cpu_cnt *= step_ptr->cpus_per_task + cpus_per_core - 1;
-			cpu_cnt	/= cpus_per_core;
+			cpu_cnt *= step_ptr->cpus_per_task;
+			cpu_cnt += (cpus_per_core - 1);
+			cpu_cnt /= cpus_per_core;
 		}
 	}
 
@@ -1998,6 +2009,12 @@ static void _step_dealloc_lps(step_record_t *step_ptr)
 	int job_node_inx = -1, step_node_inx = -1;
 
 	xassert(job_resrcs_ptr);
+	if (!job_resrcs_ptr) {
+		error("%s: job_resrcs is NULL for %pS; this should never happen",
+		      __func__, step_ptr);
+		return;
+	}
+
 	xassert(job_resrcs_ptr->cpus);
 	xassert(job_resrcs_ptr->cpus_used);
 
@@ -2342,11 +2359,17 @@ extern int step_create(job_step_create_request_msg_t *step_specs,
 	    ((job_ptr->end_time <= over_run) && !IS_JOB_CONFIGURING(job_ptr)))
 		return ESLURM_ALREADY_DONE;
 
+	if (job_ptr->details->prolog_running)
+		return ESLURM_PROLOG_RUNNING;
+
 	if (step_specs->flags & SSF_INTERACTIVE) {
 		debug("%s: interactive step requested", __func__);
 		*new_step_record = _build_interactive_step(job_ptr, step_specs,
 							   protocol_version);
-		return SLURM_SUCCESS;
+		if (*new_step_record)
+			return SLURM_SUCCESS;
+		else
+			return ESLURM_DUPLICATE_STEP_ID;
 	}
 
 	task_dist = step_specs->task_dist & SLURM_DIST_STATE_BASE;
@@ -3438,6 +3461,9 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid, bool finish,
 	job_record_t *job_ptr;
 	step_record_t *step_ptr;
 	int nodes, rem_nodes;
+#ifndef HAVE_FRONT_END
+	int range_bits, set_bits;
+#endif
 
 	xassert(rem);
 
@@ -3482,9 +3508,6 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid, bool finish,
 		return EINVAL;
 	}
 
-	ext_sensors_g_get_stependdata(step_ptr);
-	jobacctinfo_aggregate(step_ptr->jobacct, req->jobacct);
-
 	/* we have been adding task average frequencies for
 	 * jobacct->act_cpufreq so we need to divide with the
 	 * total number of tasks/cpus for the step average frequency */
@@ -3515,10 +3538,45 @@ extern int step_partial_comp(step_complete_msg_t *req, uid_t uid, bool finish,
 	bit_set_all(step_ptr->exit_node_bitmap);
 	rem_nodes = 0;
 #else
+	range_bits = req->range_last + 1 - req->range_first;
+	set_bits = bit_set_count_range(step_ptr->exit_node_bitmap,
+				       req->range_first,
+				       req->range_last + 1);
+
+	/* Check if any stepd of the range was already received */
+	if (set_bits) {
+		/* If all are already received skip jobacctinfo_aggregate */
+		if (set_bits == range_bits) {
+			debug("Step complete from %d to %d was already processed. Probably a RPC was resent from a child.",
+			      req->range_first, req->range_last);
+			goto no_aggregate;
+		}
+
+		/*
+		 * If partially received, we cannot recover the right gathered
+		 * information. If we don't gather the new one we'll miss some
+		 * information, and if we gather it some of the info will be
+		 * duplicated. We log that error and chose to partially
+		 * duplicate because it's probably a smaller error.
+		 */
+		error("Step complete from %d to %d was already processed (%d of %d). Probably a RPC was resent from a child and gathered information is partially duplicated.",
+		      req->range_first, req->range_last,
+		      set_bits, range_bits);
+	}
+
 	bit_nset(step_ptr->exit_node_bitmap,
 		 req->range_first, req->range_last);
+
+#endif
+
+	ext_sensors_g_get_stependdata(step_ptr);
+	jobacctinfo_aggregate(step_ptr->jobacct, req->jobacct);
+
+#ifndef HAVE_FRONT_END
+no_aggregate:
 	rem_nodes = bit_clear_count(step_ptr->exit_node_bitmap);
 #endif
+
 	*rem = rem_nodes;
 	if (rem_nodes == 0) {
 		/* release all switch windows */
@@ -4681,6 +4739,11 @@ extern step_record_t *build_extern_step(job_record_t *job_ptr)
 	node_list = job_ptr->nodes;
 	node_cnt = job_ptr->node_cnt;
 #endif
+	if (!step_ptr) {
+		error("%s: Can't create step_record! This should never happen",
+		      __func__);
+		return NULL;
+	}
 
 	step_ptr->step_layout = fake_slurm_step_layout_create(
 		node_list, NULL, NULL, node_cnt, node_cnt);
@@ -4721,6 +4784,12 @@ extern step_record_t *build_batch_step(job_record_t *job_ptr_in)
 		job_ptr = job_ptr_in;
 
 	step_ptr = _create_step_record(job_ptr, 0);
+
+	if (!step_ptr) {
+		error("%s: Can't create step_record! This should never happen",
+		      __func__);
+		return NULL;
+	}
 
 #ifdef HAVE_FRONT_END
 	front_end_record_t *front_end_ptr =
@@ -4771,6 +4840,7 @@ static step_record_t *_build_interactive_step(
 	job_record_t *job_ptr;
 	step_record_t *step_ptr;
 	char *host = NULL;
+	slurm_step_id_t step_id = {0};
 
 	if (job_ptr_in->het_job_id) {
 		job_ptr = find_job_record(job_ptr_in->het_job_id);
@@ -4782,7 +4852,15 @@ static step_record_t *_build_interactive_step(
 	} else
 		job_ptr = job_ptr_in;
 
-	step_ptr = _create_step_record(job_ptr, protocol_version);
+	step_id.job_id = job_ptr->job_id;
+	step_id.step_id = SLURM_INTERACTIVE_STEP,
+	step_id.step_het_comp = NO_VAL;
+	step_ptr = find_step_record(job_ptr, &step_id);
+	if (step_ptr) {
+		debug("%s: interactive step for %pJ already exists",
+		      __func__, job_ptr);
+		return NULL;
+	}
 
 #ifdef HAVE_FRONT_END
 	front_end_record_t *front_end_ptr =
@@ -4797,6 +4875,20 @@ static step_record_t *_build_interactive_step(
 #else
 		host = job_ptr->batch_host;
 #endif
+	if (!host) {
+		error("%s: %pJ batch_host is NULL! This should never happen",
+		      __func__, job_ptr);
+		return NULL;
+	}
+
+	step_ptr = _create_step_record(job_ptr, protocol_version);
+
+	if (!step_ptr) {
+		error("%s: Can't create step_record! This should never happen",
+		      __func__);
+		return NULL;
+	}
+
 	step_ptr->step_layout = fake_slurm_step_layout_create(
 		host, NULL, NULL, 1, 1);
 	step_ptr->ext_sensors = ext_sensors_alloc();
@@ -4819,6 +4911,8 @@ static step_record_t *_build_interactive_step(
 			     &step_ptr->step_node_bitmap)) {
 		error("%s: %pJ has invalid node list (%s)",
 		      __func__, job_ptr, job_ptr->batch_host);
+		delete_step_record(job_ptr, step_ptr);
+		return NULL;
 	}
 #endif
 

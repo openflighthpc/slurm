@@ -1,4 +1,4 @@
-.TH salloc "1" "Slurm Commands" "November 2020" "Slurm Commands"
+.TH salloc "1" "Slurm Commands" "April 2021" "Slurm Commands"
 
 .SH "NAME"
 salloc \- Obtain a Slurm job allocation (a set of nodes), execute a command,
@@ -1164,7 +1164,7 @@ limit is changed.
 If a job node limit exceeds the number of nodes configured in the
 partition, the job will be rejected.
 Note that the environment
-variable \fBSLURM_JOB_NODES\fR will be set to the count of nodes actually
+variable \fBSLURM_JOB_NUM_NODES\fR will be set to the count of nodes actually
 allocated to the job. See the \fBENVIRONMENT VARIABLES \fR section
 for more information.  If \fB\-N\fR is not specified, the default
 behavior is to allocate enough nodes to satisfy the requirements of
@@ -1339,9 +1339,8 @@ Request the maximum \fIntasks\fR be invoked on each core.
 Meant to be used with the \fB\-\-ntasks\fR option.
 Related to \fB\-\-ntasks\-per\-node\fR except at the core level
 instead of the node level.
-NOTE: This option is not supported unless \fISelectType=cons_res\fR is
-configured (either directly or indirectly on Cray systems)
-along with the node's core count.
+\fBNOTE\fR: This option is not supported when using
+\fISelectType=select/linear\fR.
 
 .TP
 \fB\-\-ntasks\-per\-gpu\fR=<\fIntasks\fR>
@@ -1386,9 +1385,8 @@ Request the maximum \fIntasks\fR be invoked on each socket.
 Meant to be used with the \fB\-\-ntasks\fR option.
 Related to \fB\-\-ntasks\-per\-node\fR except at the socket level
 instead of the node level.
-NOTE: This option is not supported unless \fISelectType=cons_res\fR is
-configured (either directly or indirectly on Cray systems)
-along with the node's socket count.
+\fBNOTE\fR: This option is not supported when using
+\fISelectType=select/linear\fR.
 
 .TP
 \fB\-\-no\-bell\fR
@@ -1761,14 +1759,14 @@ Same as \fB\-\-delay\-boot\fR
 \fBSALLOC_EXCLUSIVE\fR
 Same as \fB\-\-exclusive\fR
 .TP
-\fBSALLOC_GPUS\fR
-Same as \fB\-G, \-\-gpus\fR
-.TP
 \fBSALLOC_GPU_BIND\fR
 Same as \fB\-\-gpu\-bind\fR
 .TP
 \fBSALLOC_GPU_FREQ\fR
 Same as \fB\-\-gpu\-freq\fR
+.TP
+\fBSALLOC_GPUS\fR
+Same as \fB\-G, \-\-gpus\fR
 .TP
 \fBSALLOC_GPUS_PER_NODE\fR
 Same as \fB\-\-gpus\-per\-node\fR
@@ -1853,11 +1851,11 @@ Same as \fB\-\-use\-min\-nodes\fR
 \fBSALLOC_WAIT_ALL_NODES\fR
 Same as \fB\-\-wait\-all\-nodes\fR
 .TP
-\fBSALLOC_WCKEY\fR
-Same as \fB\-\-wckey\fR
-.TP
 \fBSALLOC_WAIT4SWITCH\fR
 Max time waiting for requested switches. See \fB\-\-switches\fR
+.TP
+\fBSALLOC_WCKEY\fR
+Same as \fB\-\-wckey\fR
 .TP
 \fBSLURM_CONF\fR
 The location of the Slurm configuration file.
@@ -1903,10 +1901,6 @@ See \fB\-m, \-\-distribution\fR.
 \fBSLURM_DISTRIBUTION\fR
 Only set if the \fB\-m, \-\-distribution\fR option is specified.
 .TP
-\fBSLURM_GPUS\fR
-Number of GPUs requested.
-Only set if the \fB\-G, \-\-gpus\fR option is specified.
-.TP
 \fBSLURM_GPU_BIND\fR
 Requested binding of tasks to GPU.
 Only set if the \fB\-\-gpu\-bind\fR option is specified.
@@ -1914,6 +1908,10 @@ Only set if the \fB\-\-gpu\-bind\fR option is specified.
 \fBSLURM_GPU_FREQ\fR
 Requested GPU frequency.
 Only set if the \fB\-\-gpu\-freq\fR option is specified.
+.TP
+\fBSLURM_GPUS\fR
+Number of GPUs requested.
+Only set if the \fB\-G, \-\-gpus\fR option is specified.
 .TP
 \fBSLURM_GPUS_PER_NODE\fR
 Requested GPU count per allocated node.
@@ -1927,10 +1925,13 @@ Only set if the \fB\-\-gpus\-per\-socket\fR option is specified.
 Requested GPU count per allocated task.
 Only set if the \fB\-\-gpus\-per\-task\fR option is specified.
 .TP
+\fBSLURM_HET_SIZE\fR
+Set to count of components in heterogeneous job.
+.TP
 \fBSLURM_JOB_ACCOUNT\fR
 Account name associated of the job allocation.
 .TP
-\fBSLURM_JOB_ID\fR (and \fBSLURM_JOBID\fR for backwards compatibility)
+\fBSLURM_JOB_ID\fR
 The ID of the job allocation.
 .TP
 \fBSLURM_JOB_CPUS_PER_NODE\fR
@@ -1941,10 +1942,10 @@ The select/cons_res plugin allocates individual processors
 to jobs, so this number indicates the number of processors
 on each node allocated to the job allocation.
 .TP
-\fBSLURM_JOB_NODELIST\fR (and \fBSLURM_NODELIST\fR for backwards compatibility)
+\fBSLURM_JOB_NODELIST\fR
 List of nodes allocated to the job.
 .TP
-\fBSLURM_JOB_NUM_NODES\fR (and \fBSLURM_NNODES\fR for backwards compatibility)
+\fBSLURM_JOB_NUM_NODES\fR
 Total number of nodes in the job allocation.
 .TP
 \fBSLURM_JOB_PARTITION\fR
@@ -1955,6 +1956,10 @@ Quality Of Service (QOS) of the job allocation.
 .TP
 \fBSLURM_JOB_RESERVATION\fR
 Advanced reservation containing the job allocation, if any.
+.TP
+\fBSLURM_JOBID\fR
+The ID of the job allocation. See \fBSLURM_JOB_ID\fR. Included for backwards
+compatibility.
 .TP
 \fBSLURM_MEM_BIND\fR
 Set to value of the \-\-mem\-bind\fR option.
@@ -1986,15 +1991,13 @@ Only set if the \fB\-\-mem\-per\-gpu\fR option is specified.
 \fBSLURM_MEM_PER_NODE\fR
 Same as \fB\-\-mem\fR
 .TP
-\fBSLURM_HET_SIZE\fR
-Set to count of components in heterogeneous job.
+\fBSLURM_NNODES\fR
+Total number of nodes in the job allocation. See \fBSLURM_JOB_NUM_NODES\fR.
+Included for backwards compatibility.
 .TP
-\fBSLURM_SUBMIT_DIR\fR
-The directory from which \fBsalloc\fR was invoked or, if applicable, the
-directory specified by the \fB\-D, \-\-chdir\fR option.
-.TP
-\fBSLURM_SUBMIT_HOST\fR
-The hostname of the computer from which \fBsalloc\fR was invoked.
+\fBSLURM_NODELIST\fR
+List of nodes allocated to the job. See \fBSLURM_JOB_NODELIST\fR. Included
+for backwards compabitility.
 .TP
 \fBSLURM_NODE_ALIASES\fR
 Sets of node name, communication address and hostname for nodes allocated to
@@ -2017,8 +2020,18 @@ Set to value of the \-\-ntasks\-per\-node\fR option, if specified.
 \fBSLURM_NTASKS_PER_SOCKET\fR
 Set to value of the \-\-ntasks\-per\-socket\fR option, if specified.
 .TP
+\fBSLURM_OVERCOMMIT\fR
+Set to \fB1\fR if \fB\-\-overcommit\fR was specified.
+.TP
 \fBSLURM_PROFILE\fR
 Same as \fB\-\-profile\fR
+.TP
+\fBSLURM_SUBMIT_DIR\fR
+The directory from which \fBsalloc\fR was invoked or, if applicable, the
+directory specified by the \fB\-D, \-\-chdir\fR option.
+.TP
+\fBSLURM_SUBMIT_HOST\fR
+The hostname of the computer from which \fBsalloc\fR was invoked.
 .TP
 \fBSLURM_TASKS_PER_NODE\fR
 Number of tasks to be initiated on each node. Values are
@@ -2042,33 +2055,35 @@ release the allocation and exit without waiting for the command to finish.
 Another exception is SIGTERM, which will be forwarded to the spawned process.
 
 .SH "EXAMPLES"
-.LP
-To get an allocation, and open a new xterm in which srun commands may be typed
+.TP
+To get an allocation, and open a new xterm in which srun commands may be typed \
 interactively:
-.IP
+
+.nf
 $ salloc \-N16 xterm
-.br
 salloc: Granted job allocation 65537
-.br
-(at this point the xterm appears, and salloc waits for xterm to exit)
-.br
+# (at this point the xterm appears, and salloc waits for xterm to exit)
 salloc: Relinquishing job allocation 65537
-.LP
-To grab an allocation of nodes and launch a parallel application on one command
-line (See the \fBsalloc\fR man page for more examples):
-.IP
-salloc \-N5 srun \-n10 myprogram
-.LP
-To create a heterogeneous job with 3 components, each allocating a unique set
+.fi
+
+.TP
+To grab an allocation of nodes and launch a parallel application on one \
+command line:
+
+.nf
+$ salloc \-N5 srun \-n10 myprogram
+.fi
+
+.TP
+To create a heterogeneous job with 3 components, each allocating a unique set \
 of nodes:
-.IP
-salloc -w node[2-3] : -w node4 : -w node[5-7] bash
-.br
+
+.nf
+$ salloc -w node[2-3] : -w node4 : -w node[5-7] bash
 salloc: job 32294 queued and waiting for resources
-.br
 salloc: job 32294 has been allocated resources
-.br
 salloc: Granted job allocation 32294
+.fi
 
 .SH "COPYING"
 Copyright (C) 2006\-2007 The Regents of the University of California.

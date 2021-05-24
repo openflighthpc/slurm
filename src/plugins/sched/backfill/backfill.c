@@ -672,7 +672,7 @@ static uint32_t _my_sleep(int64_t usec)
 
 static void _load_config(void)
 {
-	char *sched_params, *tmp_ptr, *tmp_str = NULL;
+	char *sched_params, *tmp_ptr;
 
 	sched_params = slurm_get_sched_params();
 
@@ -906,20 +906,18 @@ static void _load_config(void)
 	}
 
 	bf_hetjob_prio = 0;
-	tmp_str = xstrdup(sched_params);
-	if ((tmp_ptr = xstrcasestr(tmp_str, "bf_hetjob_prio="))) {
-		tmp_ptr = strtok(tmp_ptr + 15, ",");
-		if (!xstrcasecmp(tmp_ptr, "min"))
+	if ((tmp_ptr = xstrcasestr(sched_params, "bf_hetjob_prio="))) {
+		tmp_ptr += 15;
+		if (!xstrncasecmp(tmp_ptr, "min", 3))
 			bf_hetjob_prio |= HETJOB_PRIO_MIN;
-		else if (!xstrcasecmp(tmp_ptr, "max"))
+		else if (!xstrncasecmp(tmp_ptr, "max", 3))
 			bf_hetjob_prio |= HETJOB_PRIO_MAX;
-		else if (!xstrcasecmp(tmp_ptr, "avg"))
+		else if (!xstrncasecmp(tmp_ptr, "avg", 3))
 			bf_hetjob_prio |= HETJOB_PRIO_AVG;
 		else
 			error("Invalid SchedulerParameters bf_hetjob_prio: %s",
 			      tmp_ptr);
 	}
-	xfree(tmp_str);
 
 	bf_hetjob_immediate = false;
 	if (xstrcasestr(sched_params, "bf_hetjob_immediate"))
@@ -2504,9 +2502,10 @@ skip_start:
 				if (is_job_array_head &&
 				    (job_ptr->array_task_id != NO_VAL)) {
 					/* Try starting next task of job array */
+					job_record_t *tmp = job_ptr;
 					job_ptr = find_job_record(job_ptr->
 								  array_job_id);
-					if (job_ptr &&
+					if (job_ptr && (job_ptr != tmp) &&
 					    IS_JOB_PENDING(job_ptr) &&
 					    (bb_g_job_test_stage_in(
 						    job_ptr, false) == 1))
