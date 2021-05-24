@@ -1705,7 +1705,7 @@ inval:
 static int _get_core_resrcs(slurmctld_resv_t *resv_ptr)
 {
 	int i, i_first, i_last, j, node_inx;
-	int c, core_offset_local, core_offset_global, core_end;
+	int c, core_offset_local, core_offset_global, core_end, core_set;
 
 	if (!resv_ptr->core_resrcs || resv_ptr->core_bitmap ||
 	    !resv_ptr->core_resrcs->core_bitmap ||
@@ -1746,11 +1746,15 @@ static int _get_core_resrcs(slurmctld_resv_t *resv_ptr)
 		core_end = cr_get_coremap_offset(i + 1);
 		core_offset_local = get_job_resources_offset(
 					resv_ptr->core_resrcs, node_inx, 0, 0);
+		core_set = 0;
 		for (c = core_offset_global, j = core_offset_local;
-	 	     c < core_end; c++, j++) {
+		     c < core_end &&
+		     core_set < resv_ptr->core_resrcs->cpus[node_inx];
+		     c++, j++) {
 			if (!bit_test(resv_ptr->core_resrcs->core_bitmap, j))
 				continue;
 			bit_set(resv_ptr->core_bitmap, c);
+			core_set++;
 		}
 	}
 
@@ -3477,6 +3481,10 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr)
 		if ((error_code = _delete_resv_internal(resv_ptr)) !=
 		    SLURM_SUCCESS)
 			goto update_failure;
+		if (resv_ptr->start_time > now) {
+			resv_ptr->ctld_flags |= RESV_CTLD_EPILOG;
+			resv_ptr->ctld_flags |= RESV_CTLD_PROLOG;
+		}
 		if (_advance_resv_time(resv_ptr) != SLURM_SUCCESS) {
 			error_code = ESLURM_RESERVATION_NO_SKIP;
 			error("Couldn't skip reservation %s, this should never happen",
@@ -4253,8 +4261,9 @@ static bool _validate_user_access(slurmctld_resv_t *resv_ptr,
 	} else {
 		for (int i = 0; i < resv_ptr->user_cnt; i++) {
 			if (resv_ptr->user_list[i] == uid)
-				return 0;
+				return 1;
 		}
+		return 0;
 	}
 
 	return 1;
@@ -4851,7 +4860,7 @@ static int _select_nodes(resv_desc_msg_t *resv_desc_ptr,
 				rc = ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
 
 			/* filter nodes that won't work from all bitmaps */
-			for (size_t i = 1; (i < MAX_BITMAPS) && node_bitmaps[i];
+			for (size_t i = 0; (i < MAX_BITMAPS) && node_bitmaps[i];
 			     i++)
 				bit_and(node_bitmaps[i], tmp_bitmap);
 			FREE_NULL_BITMAP(tmp_bitmap);
@@ -6724,6 +6733,11 @@ static int _advance_resv_time(slurmctld_resv_t *resv_ptr)
 	}
 
 	if (day_cnt) {
+		if (!(resv_ptr->ctld_flags & RESV_CTLD_PROLOG))
+			_run_script(slurm_conf.resv_prolog, resv_ptr);
+		if (!(resv_ptr->ctld_flags & RESV_CTLD_EPILOG))
+			_run_script(slurm_conf.resv_epilog, resv_ptr);
+
 		/*
 		 * Repeated reservations need a new reservation id. Try to get a
 		 * new one and update the ID if successful.
@@ -6745,12 +6759,14 @@ static int _advance_resv_time(slurmctld_resv_t *resv_ptr)
 		verbose("%s: reservation %s advanced by %d day%s",
 			__func__, resv_ptr->name, day_cnt,
 			(day_cnt > 1 ? "s" : ""));
-
+		resv_ptr->idle_start_time = 0;
 		resv_ptr->start_time = resv_ptr->start_time_first;
 		_advance_time(&resv_ptr->start_time, day_cnt);
 		resv_ptr->start_time_prev = resv_ptr->start_time;
 		resv_ptr->start_time_first = resv_ptr->start_time;
 		_advance_time(&resv_ptr->end_time, day_cnt);
+		resv_ptr->ctld_flags &= (~RESV_CTLD_PROLOG);
+		resv_ptr->ctld_flags &= (~RESV_CTLD_EPILOG);
 		_post_resv_create(resv_ptr);
 		last_resv_update = time(NULL);
 		schedule_resv_save();
@@ -6884,16 +6900,7 @@ extern void job_resv_check(void)
 			info("Reservation %s has no more jobs for %s, ending it",
 			     resv_ptr->name, tmp_pct);
 
-			/*
-			 * Reset time here for reoccurring reservations so we
-			 * don't continually keep running this.
-			 */
-			resv_ptr->idle_start_time = 0;
-
 			(void)_post_resv_delete(resv_ptr);
-
-			if (!(resv_ptr->ctld_flags & RESV_CTLD_EPILOG))
-				_run_script(slurm_conf.resv_epilog, resv_ptr);
 
 			/*
 			 * If we are ending a reoccurring reservation advance
@@ -6904,14 +6911,24 @@ extern void job_resv_check(void)
 						 RESERVE_FLAG_WEEKEND |
 						 RESERVE_FLAG_WEEKLY))) {
 				/*
+				 * Reset time here for reoccurring reservations
+				 * so we don't continually keep running this.
+				 */
+				resv_ptr->idle_start_time = 0;
+
+				if (!(resv_ptr->ctld_flags & RESV_CTLD_PROLOG))
+					_run_script(slurm_conf.resv_prolog,
+						    resv_ptr);
+				if (!(resv_ptr->ctld_flags & RESV_CTLD_EPILOG))
+					_run_script(slurm_conf.resv_epilog,
+						    resv_ptr);
+				/*
 				 * Clear resv ptrs on finished jobs still
 				 * pointing to this reservation.
 				 */
 				_clear_job_resv(resv_ptr);
 				list_delete_item(iter);
-			} else {
-				resv_ptr->ctld_flags &= (~RESV_CTLD_PROLOG);
-				resv_ptr->ctld_flags &= (~RESV_CTLD_EPILOG);
+			} else if (resv_ptr->start_time <= now) {
 				_advance_resv_time(resv_ptr);
 			}
 
@@ -6925,8 +6942,8 @@ extern void job_resv_check(void)
 			_validate_node_choice(resv_ptr);
 			continue;
 		}
-		if (!(resv_ptr->ctld_flags &
-		      (RESV_CTLD_EPILOG | RESV_CTLD_PROLOG)))
+		if (!(resv_ptr->ctld_flags & RESV_CTLD_PROLOG) ||
+		    !(resv_ptr->ctld_flags & RESV_CTLD_EPILOG))
 			continue;
 		(void)_advance_resv_time(resv_ptr);
 		if ((!resv_ptr->job_run_cnt ||
@@ -7367,7 +7384,10 @@ static int _foreach_reservation_license_list(void *x, void *key)
 	slurmctld_resv_t *reservation = (slurmctld_resv_t *) x;
 	time_t now = time(NULL);
 
-	if (reservation->flags & RESERVE_FLAG_FLEX) {
+	if (!reservation->license_list) {
+		/* reservation without licenses */
+		return 0;
+	} else if (reservation->flags & RESERVE_FLAG_FLEX) {
 		/*
 		 * Treat FLEX reservations as always active
 		 * and skip time bounds checks.

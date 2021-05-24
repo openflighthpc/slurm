@@ -2749,9 +2749,9 @@ extern int _unpack_job_step_create_request_msg(
 	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		char *temp_str;
 		uint16_t uint16_tmp;
-		if (unpack_step_id_members(&tmp_ptr->step_id, buffer,
-					   protocol_version) != SLURM_SUCCESS)
-			goto unpack_error;
+		safe_unpack32(&tmp_ptr->step_id.job_id, buffer);
+		safe_unpack32(&tmp_ptr->step_id.step_id, buffer);
+		tmp_ptr->step_id.step_het_comp = NO_VAL;
 		safe_unpack32(&tmp_ptr->user_id, buffer);
 		safe_unpack32(&tmp_ptr->min_nodes, buffer);
 		safe_unpack32(&tmp_ptr->max_nodes, buffer);
@@ -2762,6 +2762,7 @@ extern int _unpack_job_step_create_request_msg(
 		safe_unpack32(&tmp_ptr->num_tasks, buffer);
 		safe_unpack64(&tmp_ptr->pn_min_memory, buffer);
 		safe_unpack32(&tmp_ptr->time_limit, buffer);
+		tmp_ptr->threads_per_core = NO_VAL16;
 
 		safe_unpack16(&tmp_ptr->relative, buffer);
 		safe_unpack32(&tmp_ptr->task_dist, buffer);
@@ -2771,6 +2772,8 @@ extern int _unpack_job_step_create_request_msg(
 		safe_unpack16(&uint16_tmp, buffer); /* was exclusive */
 		if (uint16_tmp)
 			tmp_ptr->flags |= SSF_EXCLUSIVE;
+		else
+			tmp_ptr->flags |= SSF_WHOLE;
 
 		safe_unpack16(&tmp_ptr->immediate, buffer);
 		safe_unpack16(&tmp_ptr->resv_port_cnt, buffer);
@@ -7726,7 +7729,7 @@ _unpack_step_alloc_info_msg(step_alloc_info_msg_t **
 		safe_unpack32(&job_desc_ptr->step_id.job_id, buffer);
 		safe_unpack32(&job_desc_ptr->het_job_offset, buffer);
 		safe_unpack32(&job_desc_ptr->step_id.step_id, buffer);
-		convert_old_step_id(&job_desc_ptr->step_id.step_id);
+		job_desc_ptr->step_id.step_het_comp = NO_VAL;
 
 		return SLURM_SUCCESS;
 
@@ -9005,15 +9008,15 @@ _unpack_job_step_kill_msg(job_step_kill_msg_t ** msg_ptr, Buf buffer,
 		if (unpack_step_id_members(&msg->step_id, buffer,
 					   protocol_version) != SLURM_SUCCESS)
 			goto unpack_error;
-		safe_unpackstr_xmalloc(&(msg)->sjob_id, &cc, buffer);
+		safe_unpackstr_xmalloc(&msg->sjob_id, &cc, buffer);
 		safe_unpackstr_xmalloc(&msg->sibling, &cc, buffer);
 		safe_unpack16(&msg->signal, buffer);
 		safe_unpack16(&msg->flags, buffer);
 	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		safe_unpackstr_xmalloc(&(msg)->sjob_id, &cc, buffer);
-		if (unpack_step_id_members(&msg->step_id, buffer,
-					   protocol_version) != SLURM_SUCCESS)
-			goto unpack_error;
+		safe_unpackstr_xmalloc(&msg->sjob_id, &cc, buffer);
+		safe_unpack32(&msg->step_id.job_id, buffer);
+		safe_unpack32(&msg->step_id.step_id, buffer);
+		msg->step_id.step_het_comp = NO_VAL;
 		safe_unpackstr_xmalloc(&msg->sibling, &cc, buffer);
 		safe_unpack16(&msg->signal, buffer);
 		safe_unpack16(&msg->flags, buffer);
@@ -9106,7 +9109,6 @@ _unpack_update_job_step_msg(step_update_request_msg_t ** msg_ptr, Buf buffer,
 		safe_unpackstr_xmalloc(&msg->name, &uint32_tmp, buffer);
 		safe_unpack_time(&msg->start_time, buffer);
 		safe_unpack32(&msg->step_id, buffer);
-		convert_old_step_id(&msg->step_id);
 		safe_unpack32(&msg->time_limit, buffer);
 	} else {
 		error("%s: protocol_version %hu not supported",
@@ -9701,9 +9703,9 @@ _unpack_job_step_info_req_msg(job_step_info_request_msg_t ** msg, Buf buffer,
 		safe_unpack16(&job_step_info->show_flags, buffer);
 	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		safe_unpack_time(&job_step_info->last_update, buffer);
-		if (unpack_step_id_members(&job_step_info->step_id, buffer,
-					   protocol_version) != SLURM_SUCCESS)
-			goto unpack_error;
+		safe_unpack32(&job_step_info->step_id.job_id, buffer);
+		safe_unpack32(&job_step_info->step_id.step_id, buffer);
+		job_step_info->step_id.step_het_comp = NO_VAL;
 		safe_unpack16(&job_step_info->show_flags, buffer);
 	} else {
 		error("%s: protocol_version %hu not supported",
@@ -10073,7 +10075,7 @@ _pack_batch_job_launch_msg(batch_job_launch_msg_t * msg, Buf buffer,
 	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		pack32(msg->job_id, buffer);
 		pack32(msg->het_job_id, buffer);
-		pack32(SLURM_BATCH_SCRIPT, buffer);
+		pack_old_step_id(SLURM_BATCH_SCRIPT, buffer);
 
 		pack32(msg->uid, buffer);
 		pack32(msg->gid, buffer);
@@ -14175,10 +14177,15 @@ extern int slurm_unpack_selected_step(slurm_selected_step_t **step,
 		safe_unpack32(&step_ptr->step_id.job_id, buffer);
 		safe_unpack32(&step_ptr->het_job_offset, buffer);
 		safe_unpack32(&step_ptr->step_id.step_id, buffer);
-		/* Old Slurm used to use INFINITE To denote the batch script */
+		/*
+		 * convert_old_step_id will not convert step_id correctly in
+		 * this particular situation.
+		 * Old Slurm used to use INFINITE To denote the batch script.
+		 * The extern step was not searchable before 20.11. NO_VAL meant
+		 * not set.
+		 */
 		if (step_ptr->step_id.step_id == INFINITE)
 			step_ptr->step_id.step_id = SLURM_BATCH_SCRIPT;
-		convert_old_step_id(&step_ptr->step_id.step_id);
 		step_ptr->step_id.step_het_comp = NO_VAL;
 	} else
 		goto unpack_error;

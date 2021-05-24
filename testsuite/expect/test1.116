@@ -110,18 +110,15 @@ expect {
 		fail "Slurm appears to be down"
 	}
 	timeout {
-		log_error "srun not responding"
 		slow_kill $sbatch_pid
-		set exit_code 1
+		fail "srun not responding"
 	}
 	eof {
 		wait
 	}
 }
 if {$no_start != 0} {
-	if {$job_id != 0} {
-		cancel_job $job_id
-	}
+	cancel_job $job_id
 	skip "Partition too small for test"
 }
 if {$job_id == 0} {

@@ -61,6 +61,15 @@ static config_response_msg_t *_fetch_parent(pid_t pid)
 	int status;
 
 	safe_read(to_parent[0], &len, sizeof(int));
+
+	/*
+	 * A zero across the pipe indicates the child failed to fetch the
+	 * config file for some reason. The child will have already printed
+	 * some error messages about this, so just return.
+	 */
+	if (len <= 0)
+		return NULL;
+
 	buffer = init_buf(len);
 	safe_read(to_parent[0], buffer->head, len);
 
@@ -86,7 +95,7 @@ static void _fetch_child(List controllers, uint32_t flags)
 {
 	config_response_msg_t *config;
 	buf_t *buffer = init_buf(1024 * 1024);
-	int len;
+	int len = 0;
 
 	/*
 	 * Parent process was holding this, but we need to drop it before
@@ -102,6 +111,7 @@ static void _fetch_child(List controllers, uint32_t flags)
 
 	if (!config) {
 		error("%s: failed to fetch remote configs", __func__);
+		safe_write(to_parent[1], &len, sizeof(int));
 		_exit(1);
 	}
 
@@ -350,6 +360,8 @@ extern int write_configs_to_conf_cache(config_response_msg_t *msg,
 		return SLURM_ERROR;
 	if (_write_conf(dir, "gres.conf", msg->gres_config))
 		return SLURM_ERROR;
+	if (_write_conf(dir, "job_container.conf", msg->xtra_config))
+		return SLURM_ERROR;
 	if (_write_conf(dir, "knl_cray.conf", msg->knl_cray_config))
 		return SLURM_ERROR;
 	if (_write_conf(dir, "knl_generic.conf", msg->knl_generic_config))
@@ -399,6 +411,7 @@ extern void load_config_response_msg(config_response_msg_t *msg, int flags)
 		   &msg->cgroup_allowed_devices_file_config);
 	_load_conf(dir, "ext_sensors.conf", &msg->ext_sensors_config);
 	_load_conf(dir, "gres.conf", &msg->gres_config);
+	_load_conf(dir, "job_container.conf", &msg->xtra_config);
 	_load_conf(dir, "knl_cray.conf", &msg->knl_cray_config);
 	_load_conf(dir, "knl_generic.conf", &msg->knl_generic_config);
 	_load_conf(dir, "plugstack.conf", &msg->plugstack_config);

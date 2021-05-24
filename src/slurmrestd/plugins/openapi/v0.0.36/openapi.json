@@ -1481,6 +1481,9 @@
       },
       "v0.0.36_job_properties": {
         "type": "object",
+        "required": [
+          "environment"
+        ],
         "properties": {
           "account": {
             "type": "string",
@@ -1811,6 +1814,10 @@
             "type": "integer",
             "format": "int64",
             "description": "timestamp of node boot"
+          },
+          "comment": {
+            "type": "string",
+            "description": "Arbitrary comment"
           },
           "cores": {
             "type": "integer",

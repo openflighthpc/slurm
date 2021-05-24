@@ -519,6 +519,9 @@ extern int load_all_node_state ( bool state_only )
 					node_ptr->node_state |= NODE_STATE_MAINT;
 				if (node_state & NODE_STATE_REBOOT)
 					node_ptr->node_state |= NODE_STATE_REBOOT;
+				if (node_state & NODE_STATE_REBOOT_ISSUED)
+					node_ptr->node_state |=
+						NODE_STATE_REBOOT_ISSUED;
 				if (node_state & NODE_STATE_POWER_UP) {
 					if (power_save_mode) {
 						node_ptr->node_state |=
@@ -1426,6 +1429,8 @@ int update_node ( update_node_msg_t * update_node_msg )
 				node_ptr->node_state &= (~NODE_STATE_DRAIN);
 				node_ptr->node_state &= (~NODE_STATE_FAIL);
 				node_ptr->node_state &= (~NODE_STATE_REBOOT);
+				node_ptr->node_state &=
+					(~NODE_STATE_REBOOT_ISSUED);
 
 				if (IS_NODE_POWERING_DOWN(node_ptr)) {
 					node_ptr->node_state &=
@@ -1556,7 +1561,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 				     IS_NODE_MIXED(node_ptr)) &&
 				    (IS_NODE_POWER_SAVE(node_ptr) ||
 				     IS_NODE_POWER_UP(node_ptr))) {
-					info("%s: DRAIN/FAIL request for node %s which is allocated and being powered up. Requeueing jobs",
+					info("%s: DRAIN/FAIL request for node %s which is allocated and being powered up. Requeuing jobs",
 					     __func__, this_node_name);
 					kill_running_job_by_node_name(
 								this_node_name);
@@ -2639,6 +2644,12 @@ extern int validate_node_specs(slurm_msg_t *slurm_msg, bool *newly_up)
 		last_node_update = now;
 	}
 
+	if (node_ptr->last_response &&
+	    (node_ptr->boot_time > node_ptr->last_response) &&
+	    !IS_NODE_UNKNOWN(node_ptr)) {	/* Node just rebooted */
+		(void) node_features_g_get_node(node_ptr->name);
+	}
+
 	if (IS_NODE_NO_RESPOND(node_ptr) ||
 	    IS_NODE_POWER_UP(node_ptr) ||
 	    IS_NODE_POWER_SAVE(node_ptr)) {
@@ -2651,6 +2662,15 @@ extern int validate_node_specs(slurm_msg_t *slurm_msg, bool *newly_up)
 		 */
 		if (IS_NODE_POWER_UP(node_ptr) || IS_NODE_POWER_SAVE(node_ptr))
 			node_ptr->last_idle = now;
+
+		/*
+		 * Set last_response if it's expected. Otherwise let it get
+		 * marked at "unexpectedly rebooted". Not checked with
+		 * IS_NODE_POWER_SAVE() above to allow ReturnToService !=2
+		 * catch nodes [re]booting unexpectedly.
+		 */
+		if (IS_NODE_POWER_UP(node_ptr))
+			node_ptr->last_response = now;
 
 		node_ptr->node_state &= (~NODE_STATE_NO_RESPOND);
 		node_ptr->node_state &= (~NODE_STATE_POWER_UP);
@@ -2665,12 +2685,6 @@ extern int validate_node_specs(slurm_msg_t *slurm_msg, bool *newly_up)
 	}
 
 	node_flags = node_ptr->node_state & NODE_STATE_FLAGS;
-
-	if (node_ptr->last_response &&
-	    (node_ptr->boot_time > node_ptr->last_response) &&
-	    !IS_NODE_UNKNOWN(node_ptr)) {	/* Node just rebooted */
-		(void) node_features_g_get_node(node_ptr->name);
-	}
 
 	if (error_code) {
 		if (!IS_NODE_DOWN(node_ptr)
@@ -2712,6 +2726,7 @@ extern int validate_node_specs(slurm_msg_t *slurm_msg, bool *newly_up)
 				    !is_node_in_maint_reservation(node_inx))
 					node_flags &= (~NODE_STATE_MAINT);
 				node_flags &= (~NODE_STATE_REBOOT);
+				node_flags &= (~NODE_STATE_REBOOT_ISSUED);
 			}
 			if (reg_msg->job_count) {
 				node_ptr->node_state = NODE_STATE_ALLOCATED |
@@ -2741,6 +2756,7 @@ extern int validate_node_specs(slurm_msg_t *slurm_msg, bool *newly_up)
 			     (node_ptr->boot_time <
 			      node_ptr->last_response)))) {
 			node_flags &= (~NODE_STATE_REBOOT);
+			node_flags &= (~NODE_STATE_REBOOT_ISSUED);
 			if (node_ptr->next_state != NO_VAL)
 				node_flags &= (~NODE_STATE_DRAIN);
 
@@ -4151,6 +4167,7 @@ extern void check_reboot_nodes()
 			 * Remove states now so that event state shows as DOWN.
 			 */
 			node_ptr->node_state &= (~NODE_STATE_REBOOT);
+			node_ptr->node_state &= (~NODE_STATE_REBOOT_ISSUED);
 			node_ptr->node_state &= (~NODE_STATE_DRAIN);
 			node_ptr->boot_req_time = 0;
 			set_node_down_ptr(node_ptr, NULL);

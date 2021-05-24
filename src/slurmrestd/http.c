@@ -731,6 +731,7 @@ static int _on_message_complete(http_parser *parser)
 		request_t *nrequest = xmalloc(sizeof(*request));
 		nrequest->magic = MAGIC_REQUEST_T;
 		nrequest->headers = list_create(_free_http_header);
+		nrequest->context = request->context;
 		request->context->request = nrequest;
 		parser->data = nrequest;
 		_free_request_t(request);
@@ -903,7 +904,7 @@ extern http_context_t *_http_context_new(void)
 	http_parser_init(parser, HTTP_REQUEST);
 	context->parser = parser;
 
-	context->auth = rest_auth_g_new();
+	context->auth = NULL;
 
 	return context;
 }

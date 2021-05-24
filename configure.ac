@@ -535,6 +535,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/job_container/Makefile
 		 src/plugins/job_container/cncu/Makefile
 		 src/plugins/job_container/none/Makefile
+		 src/plugins/job_container/tmpfs/Makefile
 		 src/plugins/job_submit/Makefile
 		 src/plugins/job_submit/all_partitions/Makefile
 		 src/plugins/job_submit/cray_aries/Makefile
@@ -618,6 +619,8 @@ AC_CONFIG_FILES([Makefile
 		 testsuite/slurm_unit/common/slurm_protocol_pack/Makefile
 		 testsuite/slurm_unit/common/slurmdb_pack/Makefile
 		 testsuite/slurm_unit/common/bitstring/Makefile
+		 testsuite/slurm_unit/slurmd/Makefile
+		 testsuite/slurm_unit/slurmd/common/Makefile
 		 ]
 )
 

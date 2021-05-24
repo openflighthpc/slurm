@@ -590,6 +590,21 @@ extern bool validate_operator(uid_t uid)
 		return false;
 }
 
+extern bool validate_operator_user_rec(slurmdb_user_rec_t *user)
+{
+#ifndef NDEBUG
+	if (drop_priv)
+		return false;
+#endif
+	if ((user->uid == 0) ||
+	    (user->uid == slurm_conf.slurm_user_id) ||
+	    (user->admin_level >= SLURMDB_ADMIN_OPERATOR))
+		return true;
+	else
+		return false;
+
+}
+
 static void _set_hostname(slurm_msg_t *msg, char **alloc_node)
 {
 	slurm_addr_t addr;
@@ -862,7 +877,8 @@ extern resource_allocation_response_msg_t *build_alloc_msg(
 		if (job_ptr->details->env_cnt) {
 			alloc_msg->env_size = job_ptr->details->env_cnt;
 			alloc_msg->environment =
-				xmalloc(sizeof(char *) * alloc_msg->env_size);
+				xcalloc(alloc_msg->env_size + 1,
+					sizeof(char *));
 			for (i = 0; i < alloc_msg->env_size; i++) {
 				alloc_msg->environment[i] =
 					xstrdup(job_ptr->details->env_sup[i]);
@@ -2163,12 +2179,16 @@ static void _slurm_rpc_complete_batch_script(slurm_msg_t *msg)
 					    .step_het_comp = NO_VAL };
 		step_record_t *step_ptr = find_step_record(job_ptr, &step_id);
 		if (!step_ptr) {
-			error("%s: Could not find batch step for %pJ, this should never happen",
+			/* Ignore duplicate or late batch complete RPCs */
+			debug("%s: Ignoring late or duplicate REQUEST_COMPLETE_BATCH_SCRIPT received for job %pJ",
 			      __func__, job_ptr);
-			step_ptr = build_batch_step(job_ptr);
-		}
-
-		if (step_ptr->step_id.step_id != SLURM_BATCH_SCRIPT) {
+			if (!(msg->flags & CTLD_QUEUE_PROCESSING)) {
+				unlock_slurmctld(job_write_lock);
+				_throttle_fini(&active_rpc_cnt);
+			}
+			slurm_send_rc_msg(msg, SLURM_SUCCESS);
+			return;
+		} else if (step_ptr->step_id.step_id != SLURM_BATCH_SCRIPT) {
 			error("%s: %pJ Didn't find batch step, found step %u. This should never happen.",
 			      __func__, job_ptr, step_ptr->step_id.step_id);
 		} else {
@@ -2391,8 +2411,11 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 			unlock_slurmctld(job_write_lock);
 			_throttle_fini(&active_rpc_cnt);
 		}
-		if ((error_code == ESLURM_PROLOG_RUNNING) ||
-		    (error_code == ESLURM_DISABLED))
+		if (error_code == ESLURM_PROLOG_RUNNING)
+			log_flag(STEPS, "%s for configuring JobId=%u: %s",
+				 __func__, req_step_msg->step_id.job_id,
+				 slurm_strerror(error_code));
+		else if (error_code == ESLURM_DISABLED)
 			log_flag(STEPS, "%s for suspended JobId=%u: %s",
 				 __func__, req_step_msg->step_id.job_id,
 				 slurm_strerror(error_code));
@@ -2402,6 +2425,10 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 				 slurm_strerror(error_code));
 		slurm_send_rc_msg(msg, error_code);
 	} else {
+		slurm_step_layout_t *step_layout = NULL;
+		dynamic_plugin_data_t *select_jobinfo = NULL;
+		dynamic_plugin_data_t *switch_job = NULL;
+
 		log_flag(STEPS, "%s: %pS %s %s",
 			 __func__, step_rec, req_step_msg->node_list, TIME_STR);
 
@@ -2409,7 +2436,8 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 		job_step_resp.job_step_id = step_rec->step_id.step_id;
 		job_step_resp.resv_ports  = step_rec->resv_ports;
 
-		job_step_resp.step_layout = step_rec->step_layout;
+		step_layout = slurm_step_layout_copy(step_rec->step_layout);
+		job_step_resp.step_layout = step_layout;
 
 #ifdef HAVE_FRONT_END
 		if (step_rec->job_ptr->batch_host) {
@@ -2424,8 +2452,13 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 		}
 		job_step_resp.cred           = slurm_cred;
 		job_step_resp.use_protocol_ver = step_rec->start_protocol_ver;
-		job_step_resp.select_jobinfo = step_rec->select_jobinfo;
-		job_step_resp.switch_job     = step_rec->switch_job;
+		select_jobinfo = select_g_select_jobinfo_copy(
+			step_rec->select_jobinfo);
+		job_step_resp.select_jobinfo = select_jobinfo;
+		if (step_rec->switch_job)
+			switch_g_duplicate_jobinfo(step_rec->switch_job,
+						   &switch_job);
+		job_step_resp.switch_job = switch_job;
 
 		if (!(msg->flags & CTLD_QUEUE_PROCESSING)) {
 			unlock_slurmctld(job_write_lock);
@@ -2436,7 +2469,12 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 		resp.data = &job_step_resp;
 
 		slurm_send_node_msg(msg->conn_fd, &resp);
+
 		slurm_cred_destroy(slurm_cred);
+		slurm_step_layout_destroy(step_layout);
+		select_g_select_jobinfo_free(select_jobinfo);
+		switch_g_free_jobinfo(switch_job);
+
 		schedule_job_save();	/* Sets own locks */
 	}
 }
@@ -5247,6 +5285,7 @@ static void _slurm_rpc_reboot_nodes(slurm_msg_t *msg)
 		if (!bit_test(bitmap, i))
 			continue;
 		if (IS_NODE_FUTURE(node_ptr) ||
+		    IS_NODE_REBOOT(node_ptr) ||
 		    (IS_NODE_CLOUD(node_ptr) && IS_NODE_POWER_SAVE(node_ptr))) {
 			bit_clear(bitmap, i);
 			continue;

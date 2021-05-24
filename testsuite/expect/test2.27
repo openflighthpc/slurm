@@ -26,7 +26,6 @@
 ############################################################################
 source ./globals
 
-set exit_code        0
 set job_id           0
 set node_cnt         1
 set user             [get_my_user_name]
@@ -37,7 +36,7 @@ if {[get_config_param "FrontendName"] ne "MISSING"} {
 	skip "This test is incompatible with front-end systems"
 }
 
-set available [available_nodes]
+set available [llength [get_nodes_by_state idle,alloc,comp]]
 if {$available < $node_cnt} {
 	skip "Not enough nodes currently available ($available avail, $node_cnt needed)"
 }
@@ -137,8 +136,6 @@ proc update { job_id args regex {negate_match 0}} {
 }
 
 set config_path [get_conf_path]
-fail_on_error "Unable to determine configuration path"
-
 save_conf $config_path/slurm.conf
 
 proc test_it {} {
@@ -187,7 +184,7 @@ proc test_it {} {
 # Test w/out MailDomain
 set domain ""
 exec $bin_sed -i "s/^\\(MailDomain.*\\)/#\\1/Ig" $config_path/slurm.conf
-reconfigure
+reconfigure -fail
 test_it
 
 
@@ -197,5 +194,5 @@ set mail_conf "
 MailDomain = $domain
 "
 exec $bin_echo $mail_conf >> $config_path/slurm.conf
-reconfigure
+reconfigure -fail
 test_it

@@ -546,6 +546,7 @@ env_vars_t env_vars[] = {
   { "SLURM_DISABLE_STATUS", 'X' },
   { "SLURM_DISTRIBUTION", 'm' },
   { "SLURM_EPILOG", LONG_OPT_EPILOG },
+  { "SLURM_EXACT", LONG_OPT_EXACT },
   { "SLURM_EXCLUSIVE", LONG_OPT_EXCLUSIVE },
   { "SLURM_EXPORT_ENV", LONG_OPT_EXPORT },
   { "SRUN_EXPORT_ENV", LONG_OPT_EXPORT }, /* overrides SLURM_EXPORT_ENV */
@@ -608,7 +609,6 @@ env_vars_t env_vars[] = {
   { "SLURM_WAIT", 'W' },
   { "SLURM_WAIT4SWITCH", LONG_OPT_SWITCH_WAIT },
   { "SLURM_WCKEY", LONG_OPT_WCKEY },
-  { "SLURM_WHOLE", LONG_OPT_WHOLE },
   { "SLURM_WORKING_DIR", 'D' },
   { "SLURMD_DEBUG", LONG_OPT_SLURMD_DEBUG },
   { NULL }
@@ -627,7 +627,8 @@ static void _opt_env(int het_job_offset)
 
 	while (e->var) {
 		if ((val = getenv(e->var)))
-			slurm_process_option(&opt, e->type, val, true, false);
+			slurm_process_option_or_exit(&opt, e->type, val, true,
+						     false);
 		if ((het_job_offset >= 0) &&
 		    strcmp(e->var, "SLURM_JOBID") &&
 		    strcmp(e->var, "SLURM_JOB_ID")) {
@@ -635,23 +636,15 @@ static void _opt_env(int het_job_offset)
 			snprintf(key, sizeof(key), "%s_PACK_GROUP_%d",
 				 e->var, het_job_offset);
 			if ((val = getenv(key)))
-				slurm_process_option(&opt, e->type, val,
-						     true, false);
+				slurm_process_option_or_exit(&opt, e->type, val,
+							     true, false);
 			snprintf(key, sizeof(key), "%s_HET_GROUP_%d",
 				 e->var, het_job_offset);
 			if ((val = getenv(key)))
-				slurm_process_option(&opt, e->type, val,
-						     true, false);
+				slurm_process_option_or_exit(&opt, e->type, val,
+							     true, false);
 		}
 		e++;
-	}
-
-	/* Running srun within an existing srun. Don't inherit values. */
-	if (getenv("SLURM_STEP_ID")) {
-		xfree(sropt.cpu_bind);
-		sropt.cpu_bind_type = 0;
-		xfree(opt.mem_bind);
-		opt.mem_bind_type = 0;
 	}
 
 	/* Process spank env options */
@@ -681,7 +674,8 @@ static bitstr_t *_get_het_group(const int argc, char **argv,
 	optind = 0;
 	while ((opt_char = getopt_long(argc, argv, opt_string,
 				       optz, &option_index)) != -1) {
-		slurm_process_option(&opt, opt_char, optarg, false, true);
+		slurm_process_option_or_exit(&opt, opt_char, optarg, false,
+					     true);
 	}
 	slurm_option_table_destroy(optz);
 	xfree(opt_string);
@@ -734,7 +728,8 @@ static void _set_options(const int argc, char **argv)
 	optind = 0;
 	while ((opt_char = getopt_long(argc, argv, opt_string,
 				       optz, &option_index)) != -1) {
-		slurm_process_option(&opt, opt_char, optarg, false, false);
+		slurm_process_option_or_exit(&opt, opt_char, optarg, false,
+					     false);
 	}
 
 	slurm_option_table_destroy(optz);
@@ -900,6 +895,11 @@ static bool _opt_verify(void)
 		xfree(opt.burst_buffer_file);
 	}
 
+	if (sropt.exact && sropt.whole) {
+		error("--exact and --whole are mutually exclusive.");
+		verified = false;
+	}
+
 	if (sropt.no_alloc && !opt.nodelist) {
 		error("must specify a node list with -Z, --no-allocate.");
 		verified = false;
@@ -937,19 +937,22 @@ static bool _opt_verify(void)
 			opt.nodes_set = false;
 	}
 
-	validate_hint_option(&opt);
-	if (opt.hint) {
-		if(sropt.cpu_bind_type & ~CPU_BIND_VERBOSE)
-		       fatal("--hint and --cpu-bind (other than --cpu-bind=verbose) are mutually exclusive.");
-		xassert(opt.ntasks_per_core == NO_VAL);
-		xassert(opt.threads_per_core == NO_VAL);
-		if (verify_hint(opt.hint,
-				&opt.sockets_per_node,
-				&opt.cores_per_socket,
-				&opt.threads_per_core,
-				&opt.ntasks_per_core,
-				&sropt.cpu_bind_type)) {
-			exit(error_exit);
+	if (opt.hint &&
+	    !validate_hint_option(&opt)) {
+		if (sropt.cpu_bind_type & ~CPU_BIND_VERBOSE) {
+			if (opt.verbose)
+				info("--hint and --cpu-bind (other than --cpu-bind=verbose) are mutually exclusive. Ignoring --hint.");
+		} else {
+			xassert(opt.ntasks_per_core == NO_VAL);
+			xassert(opt.threads_per_core == NO_VAL);
+			if (verify_hint(opt.hint,
+					&opt.sockets_per_node,
+					&opt.cores_per_socket,
+					&opt.threads_per_core,
+					&opt.ntasks_per_core,
+					&sropt.cpu_bind_type)) {
+				exit(error_exit);
+			}
 		}
 	}
 
@@ -1026,10 +1029,10 @@ static bool _opt_verify(void)
 
 	if (sropt.parallel_debug) {
 		/* Set --threads 1 */
-		slurm_process_option(&opt, 'T', "1", false, false);
+		slurm_process_option_or_exit(&opt, 'T', "1", false, false);
 		/* Set --msg-timeout 15 */
-		slurm_process_option(&opt, LONG_OPT_MSG_TIMEOUT, "1",
-				     false, false);
+		slurm_process_option_or_exit(&opt, LONG_OPT_MSG_TIMEOUT, "1",
+					     false, false);
 	}
 
 	pmi_server_max_threads(sropt.max_threads);
@@ -1198,7 +1201,8 @@ static bool _opt_verify(void)
 			 * which influences future decisions.
 			 */
 			xstrfmtcat(tmp, "%d", opt.min_nodes);
-			slurm_process_option(&opt, 'N', tmp, false, false);
+			slurm_process_option_or_exit(&opt, 'N', tmp, false,
+						     false);
 			xfree(tmp);
 			if (hl_cnt > opt.min_nodes) {
 				int del_cnt, i;
@@ -1422,12 +1426,12 @@ static void _usage(void)
 "            [--cpu-bind=...] [--mem-bind=...] [--network=type]\n"
 "            [--ntasks-per-node=n] [--ntasks-per-socket=n] [reservation=name]\n"
 "            [--ntasks-per-core=n] [--mem-per-cpu=MB] [--preserve-env]\n"
-"            [--profile=...] [--whole]\n"
+"            [--profile=...] [--exact]\n"
 "            [--mail-type=type] [--mail-user=user] [--nice[=value]]\n"
 "            [--prolog=fname] [--epilog=fname]\n"
 "            [--task-prolog=fname] [--task-epilog=fname]\n"
 "            [--ctrl-comm-ifhn=addr] [--multi-prog] [--mcs-label=mcs]\n"
-"            [--cpu-freq=min[-max[:gov]] [--power=flags] [--spread-job]\n"
+"            [--cpu-freq=min[-max[:gov]]] [--power=flags] [--spread-job]\n"
 "            [--switches=max-switches{@max-time-to-wait}] [--reboot]\n"
 "            [--core-spec=cores] [--thread-spec=threads]\n"
 "            [--bb=burst_buffer_spec] [--bbf=burst_buffer_file]\n"
@@ -1436,7 +1440,7 @@ static void _usage(void)
 "            [-w hosts...] [-x hosts...] [--use-min-nodes]\n"
 "            [--mpi-combine=yes|no] [--het-group=value]\n"
 "            [--cpus-per-gpu=n] [--gpus=n] [--gpu-bind=...] [--gpu-freq=...]\n"
-"            [--gpus-per-node=n] [--gpus-per-socket=n]  [--gpus-per-task=n]\n"
+"            [--gpus-per-node=n] [--gpus-per-socket=n] [--gpus-per-task=n]\n"
 "            [--mem-per-gpu=MB]\n"
 "            executable [args...]\n");
 
@@ -1544,8 +1548,6 @@ static void _help(void)
 "  -W, --wait=sec              seconds to wait after first task exits\n"
 "                              before killing job\n"
 "      --wckey=wckey           wckey to run job under\n"
-"      --whole                 Use entire node(s) in the allocation\n"
-"                              for the step\n"
 "  -X, --disable-status        Disable Ctrl-C status feature\n"
 "\n"
 "Constraint options:\n"
@@ -1562,12 +1564,15 @@ static void _help(void)
 "  -Z, --no-allocate           don't allocate nodes (must supply -w)\n"
 "\n"
 "Consumable resources related options:\n"
-"      --exclusive[=user]      allocate nodes in exclusive mode when\n"
-"                              cpu consumable resource is enabled\n"
-"                              or don't share CPUs for job steps\n"
+"      --exact                 use only the resources requested for the step\n"
+"                              (by default, all non-gres resources on each node\n"
+"                              in the allocation will be used in the step)\n"
+"      --exclusive[=user]      for job allocation, this allocates nodes in\n"
+"                              in exclusive mode\n"
+"                              for job steps, this is equivalent to --exact\n"
 "      --exclusive[=mcs]       allocate nodes in exclusive mode when\n"
 "                              cpu consumable resource is enabled\n"
-"                              and mcs plugin is enabled\n"
+"                              and mcs plugin is enabled (--exact implied)\n"
 "                              or don't share CPUs for job steps\n"
 "      --mem-per-cpu=MB        maximum amount of real memory per allocated\n"
 "                              cpu required by the job.\n"
@@ -1575,12 +1580,16 @@ static void _help(void)
 "      --resv-ports            reserve communication ports\n"
 "\n"
 "Affinity/Multi-core options: (when the task/affinity plugin is enabled)\n"
-"  -B, --extra-node-info=S[:C[:T]]           Expands to:\n"
+"                              For the following 4 options, you are\n"
+"                              specifying the minimum resources available for\n"
+"                              the node(s) allocated to the job.\n"
 "      --sockets-per-node=S    number of sockets per node to allocate\n"
 "      --cores-per-socket=C    number of cores per socket to allocate\n"
 "      --threads-per-core=T    number of threads per core to allocate\n"
-"                              each field can be 'min' or wildcard '*'\n"
-"                              total cpus requested = (N x S x C x T)\n"
+"  -B  --extra-node-info=S[:C[:T]]  combine request of sockets per node,\n"
+"                              cores per socket and threads per core.\n"
+"                              Specify an asterisk (*) as a placeholder,\n"
+"                              a minimum value, or a min-max range.\n"
 "\n"
 "      --ntasks-per-core=n     number of tasks to invoke on each core\n"
 "      --ntasks-per-socket=n   number of tasks to invoke on each socket\n");

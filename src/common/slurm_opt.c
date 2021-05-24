@@ -1474,8 +1474,10 @@ static slurm_cli_opt_t slurm_opt_exclude = {
 static int arg_set_exclusive(slurm_opt_t *opt, const char *arg)
 {
 	if (!arg || !xstrcasecmp(arg, "exclusive")) {
-		if (opt->srun_opt)
+		if (opt->srun_opt) {
 			opt->srun_opt->exclusive = true;
+			opt->srun_opt->exact = true;
+		}
 		opt->shared = JOB_SHARED_NONE;
 	} else if (!xstrcasecmp(arg, "oversubscribe")) {
 		opt->shared = JOB_SHARED_OK;
@@ -1500,8 +1502,10 @@ static int arg_set_data_exclusive(slurm_opt_t *opt, const data_t *arg,
 		ADD_DATA_ERROR("Unable to read string", rc);
 	else {
 		if (!str || !xstrcasecmp(str, "exclusive")) {
-			if (opt->srun_opt)
+			if (opt->srun_opt) {
 				opt->srun_opt->exclusive = true;
+				opt->srun_opt->exact = true;
+			}
 			opt->shared = JOB_SHARED_NONE;
 		} else if (!xstrcasecmp(str, "oversubscribe")) {
 			opt->shared = JOB_SHARED_OK;
@@ -1548,6 +1552,16 @@ static slurm_cli_opt_t slurm_opt_exclusive = {
 	.get_func = arg_get_exclusive,
 	.reset_func = arg_reset_shared,
 	.reset_each_pass = true,
+};
+
+COMMON_SRUN_BOOL_OPTION(exact);
+static slurm_cli_opt_t slurm_opt_exact = {
+	.name = "exact",
+	.has_arg = no_argument,
+	.val = LONG_OPT_EXACT,
+	.set_func_srun = arg_set_exact,
+	.get_func = arg_get_exact,
+	.reset_func = arg_reset_exact,
 };
 
 static int arg_set_export(slurm_opt_t *opt, const char *arg)
@@ -3159,55 +3173,33 @@ static slurm_cli_opt_t slurm_opt_ntasks_per_gpu = {
 
 static int arg_set_open_mode(slurm_opt_t *opt, const char *arg)
 {
-	uint8_t tmp = 0;
-
-	if (!opt->sbatch_opt && !opt->srun_opt)
-		return SLURM_ERROR;
-
 	if (arg && (arg[0] == 'a' || arg[0] == 'A'))
-		tmp = OPEN_MODE_APPEND;
+		opt->open_mode = OPEN_MODE_APPEND;
 	else if (arg && (arg[0] == 't' || arg[0] == 'T'))
-		tmp = OPEN_MODE_TRUNCATE;
+		opt->open_mode = OPEN_MODE_TRUNCATE;
 	else {
 		error("Invalid --open-mode specification");
-		exit(-1);
+		return SLURM_ERROR;
 	}
-
-	if (opt->sbatch_opt)
-		opt->sbatch_opt->open_mode = tmp;
-	if (opt->srun_opt)
-		opt->srun_opt->open_mode = tmp;
 
 	return SLURM_SUCCESS;
 }
 static int arg_set_data_open_mode(slurm_opt_t *opt, const data_t *arg,
 				  data_t *errors)
 {
-	int rc;
+	int rc = SLURM_SUCCESS;
 	char *str = NULL;
-
-	if (!opt->sbatch_opt && !opt->srun_opt)
-		return SLURM_ERROR;
 
 	if ((rc = data_get_string_converted(arg, &str)))
 		ADD_DATA_ERROR("Unable to read string", rc);
 	else {
-		uint8_t tmp = 0;
-
 		if (str && (str[0] == 'a' || str[0] == 'A'))
-			tmp = OPEN_MODE_APPEND;
+			opt->open_mode = OPEN_MODE_APPEND;
 		else if (str && (str[0] == 't' || str[0] == 'T'))
-			tmp = OPEN_MODE_TRUNCATE;
+			opt->open_mode = OPEN_MODE_TRUNCATE;
 		else {
 			rc = SLURM_ERROR;
 			ADD_DATA_ERROR("Invalid open mode specification", rc);
-		}
-
-		if (!rc) {
-			if (opt->sbatch_opt)
-				opt->sbatch_opt->open_mode = tmp;
-			if (opt->srun_opt)
-				opt->srun_opt->open_mode = tmp;
 		}
 	}
 
@@ -3216,34 +3208,20 @@ static int arg_set_data_open_mode(slurm_opt_t *opt, const data_t *arg,
 }
 static char *arg_get_open_mode(slurm_opt_t *opt)
 {
-	uint8_t tmp = 0;
-	if (!opt->sbatch_opt && !opt->srun_opt)
-		return xstrdup("invalid-context");
-
-	if (opt->sbatch_opt)
-		tmp = opt->sbatch_opt->open_mode;
-	if (opt->srun_opt)
-		tmp = opt->srun_opt->open_mode;
-
-	if (tmp == OPEN_MODE_APPEND)
+	if (opt->open_mode == OPEN_MODE_APPEND)
 		return xstrdup("a");
-	if (tmp == OPEN_MODE_TRUNCATE)
+	if (opt->open_mode == OPEN_MODE_TRUNCATE)
 		return xstrdup("t");
 
 	return NULL;
 }
-static void arg_reset_open_mode(slurm_opt_t *opt)
-{
-	if (opt->sbatch_opt)
-		opt->sbatch_opt->open_mode = 0;
-	if (opt->srun_opt)
-		opt->srun_opt->open_mode = 0;
-}
+COMMON_OPTION_RESET(open_mode, 0);
 static slurm_cli_opt_t slurm_opt_open_mode = {
 	.name = "open-mode",
 	.has_arg = required_argument,
 	.val = LONG_OPT_OPEN_MODE,
 	.set_func_sbatch = arg_set_open_mode,
+	.set_func_scron = arg_set_open_mode,
 	.set_func_srun = arg_set_open_mode,
 	.set_func_data = arg_set_data_open_mode,
 	.get_func = arg_get_open_mode,
@@ -4923,6 +4901,7 @@ static const slurm_cli_opt_t *common_options[] = {
 	&slurm_opt_distribution,
 	&slurm_opt_epilog,
 	&slurm_opt_error,
+	&slurm_opt_exact,
 	&slurm_opt_exclude,
 	&slurm_opt_exclusive,
 	&slurm_opt_export,
@@ -5315,12 +5294,14 @@ int slurm_process_option(slurm_opt_t *opt, int optval, const char *arg,
 		}
 	}
 
-	/*
-	 * If we've made it here, then the set_func failed for some reason.
-	 * At which point we'll abandon ship.
-	 */
-	exit(-1);
 	return SLURM_ERROR;
+}
+
+void slurm_process_option_or_exit(slurm_opt_t *opt, int optval, const char *arg,
+				  bool set_by_env, bool early_pass)
+{
+	if (slurm_process_option(opt, optval, arg, set_by_env, early_pass))
+		exit(-1);
 }
 
 void slurm_print_set_options(slurm_opt_t *opt)
@@ -5585,13 +5566,15 @@ extern void validate_memory_options(slurm_opt_t *opt)
 	}
 }
 
-extern void validate_hint_option(slurm_opt_t *opt)
+extern int validate_hint_option(slurm_opt_t *opt)
 {
 	if (slurm_option_set_by_cli(opt, LONG_OPT_HINT) &&
 	    (slurm_option_set_by_cli(opt, LONG_OPT_NTASKSPERCORE) ||
 	     slurm_option_set_by_cli(opt, LONG_OPT_THREADSPERCORE) ||
 	     slurm_option_set_by_cli(opt, 'B')) ) {
-		fatal("Following options are mutually exclusive: --hint, --ntasks-per-core, --threads-per-core, -B.");
+		if (opt->verbose)
+			info("Following options are mutually exclusive: --hint, --ntasks-per-core, --threads-per-core, -B. Ignoring --hint.");
+		return SLURM_ERROR;
 	} else if (slurm_option_set_by_cli(opt, LONG_OPT_HINT)) {
 		slurm_option_reset(opt, "ntasks-per-core");
 		slurm_option_reset(opt, "threads-per-core");
@@ -5600,12 +5583,16 @@ extern void validate_hint_option(slurm_opt_t *opt)
 		   slurm_option_set_by_cli(opt, LONG_OPT_THREADSPERCORE) ||
 		   slurm_option_set_by_cli(opt, 'B')) {
 		slurm_option_reset(opt, "hint");
+		return SLURM_ERROR;
 	} else if (slurm_option_set_by_env(opt, LONG_OPT_HINT) &&
 		   (slurm_option_set_by_env(opt, LONG_OPT_NTASKSPERCORE) ||
 		    slurm_option_set_by_env(opt, LONG_OPT_THREADSPERCORE) ||
 		    slurm_option_set_by_env(opt, 'B'))) {
-		fatal("Following options are mutually exclusive: --hint, --ntasks-per-core, --threads-per-core, -B, but more than one set by environment variables.");
+		if (opt->verbose)
+			info("Following options are mutually exclusive: --hint, --ntasks-per-core, --threads-per-core, -B, but more than one set by environment variables. Ignoring SLURM_HINT.");
+		return SLURM_ERROR;
 	}
+	return SLURM_SUCCESS;
 }
 
 static void _validate_ntasks_per_gpu(slurm_opt_t *opt)

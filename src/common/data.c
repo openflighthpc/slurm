@@ -478,12 +478,12 @@ extern void data_free(data_t *data)
 
 extern data_type_t data_get_type(const data_t *data)
 {
+	if (!data)
+		return DATA_TYPE_NONE;
+
 	_check_magic(data);
 
-	if (data)
-		return data->type;
-	else
-		return DATA_TYPE_NONE;
+	return data->type;
 }
 
 extern data_t *data_set_float(data_t *data, double value)
@@ -881,8 +881,11 @@ int data_get_string_converted(const data_t *d, char **buffer)
 		    DATA_TYPE_STRING)
 			_buffer = xstrdup(data_get_string(dclone));
 		FREE_NULL_DATA(dclone);
-	} else
+	} else {
 		_buffer = xstrdup(data_get_string_const(d));
+		if (!_buffer)
+			_buffer = xstrdup("");
+	}
 
 	if (_buffer) {
 		*buffer = _buffer;
