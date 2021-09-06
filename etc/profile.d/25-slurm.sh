@@ -26,3 +26,11 @@
 #==============================================================================
 export PATH=$PATH:/opt/flight/opt/slurm/bin
 
+flight_slurm_exit() {
+  PATH=$(echo "$PATH" | sed 's,:/opt/flight/opt/slurm/bin,,g')
+}
+
+if [ "${flight_DEFINES}" ]; then
+  flight_DEFINES+=(flight_slurm_exit)
+  flight_DEFINES_exits=(flight_slurm_exit "${flight_DEFINES_exits[@]}")
+fi
