@@ -1,4 +1,4 @@
-.TH sacct "1" "Slurm Commands" "April 2021" "Slurm Commands"
+.TH sacct "1" "Slurm Commands" "June 2021" "Slurm Commands"
 
 .SH "NAME"
 sacct \- displays accounting data for all jobs and job steps in the
@@ -74,6 +74,14 @@ Displays a brief listing consisting of JobID, State, and ExitCode.
 .IP
 
 .TP
+\f3\-B\fP\f3,\fP \f3\-\-batch-script\fP
+This option will print the batch script of job if the job used one. If the job
+didn't have a script 'NONE' is output.
+NOTE: AccountingStoreFlags=job_script is required for this.
+NOTE: Requesting specific job(s) with '\-j' is required for this.
+.IP
+
+.TP
 \f3\-c\fP\f3,\fP \f3\-\-completion\fP
 Use job completion data instead of job accounting.  The \f3JobCompType\fP
 parameter in the slurm.conf file must be defined to a non\-none option.
@@ -111,6 +119,14 @@ NOTE: Revoked federated sibling jobs are hidden unless the \-\-duplicates option
 is specified.
 
 .TP
+\f3\-\-env\-vars\fP
+This option will print the running environment of a batch job, otherwise 'NONE'
+is output.
+NOTE: AccountingStoreFlags=job_env is required for this.
+NOTE: Requesting specific job(s) with '\-j' is required for this.
+.IP
+
+.TP
 \f3\-e\fP\f3,\fP \f3\-\-helpformat\fP
 .IP
 Print a list of fields that can be specified with the \f3\-\-format\fP option.
@@ -126,29 +142,30 @@ Account             AdminComment        AllocCPUS           AllocNodes
 AllocTRES           AssocID             AveCPU              AveCPUFreq
 AveDiskRead         AveDiskWrite        AvePages            AveRSS
 AveVMSize           BlockID             Cluster             Comment
-Constraints         ConsumedEnergy      ConsumedEnergyRaw   CPUTime
-CPUTimeRAW          DBIndex             DerivedExitCode     Elapsed
-ElapsedRaw          Eligible            End                 ExitCode
-Flags               GID                 Group               JobID
-JobIDRaw            JobName             Layout              MaxDiskRead
-MaxDiskReadNode     MaxDiskReadTask     MaxDiskWrite        MaxDiskWriteNode
-MaxDiskWriteTask    MaxPages            MaxPagesNode        MaxPagesTask
-MaxRSS              MaxRSSNode          MaxRSSTask          MaxVMSize
-MaxVMSizeNode       MaxVMSizeTask       McsLabel            MinCPU
-MinCPUNode          MinCPUTask          NCPUS               NNodes
-NodeList            NTasks              Priority            Partition
-QOS                 QOSRAW              Reason              ReqCPUFreq
-ReqCPUFreqMin       ReqCPUFreqMax       ReqCPUFreqGov       ReqCPUS
-ReqMem              ReqNodes            ReqTRES             Reservation
-ReservationId       Reserved            ResvCPU             ResvCPURAW
-Start               State               Submit              Suspended
-SystemCPU           SystemComment       Timelimit           TimelimitRaw
-TotalCPU            TRESUsageInAve      TRESUsageInMax      TRESUsageInMaxNode
-TRESUsageInMaxTask  TRESUsageInMin      TRESUsageInMinNode  TRESUsageInMinTask
-TRESUsageInTot      TRESUsageOutAve     TRESUsageOutMax     TRESUsageOutMaxNode
-TRESUsageOutMaxTask TRESUsageOutMin     TRESUsageOutMinNode TRESUsageOutMinTask
-TRESUsageOutTot     UID                 User                UserCPU
-WCKey               WCKeyID             WorkDir
+Constraints         Container           ConsumedEnergy      ConsumedEnergyRaw
+CPUTime             CPUTimeRAW          DBIndex             DerivedExitCode
+Elapsed             ElapsedRaw          Eligible            End
+ExitCode            Flags               GID                 Group
+JobID               JobIDRaw            JobName             Layout
+MaxDiskRead         MaxDiskReadNode     MaxDiskReadTask     MaxDiskWrite
+MaxDiskWriteNode    MaxDiskWriteTask    MaxPages            MaxPagesNode
+MaxPagesTask        MaxRSS              MaxRSSNode          MaxRSSTask
+MaxVMSize           MaxVMSizeNode       MaxVMSizeTask       McsLabel
+MinCPU              MinCPUNode          MinCPUTask          NCPUS
+NNodes              NodeList            NTasks              Priority
+Partition           QOS                 QOSRAW              Reason
+ReqCPUFreq          ReqCPUFreqMin       ReqCPUFreqMax       ReqCPUFreqGov
+ReqCPUS             ReqMem              ReqNodes            ReqTRES
+Reservation         ReservationId       Reserved            ResvCPU
+ResvCPURAW          Start               State               Submit
+SubmitLine          Suspended           SystemCPU           SystemComment
+Timelimit           TimelimitRaw        TotalCPU            TRESUsageInAve
+TRESUsageInMax      TRESUsageInMaxNode  TRESUsageInMaxTask  TRESUsageInMin
+TRESUsageInMinNode  TRESUsageInMinTask  TRESUsageInTot      TRESUsageOutAve
+TRESUsageOutMax     TRESUsageOutMaxNode TRESUsageOutMaxTask TRESUsageOutMin
+TRESUsageOutMinNode TRESUsageOutMinTask TRESUsageOutTot     UID
+User                UserCPU             WCKey               WCKeyID
+WorkDir
 .ft 1
 .fi
 .RE
@@ -235,6 +252,10 @@ NOTE: If --state is also specified, as non-eligible are not PD,
 then non-eligible jobs will not be displayed.
 See the \fBDEFAULT TIME WINDOW\fR for details about how this option
 changes the default \-S and \-E options.
+
+.TP
+\f3\-\-json\fP
+Dump job information as JSON. All other formating arugments will be ignored.
 
 .TP
 \f3\-k\fP\f3,\fP \f3\-\-timelimit-min\fP
@@ -467,6 +488,10 @@ into consideration.
 \fBNOTE\fR: Without including steps, utilization statistics for job
 allocation(s) will be reported as zero.
 
+.TP
+\f3\-\-yaml\fP
+Dump job information as YAML. All other formating arugments will be ignored.
+
 .SS "Job Accounting Fields"
 The following describes each job accounting field:
 .RS
@@ -533,8 +558,8 @@ Cluster name.
 
 .TP
 \f3Comment\fP
-The job's comment string when the AccountingStoreJobComment parameter
-in the slurm.conf file is set (or defaults) to YES.  The Comment
+The job's comment string when the AccountingStoreFlags parameter
+in the slurm.conf file contains 'job_comment'.  The Comment
 string can be modified by invoking \f3sacctmgr modify job\fP or the
 specialized \f3sjobexitmod\fP command.
 
@@ -543,6 +568,10 @@ specialized \f3sjobexitmod\fP command.
 Total energy consumed by all tasks in job, in joules.
 Note: Only in case of exclusive job allocation this value
 reflects the jobs' real energy consumption.
+
+.TP
+\f3Container\fP
+Path to OCI Container Bundle requested.
 
 .TP
 \f3CPUTime\fP
@@ -562,9 +591,9 @@ or the specialized \f3sjobexitmod\fP command.
 
 .TP
 \f3Elapsed\fP
-The jobs elapsed time.
+The job's elapsed time.
 .IP
-The format of this fields output is as follows:
+The format of this field's output is as follows:
 .RS
 .PD "0"
 .HP
@@ -627,6 +656,11 @@ Heterogeneous jobs are in the form:
 .IP
 \f2HetJobID+HetJobOffset\fP
 \&.
+
+When printing job arrays, performance of the command can be measurably improved
+for systems with large numbers of jobs when a single job ID is specified. By
+default, this field size will be limited to 64 bytes. Use the environment
+variable SLURM_BITSTR_LEN to specify larger field sizes.
 
 .TP
 \f3JobIDRaw\fP
@@ -779,8 +813,8 @@ Number of requested CPUs.
 
 .TP
 \f3ReqMem\fP
-Minimum required memory for the job, in MB. A 'c' at the end of
-number represents Memory Per CPU, a 'n' represents Memory Per Node.
+Minimum required memory for the job. It may have a letter appended to it
+indicating units (M for megabytes, G for gigabytes, etc.).
 Note: This value is only from the job allocation, not the step.
 
 .TP
@@ -847,6 +881,10 @@ The time the job was submitted in the same format as \f3End\fP.
 NOTE: If a job is requeued, the submit time is reset.  To obtain the
 original submit time it is necessary to use the \-D or \-\-duplicate option
 to display all duplicate entries for a job.
+
+.TP
+\f3SubmitLine\fP
+The full command issued to submit the job.
 
 .TP
 \f3Suspended\fP
@@ -1078,13 +1116,21 @@ information you are trying to gather.
 Some \fBsacct\fR options may
 be set via environment variables. These environment variables,
 along with their corresponding options, are listed below. (Note:
-Commandline options will always override these settings.)
+Command line options will always override these settings.)
 .TP 20
 \fBSACCT_FEDERATION\fR
 Same as \fB\-\-federation\fR
 .TP
 \fBSACCT_LOCAL\fR
 Same as \fB\-\-local\fR
+
+.TP
+\fBSLURM_BITSTR_LEN\fR
+Specifies the string length to be used for holding a job array's task ID
+expression. The default value is 64 bytes. A value of 0 will print the full
+expression with any length required. Larger values may adversely impact the
+application performance.
+
 .TP
 \fBSLURM_CONF\fR
 The location of the Slurm configuration file.
@@ -1266,7 +1312,7 @@ Copyright (C) 2005\-2007 Copyright Hewlett\-Packard Development Company L.P.
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
-Copyright (C) 2010\-2014 SchedMD LLC.
+Copyright (C) 2010\-2021 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <https://slurm.schedmd.com/>.

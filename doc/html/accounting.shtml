@@ -91,7 +91,7 @@ The configuration required to use SlurmDBD will be described below.
 Storing information directly into a database would be similar.</p>
 
 <p>Note that SlurmDBD relies upon existing Slurm plugins
-for authentication and Slurm sql for database use, but the other Slurm
+for authentication and Slurm SQL for database use, but the other Slurm
 commands and daemons are not required on the host where
 SlurmDBD is installed. Install the <i>slurm</i> and <i>slurm-slurmdbd</i>
 RPMs on the server where SlurmDBD is to run.</p>
@@ -281,7 +281,7 @@ $cat my.cnf
 <i>COMPACT</i> which could cause some issues during an upgrade when creating
 tables. In more recent versions it was changed to <i>DYNAMIC</i>. The row
 format of a table determines how its rows are physically stored in pages and
-directly affects the performane of queries and DML operations. In very specific
+directly affects the performance of queries and DML operations. In very specific
 situations using a format other than DYNAMIC can lead to rows not fitting into
 pages and MySQL can throw an error during the creation of the table because of
 that. Therefore it is recommended to read carefully about the row format before
@@ -294,12 +294,23 @@ allow the conversion to proceed:
 <i>[Warning] InnoDB: Cannot add field ... in table ... because after adding it, the row size is Y which is greater than maximum allowed size (X) for a record on index leaf page.</i>
 </pre>
 
-You can check your default row format value by showing the
-<i>innodb_default_row_format</i> variable, and how the tables are created
-by running:
-
+You can see what the default row format is by showing the
+<i>innodb_default_row_format</i> variable:
 <pre>
-mysql> SHOW TABLE STATUS IN table_name;
+mysql> SHOW VARIABLES LIKE 'innodb_default_row_format';
++---------------------------+---------+
+| Variable_name             | Value   |
++---------------------------+---------+
+| innodb_default_row_format | dynamic |
++---------------------------+---------+
+1 row in set (0.001 sec)
+</pre>
+
+You can also see how the tables are created by running the following command,
+where <i>db_name</i> is the name of your Slurm database (StorageLoc) set in
+your slurmdbd.conf:
+<pre>
+mysql> SHOW TABLE STATUS IN db_name;
 </pre>
 </p>
 
@@ -812,7 +823,7 @@ completely. This is meant to clean up after typographical errors.
 Removing user associations or accounts, however, will cause slurmctld to lose
 track of usage data for that user/account.</p>
 
-<p style="text-align:center;">Last modified 12 May 2020</p>
+<p style="text-align:center;">Last modified 14 July 2021</p>
 
 <!--#include virtual="footer.txt"-->
 

@@ -127,6 +127,7 @@ static void _partial_free_dbd_job_start(void *object)
 		xfree(req->account);
 		xfree(req->array_task_str);
 		xfree(req->constraints);
+		xfree(req->env);
 		xfree(req->mcs_label);
 		xfree(req->name);
 		xfree(req->nodes);
@@ -134,6 +135,8 @@ static void _partial_free_dbd_job_start(void *object)
 		xfree(req->node_inx);
 		xfree(req->wckey);
 		xfree(req->gres_used);
+		FREE_NULL_BUFFER(req->script_buf);
+		xfree(req->submit_line);
 		xfree(req->tres_alloc_str);
 		xfree(req->tres_req_str);
 		xfree(req->work_dir);
@@ -205,6 +208,7 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 
 	req->db_index      = job_ptr->db_index;
 	req->constraints   = xstrdup(job_ptr->details->features);
+	req->container     = xstrdup(job_ptr->container);
 	req->job_state     = job_ptr->job_state;
 	req->state_reason_prev = job_ptr->state_reason_prev_db;
 	req->name          = xstrdup(job_ptr->name);
@@ -225,6 +229,7 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	if (job_ptr->details) {
 		req->req_cpus = job_ptr->details->min_cpus;
 		req->req_mem = job_ptr->details->pn_min_memory;
+		req->submit_line = xstrdup(job_ptr->details->submit_line);
 	}
 	req->resv_id       = job_ptr->resv_id;
 	req->priority      = job_ptr->priority;
@@ -236,6 +241,23 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	req->uid           = job_ptr->user_id;
 	req->qos_id        = job_ptr->qos_id;
 	req->gres_used     = xstrdup(job_ptr->gres_used);
+
+	/* Only send this once per instance of the job! */
+	if (!job_ptr->db_index || (job_ptr->db_index == NO_VAL64)) {
+		if (slurm_conf.conf_flags & CTL_CONF_SJS)
+			req->script_buf = get_job_script(job_ptr);
+		if (job_ptr->batch_flag &&
+		    (slurm_conf.conf_flags & CTL_CONF_SJE)) {
+			uint32_t env_size = 0;
+			char **env = get_job_env(job_ptr, &env_size);
+			if (env) {
+				for (int i = 0; i < env_size; i++)
+					xstrfmtcat(req->env, "%s\n", env[i]);
+				xfree(env[0]);
+				xfree(env);
+			}
+		}
+	}
 
 	return SLURM_SUCCESS;
 }
@@ -2773,6 +2795,7 @@ extern int jobacct_storage_p_step_start(void *db_conn, step_record_t *step_ptr)
 	memset(&req, 0, sizeof(dbd_step_start_msg_t));
 
 	req.assoc_id    = step_ptr->job_ptr->assoc_id;
+	req.container   = xstrdup(step_ptr->container);
 	req.db_index    = step_ptr->job_ptr->db_index;
 	req.name        = step_ptr->name;
 	req.nodes       = node_list;
@@ -2799,6 +2822,7 @@ extern int jobacct_storage_p_step_start(void *db_conn, step_record_t *step_ptr)
 
 	req.total_tasks = tasks;
 
+	req.submit_line = step_ptr->submit_line;
 	req.tres_alloc_str = step_ptr->tres_alloc_str;
 
 	req.req_cpufreq_min = step_ptr->cpu_freq_min;

@@ -80,6 +80,7 @@
 #include "src/slurmctld/fed_mgr.h"
 #include "src/slurmctld/front_end.h"
 #include "src/slurmctld/gang.h"
+#include "src/slurmctld/gres_ctld.h"
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/job_scheduler.h"
 #include "src/slurmctld/licenses.h"
@@ -124,9 +125,12 @@ static int	correspond_after_task_cnt = CORRESPOND_ARRAY_TASK_CNT;
 static int	save_last_part_update = 0;
 
 static pthread_mutex_t sched_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int sched_pend_thread = 0;
-static bool sched_running = false;
+static pthread_cond_t  sched_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t thread_id_sched = 0;
+static bool sched_full_queue = false;
+static int sched_requests = 0;
 static struct timeval sched_last = {0, 0};
+
 static uint32_t max_array_size = NO_VAL;
 static bool bf_hetjob_immediate = false;
 static uint16_t bf_hetjob_prio = 0;
@@ -137,8 +141,8 @@ extern diag_stats_t slurmctld_diag_stats;
 
 static int _find_singleton_job (void *x, void *key)
 {
-	struct job_record *qjob_ptr = (struct job_record *) x;
-	struct job_record *job_ptr = (struct job_record *) key;
+	job_record_t *qjob_ptr = (job_record_t *) x;
+	job_record_t *job_ptr = (job_record_t *) key;
 
 	xassert (qjob_ptr->magic == JOB_MAGIC);
 
@@ -562,6 +566,8 @@ extern List build_job_queue(bool clear_start, bool backfill)
 	list_iterator_reset(job_iterator);
 	while ((job_ptr = list_next(job_iterator))) {
 		if (IS_JOB_PENDING(job_ptr)) {
+			/* Remove backfill flag */
+			job_ptr->bit_flags &= ~BACKFILL_SCHED;
 			set_job_failed_assoc_qos_ptr(job_ptr);
 			acct_policy_handle_accrue_time(job_ptr, false);
 		}
@@ -784,113 +790,85 @@ static bool _all_partition_priorities_same(void)
 }
 
 /*
- * schedule - attempt to schedule all pending jobs
- *	pending jobs for each partition will be scheduled in priority
- *	order until a request fails
- * IN job_limit - maximum number of jobs to test now, avoid testing the full
- *		  queue on every job submit (0 means to use the system default,
- *		  SchedulerParameters for default_queue_depth)
- * RET count of jobs scheduled
- * Note: If the scheduler has executed recently, rather than executing again
- *	right away, a thread will be spawned to execute later in an effort
- *	to reduce system overhead.
- * Note: We re-build the queue every time. Jobs can not only be added
- *	or removed from the queue, but have their priority or partition
- *	changed with the update_job RPC. In general nodes will be in priority
- *	order (by submit time), so the sorting should be pretty fast.
- * Note: job_write_lock must be unlocked before calling this.
+ * Queue requests of job scheduler
  */
-extern int schedule(bool full_queue)
+extern void schedule(bool full_queue)
 {
-	static bool sched_full_queue = false;
-	int job_count = 0;
-	struct timeval now;
-	long delta_t;
 
 	if (slurmctld_config.scheduling_disabled)
-		return 0;
-
-	gettimeofday(&now, NULL);
-	if (sched_last.tv_sec == 0) {
-		delta_t = sched_min_interval;
-	} else if (sched_running) {
-		delta_t = 0;
-	} else {
-		delta_t  = (now.tv_sec  - sched_last.tv_sec) * USEC_IN_SEC;
-		delta_t +=  now.tv_usec - sched_last.tv_usec;
-	}
+		return;
 
 	slurm_mutex_lock(&sched_mutex);
-	/*
-	 * A thread may not get its scheduling request immediately satisfied.
-	 * If any of those requests were for full_queue, the next thread that
-	 * launches _schedule() will ensure that is honored eventually.
-	 */
 	sched_full_queue |= full_queue;
-
-	if (delta_t >= sched_min_interval) {
-		/* Temporarily set time in the future until we get the real
-		 * scheduler completion time */
-		sched_last.tv_sec  = now.tv_sec;
-		sched_last.tv_usec = now.tv_usec;
-		sched_running = true;
-		slurm_mutex_unlock(&sched_mutex);
-
-		job_count = _schedule(sched_full_queue);
-
-		slurm_mutex_lock(&sched_mutex);
-		gettimeofday(&now, NULL);
-		sched_last.tv_sec  = now.tv_sec;
-		sched_last.tv_usec = now.tv_usec;
-		sched_full_queue = false;
-		sched_running = false;
-		slurm_mutex_unlock(&sched_mutex);
-	} else if (sched_pend_thread == 0) {
-		/* We don't want to run now, but also don't want to defer
-		 * this forever, so spawn a thread to run later */
-		sched_pend_thread = 1;
-		slurm_thread_create_detached(NULL, _sched_agent, NULL);
-		slurm_mutex_unlock(&sched_mutex);
-	} else {
-		/* Nothing to do, agent already pending */
-		slurm_mutex_unlock(&sched_mutex);
-	}
-
-	return job_count;
+	slurm_cond_broadcast(&sched_cond);
+	sched_requests++;
+	slurm_mutex_unlock(&sched_mutex);
 }
 
-/* Thread used to possibly start job scheduler later, if nothing else does */
+/* detached thread periodically attempts to schedule jobs */
 static void *_sched_agent(void *args)
 {
 	long delta_t;
 	struct timeval now;
-	useconds_t usec;
 	int job_cnt;
+	bool full_queue;
 
-	usec = sched_min_interval / 2;
-	usec = MIN(usec, 1000000);
-	usec = MAX(usec, 10000);
-
-	/* Keep waiting until scheduler() can really run */
-	while (!slurmctld_config.shutdown_time) {
-		usleep(usec);
-		if (sched_running)
-			continue;
-		gettimeofday(&now, NULL);
-		delta_t  = (now.tv_sec  - sched_last.tv_sec) * USEC_IN_SEC;
-		delta_t +=  now.tv_usec - sched_last.tv_usec;
-		if (delta_t >= sched_min_interval)
-			break;
+#if HAVE_SYS_PRCTL_H
+	if (prctl(PR_SET_NAME, "sched_agent", NULL, NULL, NULL) < 0) {
+		error("cannot set my name to _sched_agent %m");
 	}
+#endif
 
-	job_cnt = schedule(0);
-	slurm_mutex_lock(&sched_mutex);
-	sched_pend_thread = 0;
-	slurm_mutex_unlock(&sched_mutex);
-	if (job_cnt) {
-		/* jobs were started, save state */
-		schedule_node_save();		/* Has own locking */
-		schedule_job_save();		/* Has own locking */
+	while (!slurmctld_config.shutdown_time) {
+
+		slurm_mutex_lock(&sched_mutex);
+		while (1) {
+			if (slurmctld_config.shutdown_time) {
+				slurm_mutex_unlock(&sched_mutex);
+				return NULL;
+			}
+
+			gettimeofday(&now, NULL);
+			delta_t  = (now.tv_sec  - sched_last.tv_sec) *
+				   USEC_IN_SEC;
+			delta_t +=  now.tv_usec - sched_last.tv_usec;
+
+			if (sched_requests && delta_t > sched_min_interval ) {
+				break;
+			} else if (sched_requests) {
+				struct timespec ts = {0, 0};
+				int64_t nsec;
+
+				nsec = sched_min_interval + sched_last.tv_usec;
+				nsec *= NSEC_IN_USEC;
+				nsec += NSEC_IN_USEC;
+				ts.tv_sec = sched_last.tv_sec +
+					    (nsec / NSEC_IN_SEC);
+				ts.tv_nsec = nsec % NSEC_IN_SEC;
+				slurm_cond_timedwait(&sched_cond,
+						     &sched_mutex, &ts);
+			} else {
+				slurm_cond_wait(&sched_cond, &sched_mutex);
+			}
+
+			if (slurmctld_config.shutdown_time)
+				return NULL;
+		}
+
+		full_queue = sched_full_queue;
+		sched_full_queue = false;
+		sched_requests = 0;
+		slurm_mutex_unlock(&sched_mutex);
+
+		job_cnt = _schedule(full_queue);
+		gettimeofday(&now, NULL);
+		sched_last.tv_sec  = now.tv_sec;
+		sched_last.tv_usec = now.tv_usec;
+		if (job_cnt) {
+			/* jobs were started, save state */
+			schedule_node_save();		/* Has own locking */
+			schedule_job_save();		/* Has own locking */
+		}
 	}
 
 	return NULL;
@@ -1039,23 +1017,10 @@ static int _schedule(bool full_queue)
 	bool fail_by_part, wait_on_resv;
 	uint32_t deadline_time_limit, save_time_limit = 0;
 	uint32_t prio_reserve;
-#if HAVE_SYS_PRCTL_H
-	char get_name[16];
-#endif
 	DEF_TIMERS;
 
 	if (slurmctld_config.shutdown_time)
 		return 0;
-
-#if HAVE_SYS_PRCTL_H
-	if (prctl(PR_GET_NAME, get_name, NULL, NULL, NULL) < 0) {
-		error("%s: cannot get my name %m", __func__);
-		strlcpy(get_name, "slurmctld", sizeof(get_name));
-	}
-	if (prctl(PR_SET_NAME, "sched", NULL, NULL, NULL) < 0) {
-		error("%s: cannot set my name to %s %m", __func__, "sched");
-	}
-#endif
 
 	if (sched_update != slurm_conf.last_update) {
 		char *tmp_ptr;
@@ -1365,7 +1330,7 @@ static int _schedule(bool full_queue)
 		list_iterator_destroy(part_iterator);
 	}
 
-	sched_debug("Running job scheduler");
+	sched_debug("Running job scheduler %s.", full_queue ? "for full queue":"for default depth");
 	/*
 	 * If we are doing FIFO scheduling, use the job records right off the
 	 * job list.
@@ -1591,7 +1556,7 @@ next_task:
 			    (job_ptr->state_reason == WAIT_RESOURCES)) {
 				sched_debug("%pJ unable to schedule in Partition=%s (per _failed_partition()). State=PENDING. Previous-Reason=%s. Previous-Desc=%s. New-Reason=Priority. Priority=%u.",
 					    job_ptr,
-					    job_ptr->partition,
+					    job_ptr->part_ptr->name,
 					    job_reason_string(
 						    job_ptr->state_reason),
 					    job_ptr->state_desc,
@@ -1604,7 +1569,7 @@ next_task:
 				 * overriding the reason */
 				sched_debug2("%pJ. unable to schedule in Partition=%s (per _failed_partition()). Retaining previous scheduling Reason=%s. Desc=%s. Priority=%u.",
 					     job_ptr,
-					     job_ptr->partition,
+					     job_ptr->part_ptr->name,
 					     job_reason_string(
 						     job_ptr->state_reason),
 					     job_ptr->state_desc,
@@ -1972,12 +1937,6 @@ fail_this_part:	if (fail_by_part) {
 	_do_diag_stats(DELTA_TIMER);
 
 out:
-#if HAVE_SYS_PRCTL_H
-	if (prctl(PR_SET_NAME, get_name, NULL, NULL, NULL) < 0) {
-		error("%s: cannot set my name to %s %m",
-		      __func__, get_name);
-	}
-#endif
 	return job_cnt;
 }
 
@@ -2186,6 +2145,7 @@ static batch_job_launch_msg_t *_build_launch_job_msg(job_record_t *job_ptr,
 
 	launch_msg_ptr->ntasks = job_ptr->details->num_tasks;
 	launch_msg_ptr->alias_list = xstrdup(job_ptr->alias_list);
+	launch_msg_ptr->container = xstrdup(job_ptr->container);
 	launch_msg_ptr->nodes = xstrdup(job_ptr->nodes);
 	launch_msg_ptr->overcommit = job_ptr->details->overcommit;
 	launch_msg_ptr->open_mode  = job_ptr->details->open_mode;
@@ -2635,8 +2595,24 @@ extern int make_batch_job_cred(batch_job_launch_msg_t *launch_msg_ptr,
 	cred_arg.job_core_bitmap     = job_resrcs_ptr->core_bitmap;
 	cred_arg.job_core_spec       = job_ptr->details->core_spec;
 	cred_arg.job_mem_limit       = job_ptr->details->pn_min_memory;
+	if (job_resrcs_ptr->memory_allocated) {
+		int batch_inx = job_get_node_inx(
+			job_ptr->batch_host, job_ptr->node_bitmap);
+
+		if (batch_inx == -1) {
+			error("%s: Invalid batch host %s for %pJ; this should never happen",
+			      __func__, job_ptr->batch_host, job_ptr);
+			batch_inx = 0;
+		}
+		cred_arg.job_mem_alloc = xmalloc(sizeof(uint64_t));
+		cred_arg.job_mem_alloc[0] =
+			job_resrcs_ptr->memory_allocated[batch_inx];
+		cred_arg.job_mem_alloc_rep_count = xmalloc(sizeof(uint64_t));
+		cred_arg.job_mem_alloc_rep_count[0] = 1;
+		cred_arg.job_mem_alloc_size = 1;
+	}
 	cred_arg.job_nhosts          = job_resrcs_ptr->nhosts;
-	cred_arg.job_gres_list       = job_ptr->gres_list;
+	cred_arg.job_gres_list       = job_ptr->gres_list_alloc;
 /*	cred_arg.step_gres_list      = NULL; */
 
 #ifdef HAVE_FRONT_END
@@ -2652,8 +2628,12 @@ extern int make_batch_job_cred(batch_job_launch_msg_t *launch_msg_ptr,
 	cred_arg.sockets_per_node    = job_resrcs_ptr->sockets_per_node;
 	cred_arg.sock_core_rep_count = job_resrcs_ptr->sock_core_rep_count;
 
+	cred_arg.selinux_context = job_ptr->selinux_context;
+
 	launch_msg_ptr->cred = slurm_cred_create(slurmctld_config.cred_ctx,
 						 &cred_arg, protocol_version);
+	xfree(cred_arg.job_mem_alloc);
+	xfree(cred_arg.job_mem_alloc_rep_count);
 
 	if (launch_msg_ptr->cred)
 		return SLURM_SUCCESS;
@@ -3351,8 +3331,8 @@ static void _parse_dependency_jobid_new(job_record_t *job_ptr,
 				 */
 				_copy_tres_opts(job_ptr, dep_job_ptr);
 			}
-			FREE_NULL_LIST(job_ptr->gres_list);
-			(void) gres_plugin_job_state_validate(
+			FREE_NULL_LIST(job_ptr->gres_list_req);
+			(void) gres_job_state_validate(
 				job_ptr->cpus_per_tres,
 				job_ptr->tres_freq,
 				job_ptr->tres_per_job,
@@ -3369,18 +3349,18 @@ static void _parse_dependency_jobid_new(job_record_t *job_ptr,
 				ntasks_per_socket,
 				&sockets_per_node,
 				&job_ptr->details->
-				cpus_per_task,
+				orig_cpus_per_task,
 				&job_ptr->details->ntasks_per_tres,
-				&job_ptr->gres_list);
+				&job_ptr->gres_list_req);
 			if (mc_ptr && (sockets_per_node != NO_VAL16)) {
 				mc_ptr->sockets_per_node =
 					sockets_per_node;
 			}
 			assoc_mgr_lock(&locks);
-			gres_set_job_tres_cnt(job_ptr->gres_list,
-					      job_ptr->details->min_nodes,
-					      job_ptr->tres_req_cnt,
-					      true);
+			gres_ctld_set_job_tres_cnt(job_ptr->gres_list_req,
+						   job_ptr->details->min_nodes,
+						   job_ptr->tres_req_cnt,
+						   true);
 			xfree(job_ptr->tres_req_str);
 			job_ptr->tres_req_str =
 				assoc_mgr_make_tres_str_from_array(
@@ -4113,7 +4093,7 @@ extern void epilog_slurmctld(job_record_t *job_ptr)
 {
 	xassert(verify_lock(JOB_LOCK, WRITE_LOCK));
 
-	prep_epilog_slurmctld(job_ptr);
+	prep_g_epilog_slurmctld(job_ptr);
 }
 
 /*
@@ -4223,10 +4203,17 @@ extern int reboot_job_nodes(job_record_t *job_ptr)
 	uint16_t protocol_version = SLURM_PROTOCOL_VERSION;
 	wait_boot_arg_t *wait_boot_arg;
 	pthread_t tid;
+	static bool power_save_on = false;
+	static time_t sched_update = 0;
+
+	if (sched_update != slurm_conf.last_update) {
+		power_save_on = power_save_test();
+		sched_update = slurm_conf.last_update;
+	}
 
 	if ((job_ptr->details == NULL) || (job_ptr->node_bitmap == NULL))
 		return SLURM_SUCCESS;
-	if (power_save_test())
+	if (power_save_on)
 		return power_job_reboot(job_ptr);
 	if ((slurm_conf.reboot_program == NULL) ||
 	    (slurm_conf.reboot_program[0] == '\0'))
@@ -4261,12 +4248,11 @@ extern int reboot_job_nodes(job_record_t *job_ptr)
 		if (protocol_version > node_ptr->protocol_version)
 			protocol_version = node_ptr->protocol_version;
 		node_ptr->node_state |= NODE_STATE_NO_RESPOND;
-		node_ptr->node_state |= NODE_STATE_POWER_UP;
+		node_ptr->node_state |= NODE_STATE_POWERING_UP;
 		bit_clear(avail_node_bitmap, i);
 		bit_set(booting_node_bitmap, i);
 		bit_set(wait_boot_arg->node_bitmap, i);
 		node_ptr->boot_req_time = now;
-		node_ptr->last_response = now + slurm_conf.resume_timeout;
 	}
 
 	if (job_ptr->details->features &&
@@ -4468,7 +4454,7 @@ static void *_start_prolog_slurmctld_thread(void *x)
 		unlock_slurmctld(node_write_lock);
 		return NULL;
 	}
-	prep_prolog_slurmctld(job_ptr);
+	prep_g_prolog_slurmctld(job_ptr);
 
 	/*
 	 * No async prolog_slurmctld threads running, so decrement now to move
@@ -4495,7 +4481,7 @@ extern void prolog_slurmctld(job_record_t *job_ptr)
 	uint32_t *job_id;
 	xassert(verify_lock(JOB_LOCK, WRITE_LOCK));
 
-	if (!prep_required(PREP_PROLOG_SLURMCTLD))
+	if (!prep_g_required(PREP_PROLOG_SLURMCTLD))
 		return;
 	job_ptr->details->prolog_running++;
 	job_ptr->job_state |= JOB_CONFIGURING;
@@ -5015,4 +5001,19 @@ waitpid_timeout(const char *name, pid_t pid, int *pstatus, int timeout)
 
 	killpg(pid, SIGKILL);  /* kill children too */
 	return pid;
+}
+
+void main_sched_init(void)
+{
+	if (thread_id_sched)
+		return;
+	slurm_thread_create(&thread_id_sched, _sched_agent, NULL);
+}
+
+void main_sched_fini(void)
+{
+	if (!thread_id_sched)
+		return;
+	slurm_cond_broadcast(&sched_cond);
+	pthread_join(thread_id_sched, NULL);
 }

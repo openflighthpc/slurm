@@ -160,6 +160,7 @@ cset bjobs     	 "${slurm_dir}/bin/bjobs"
 cset bkill     	 "${slurm_dir}/bin/bkill"
 cset bsub     	 "${slurm_dir}/bin/bsub"
 
+cset influx	"/usr/bin/influx"
 # If using MPICH-2 or other version of MPI requiring pmi libary, use this
 #cset mpicc	"/home/jette/mpich2-install/bin/mpicc"
 #cset use_pmi	1
@@ -199,16 +200,21 @@ cset bin_echo	"echo"
 cset bin_env	"env"
 cset bin_file	"file"
 cset bin_id	"id"
+cset bin_ip	"ip"
+cset bin_jq	"jq"
 cset bin_grep   "grep"
 cset bin_head   "head"
 cset bin_ln     "ln"
 cset bin_perldoc "/usr/bin/perldoc"
+cset bin_py3     "python3"
+cset bin_oasgen  "openapi-generator-cli"
 
 # Don't user $bin_hostname unless on a front-end system that
 # doesn't fully use the slurmd, use $bin_printenv SLURMD_NODENAME
 cset bin_hostname "hostname"
 
 cset bin_kill	"kill"
+cset bin_lscpu	"lscpu"
 cset bin_make	"make"
 cset bin_mv	"mv"
 cset bin_od	"od"
@@ -220,12 +226,16 @@ cset bin_rm	"rm"
 cset bin_sed	"sed"
 cset bin_sleep  "sleep"
 cset bin_sort	"sort"
+cset bin_socat	"socat"
 cset bin_sum	"sum"
 cset bin_sudo	"sudo"
+cset bin_systemd_detect_virt "systemd-detect-virt"
 cset bin_touch	"touch"
 cset bin_true	"true"
 cset bin_uname	"uname"
 cset bin_uniq	"uniq"
+cset bin_unshare "unshare"
+cset bin_virtualenv "virtualenv"
 cset bin_wc	"wc"
 
 #
@@ -1187,6 +1197,10 @@ proc cancel_job { job_id_list {het_job 0}} {
 		if {$job_id != 0} {
 			lappend job_list_clean $job_id
 		}
+	}
+
+	if {![llength $job_list_clean]} {
+		return $::RETURN_SUCCESS
 	}
 
 	log_debug "Cancelling $job_list_clean"
@@ -2515,15 +2529,18 @@ proc wait_job_reason args {
 		# Check if both state and reason are the desired ones
 		if {$job_state == $desired_state} {
 			set found 0
+			set reason_msg ""
 			if {$desired_reason_list == ""} {
 				set found 1
 			}
 			foreach desired_reason $desired_reason_list {
 				if {$job_reason == $desired_reason } {
+					set reason_msg " with reason $job_reason"
 					set found 1
 				}
 			}
 			if {$found} {
+				log_debug "Job $job_id found $job_state$reason_msg"
 				set rc $::RETURN_SUCCESS
 				break
 			}
@@ -2796,6 +2813,74 @@ proc get_mps_count_by_index { index hostname } {
 	log_user 1
 
 	return $count
+}
+
+
+################################################################
+#
+# NAME
+#	check_influxdb_access - determines if user can access to the desired influxdb
+#
+# SYNOPSIS
+#	check_influxdb_access host port database
+#
+# DESCRIPTION
+#	It uses the global $influx CLI command to try to connect and use
+#	the desired database.
+#
+# RETURN VALUE
+#	Returns true if we can connect to host:port and use the database,
+#	false otherwise
+#
+################################################################
+
+proc check_influxdb_access {host port database} {
+	global influx
+	set connected 0
+	set access 0
+
+	if {![file executable $influx]} {
+		log_warn "Cannot execute influx command: $influx"
+		return false
+	}
+
+	set log_user_save [log_user -info]
+	log_user 0
+	spawn $influx -host $host -port $port
+	expect {
+		-re "Connected to" {
+			set connected 1
+			send "use $database\r"
+			exp_continue
+		}
+		-re "Using database" {
+			set access 1
+			send "quit\r"
+		}
+		-re "unable to parse authentication credentials" {
+			send "quit\r"
+		}
+		-re "authorization failed" {
+			send "quit\r"
+		}
+		timeout {
+			fail "InfluxDB instance not responding"
+		}
+		eof {
+			wait
+		}
+	}
+	log_user $log_user_save
+
+	if {!$connected} {
+		log_warn "Cannot connect to $host:$port"
+		return false
+	}
+	if {!$access} {
+		log_warn "Connected to $host:$port, but cannot use $database"
+		return false
+	}
+	return true
 }
 
 
@@ -3127,6 +3212,41 @@ proc get_total_cpus {} {
 	return $cpu_cnt
 }
 
+################################################################
+#
+# NAME
+#	is_running_in_container
+#
+# SYNOPSIS
+#	is_running_in_container
+#
+# DESCRIPTION
+#	Determine if test script is running inside of a container.
+#
+# RETURN VALUE
+#	true if container detected or systemd-detect-virt is not found,
+#	false otherwise
+#
+################################################################
+
+proc is_running_in_container {} {
+	global bin_systemd_detect_virt
+
+	if {[run_command_status -nolog -none "$bin_systemd_detect_virt --version"]} {
+		log_warn "$bin_systemd_detect_virt not found, assuming container"
+		return true
+	}
+
+	set result [run_command -nolog -none "$bin_systemd_detect_virt -c"]
+	set output [string trimright [dict get $result output] "\r\n"]
+	if { $output != "none"} {
+		log_debug "Detected container type: $output"
+	}
+	if {[dict get $result exit_code]} {
+		return false
+	}
+	return true
+}
 
 ################################################################
 #
@@ -3889,10 +4009,10 @@ proc wait_for_node args {
 #####################################################################
 #
 # NAME
-#	list2hostlist - converts a TCL list into a Slurm hostlist using scontrol
+#	node_list_to_range - converts a TCL list into a Slurm hostlist using scontrol
 #
 # SYNOPSIS
-#	list2hostlist nodes_list
+#	node_list_to_range nodes_list
 #
 # ARGUMENTS
 #
@@ -3904,12 +4024,96 @@ proc wait_for_node args {
 #
 #####################################################################
 
-proc list2hostlist {nodes_list} {
+proc node_list_to_range {nodes_list} {
 	global scontrol
 
 	set comalist [join $nodes_list ,]
-	set hostlist [run_command_output -fail "$scontrol show hostlist $comalist"]
+	set hostlist [run_command_output -nolog -fail "$scontrol show hostlist $comalist"]
 	set hostlist [string trimright $hostlist "\r\n"]
+}
+
+
+################################################################
+#
+# NAME
+#	list_to_range - converts a list of integer numbers to a range expression
+#
+# SYNOPSIS
+#	list_to_range ?numeric_list?
+#
+# DESCRIPTION
+#	Collapse a numeric list to a range expression defined by the following
+#	EBNF:
+#		<expression> ::= <range> {, <range>}*
+#		<range> ::= <integer> - <integer> | <integer>
+#
+# RETURN VALUE
+#	a range expression representing the numeric elements on the given list.
+#
+################################################################
+
+proc list_to_range {numeric_list} {
+	set node_range_expression [node_list_to_range $numeric_list]
+	set range_expression [regsub {^\[(.*)\]$} $node_range_expression {\1}]
+	return $range_expression
+}
+
+
+#####################################################################
+#
+# NAME
+#	node_range_to_list - converts a node range expression into a list of nodes using scontrol
+#
+# SYNOPSIS
+#	node_range_to_list node_range_expression
+#
+# ARGUMENTS
+#
+#	node_range_expression
+#		a node range expression accepted by scontrol
+#
+# RETURN VALUE
+#	a list contining all node names expanded from the node range expression
+#
+#####################################################################
+
+proc node_range_to_list {node_range_expression} {
+	global scontrol
+
+	set node_list [list]
+	set output [run_command_output -nolog -fail "$scontrol show hostnames $node_range_expression"]
+	foreach line [split $output "\n"] {
+		if {$line eq ""} {
+			break
+		}
+		lappend node_list $line
+	}
+	return $node_list
+}
+
+
+################################################################
+#
+# NAME
+#	range_to_list - converts a range expression into a list with the numbers of the range
+#
+# SYNOPSIS
+#	range_to_list ?range_expression?
+#
+# DESCRIPTION
+#	Expands a range expression defined by the following EBNF into a numeric list
+#		<expression> ::= <range> {, <range>}*
+#		<range> ::= <integer> - <integer> | <integer>
+#
+# RETURN VALUE
+#	Returns the list of integer numbers defined by the range_expression
+#
+################################################################
+
+proc range_to_list {range_expression} {
+	set node_range_expression \[$range_expression\]
+	set range_list [node_range_to_list $node_range_expression]
+	return $range_list
 }
 
 
@@ -4913,7 +5117,7 @@ proc count_gres { gres_param } {
 
 proc get_highest_gres_count { node_count gres_name } {
 
-	set available_nodes [list2hostlist [get_nodes_by_state]]
+	set available_nodes [node_list_to_range [get_nodes_by_state]]
 	set gres_dict [get_gres_count $gres_name $available_nodes]
 	set gres_count [list]
 
@@ -5096,7 +5300,7 @@ proc get_highest_mps_count { node_count } {
 	# We cannot use get_highest_gres_count because we need "per gpu",
 	# so we get all the mps per node and all gpus per node, to create
 	# a mps_per_gpu list to sort and get the count.
-	set available_nodes [list2hostlist [get_nodes_by_state]]
+	set available_nodes [node_list_to_range [get_nodes_by_state]]
 	set mps_dict [get_gres_count "mps" $available_nodes]
 	set gpu_dict [get_gres_count "gpu" $available_nodes]
 	set mps_per_gpu [list]
@@ -6091,7 +6295,7 @@ proc submit_job args {
 }
 
 
-################################################################################
+################################################################
 #
 # NAME
 #	compile_against_libslurm - compiles a test program against either libslurm.so or libslurmfull.so

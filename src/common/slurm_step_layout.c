@@ -281,7 +281,7 @@ extern void slurm_step_layout_merge(slurm_step_layout_t *step_layout1,
 }
 
 extern void pack_slurm_step_layout(slurm_step_layout_t *step_layout,
-				   Buf buffer, uint16_t protocol_version)
+				   buf_t *buffer, uint16_t protocol_version)
 {
 	uint32_t i = 0;
 
@@ -310,11 +310,11 @@ extern void pack_slurm_step_layout(slurm_step_layout_t *step_layout,
 	}
 }
 
-extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, Buf buffer,
+extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, buf_t *buffer,
 				    uint16_t protocol_version)
 {
 	uint16_t uint16_tmp;
-	uint32_t num_tids, uint32_tmp;
+	uint32_t num_tids;
 	slurm_step_layout_t *step_layout = NULL;
 	int i;
 
@@ -326,10 +326,8 @@ extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, Buf buffer,
 		step_layout = xmalloc(sizeof(slurm_step_layout_t));
 		*layout = step_layout;
 
-		safe_unpackstr_xmalloc(&step_layout->front_end,
-				       &uint32_tmp, buffer);
-		safe_unpackstr_xmalloc(&step_layout->node_list,
-				       &uint32_tmp, buffer);
+		safe_unpackstr(&step_layout->front_end, buffer);
+		safe_unpackstr(&step_layout->node_list, buffer);
 		safe_unpack32(&step_layout->node_cnt, buffer);
 		safe_unpack16(&step_layout->start_protocol_ver, buffer);
 		safe_unpack32(&step_layout->task_cnt, buffer);
@@ -932,10 +930,7 @@ extern char *slurm_step_layout_type_name(task_dist_states_t task_dist)
 	}
 
 	if (!name) {
-		/*
-		 * SLURM_DIST_NO_LLLP or SLURM_DIST_UNKNOWN
-		 * No distribution specified for lllp
-		 */
+		/* SLURM_DIST_UNKNOWN - No distribution specified */
 		xstrfmtcatat(name, &pos, "%s", "Unknown");
 	}
 

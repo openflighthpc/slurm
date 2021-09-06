@@ -1,10 +1,10 @@
-.TH "slurmdbd.conf" "5" "Slurm Configuration File" "November 2020" "Slurm Configuration File"
+.TH "slurmdbd.conf" "5" "Slurm Configuration File" "June 2021" "Slurm Configuration File"
 
 .SH "NAME"
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file
 
 .SH "DESCRIPTION"
-\fBslurmdb.conf\fP is an ASCII file which describes Slurm Database
+\fBslurmdbd.conf\fP is an ASCII file which describes Slurm Database
 Daemon (SlurmDBD) configuration information.
 The file location can be modified at system build time using the
 DEFAULT_SLURM_CONF parameter or at execution time by setting the SLURM_CONF
@@ -14,7 +14,7 @@ The contents of the file are case insensitive except for the names of nodes
 and files. Any text following a "#" in the configuration file is treated
 as a comment through the end of that line.
 Changes to the configuration file take effect upon restart of
-SlurmDbd or daemon receipt of the SIGHUP signal unless otherwise noted.
+SlurmDBD or daemon receipt of the SIGHUP signal unless otherwise noted.
 .LP
 This file should be only on the computer where SlurmDBD executes and
 should only be readable by the user which executes SlurmDBD (e.g. "slurm").
@@ -61,7 +61,7 @@ This script can be executed every time a rollup happens (every hour,
 day and month), depending on the Purge*After options.  This script is used
 to transfer accounting records out of the database into an archive.  It is
 used in place of the internal process used to archive objects.
-The script is executed with a no arguments, The following environment
+The script is executed with no arguments, and the following environment
 variables are set.
 .RS
 .TP
@@ -139,7 +139,13 @@ will permit for communication.
 Used to define alternative authentication plugins options. Multiple options may
 be comma separated.
 .RS
-.TP 15
+.TP
+\fBjwks=\fR
+Absolute path to JWKS file. Only RS256 keys are supported, although other
+key types may be listed in the file. If set, no HS256 key will be loaded by
+default (and token generation is disabled), although the jwt_key setting may
+be used to explicitly re\-enable HS256 key use (and token generation).
+.TP
 \fBjwt_key=\fR
 Absolute path to JWT key file. Key must be HS256, and should only be accessible
 by SlurmUser.
@@ -149,9 +155,7 @@ by SlurmUser.
 \fBAuthType\fR
 Define the authentication method for communications between Slurm
 components.
-Acceptable values at present include "auth/none" and "auth/munge".
-The default value is "auth/munge".
-\fBDo not use "auth/none" if you desire any security\fR.
+Acceptable values at present include "auth/munge", which is the default.
 "auth/munge" indicates that LLNL's MUNGE system is to be used
 (this is the supported authentication mechanism for Slurm;
 see "https://dun.github.io/munge/" for more information).
@@ -446,7 +450,7 @@ and above.
 .TP
 \fBusage\fR
 prevents users from viewing usage of any other user.
-This applys to sreport.
+This applies to sreport.
 .TP
 \fBusers\fR
 prevents users from viewing information of any user
@@ -706,7 +710,7 @@ StorageUser=database_mgr
 Copyright (C) 2008-2010 Lawrence Livermore National Security.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
-Copyright (C) 2010\-2014 SchedMD LLC.
+Copyright (C) 2010\-2021 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <https://slurm.schedmd.com/>.

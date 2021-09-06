@@ -1,4 +1,4 @@
-.TH salloc "1" "Slurm Commands" "April 2021" "Slurm Commands"
+.TH salloc "1" "Slurm Commands" "July 2021" "Slurm Commands"
 
 .SH "NAME"
 salloc \- Obtain a Slurm job allocation (a set of nodes), execute a command,
@@ -126,7 +126,8 @@ applications having less than 10,000 tasks.
 \fB\-B\fR \fB\-\-extra\-node\-info\fR=<\fIsockets\fR[:\fIcores\fR[:\fIthreads\fR]]>
 Restrict node selection to nodes with at least the specified number of
 sockets, cores per socket and/or threads per core.
-NOTE: These options do not specify the resource allocation size.
+.br
+\fBNOTE\fR: These options do not specify the resource allocation size.
 Each value specified is considered a minimum.
 An asterisk (*) can be used as a placeholder indicating that all available
 resources of that type are to be utilized. Values can also be specified as
@@ -146,14 +147,23 @@ CR_Core, CR_Core_Memory, CR_Socket, or CR_Socket_Memory for this option
 to be honored.
 If not specified, the scontrol show job will display 'ReqS:C:T=*:*:*'. This
 option applies to job allocations.
-\fBNOTE:\fR This option is mutually exclusive with \fB\-\-hint\fR,
+.br
+\fBNOTE\fR: This option is mutually exclusive with \fB\-\-hint\fR,
 \fB\-\-threads\-per\-core\fR and \fB\-\-ntasks\-per\-core\fR.
+.br
+\fBNOTE\fR: This option may implicitly set the number of tasks (if \fB-n\fR
+was not specified) as one task per requested thread.
 
 .TP
 \fB\-\-bb\fR=<\fIspec\fR>
 Burst buffer specification. The form of the specification is system dependent.
 Note the burst buffer may not be accessible from a login node, but require
 that salloc spawn a shell on one of its allocated compute nodes.
+When the \fB\-\-bb\fR option is used, Slurm parses this option and creates a
+temporary burst buffer script file that is used internally by the burst buffer
+plugins. See Slurm's burst buffer guide for more information and examples:
+.br
+https://slurm.schedmd.com/burst_buffer.html
 
 .TP
 \fB\-\-bbf\fR=<\fIfile_name\fR>
@@ -162,6 +172,9 @@ The form of the specification is system dependent.
 Also see \fB\-\-bb\fR.
 Note the burst buffer may not be accessible from a login node, but require
 that salloc spawn a shell on one of its allocated compute nodes.
+See Slurm's burst buffer guide for more information and examples:
+.br
+https://slurm.schedmd.com/burst_buffer.html
 
 .TP
 \fB\-\-begin\fR=<\fItime\fR>
@@ -281,6 +294,7 @@ Specification of multiple KNL modes requires the use of a heterogeneous job.
 \fBBrackets\fR
 Brackets can be used to indicate that you are looking for a set of nodes with
 the different requirements contained within the brackets. For example,
+.TP
 \fB--constraint="[(rack1|rack2)*1&(rack3)*2]"\fR will get you one node with
 either the "rack1" or "rack2" features and two nodes with the "rack3" feature.
 The same request without the brackets will try to find a single node that
@@ -295,6 +309,10 @@ grouped with AND (e.g. "&") operands.
 .RE
 
 .TP
+\fB--container=<absolute path to container>\fR
+Path to OCI container bundle.
+
+.TP
 \fB\-\-contiguous\fR
 If set, then the allocated nodes must form a contiguous set.
 
@@ -307,6 +325,9 @@ plugins, both of which can modify the node ordering.
 Restrict node selection to nodes with at least the specified number of
 cores per socket.  See additional information under \fB\-B\fR option
 above when task/affinity plugin is enabled.
+.br
+\fBNOTE\fR: This option may implicitly set the number of tasks (if \fB-n\fR
+was not specified) as one task per requested thread.
 
 .TP
 \fB\-\-cpu\-freq\fR =<\fIp1\fR[\-\fIp2\fR[:\fIp3\fR]]>
@@ -328,7 +349,8 @@ p2 will be the maximum scaling frequency.
 
 \fBp2\fR can be  [#### | medium | high | highm1] p2 must be greater than p1.
 
-\fBp3\fR can be [Conservative | OnDemand | Performance | PowerSave | UserSpace]
+\fBp3\fR can be [Conservative | OnDemand | Performance | PowerSave | SchedUtil |
+UserSpace]
 which will set the governor to the corresponding value.
 
 If \fBp3\fR is UserSpace, the frequency scaling_speed will be set by a power
@@ -578,9 +600,10 @@ See also the \fB\-\-gpus\-per\-node\fR, \fB\-\-gpus\-per\-socket\fR and
 .TP
 \fB\-\-gpu\-bind\fR=[verbose,]<\fItype\fR>
 Bind tasks to specific GPUs.
-By default every spawned task can access every GPU allocated to the job.
+By default every spawned task can access every GPU allocated to the step.
 If "verbose," is specified before <\fItype\fR>, then print out GPU binding
-information.
+debug information to the stderr of the tasks. GPU binding is ignored if there is
+only one task.
 
 Supported \fItype\fR options:
 .RS
@@ -629,6 +652,11 @@ second \fI<tasks_per_gpu>\fR tasks are bound to the second GPU available, etc.
 This is basically a block distribution of tasks onto available GPUs, where the
 available GPUs are determined by the socket affinity of the task and the socket
 affinity of the GPUs as specified in gres.conf's \fICores\fR parameter.
+.TP
+\fBper_task:<gpus_per_task>\fR
+Each task will be bound to the number of gpus specified in
+\fI<gpus_per_task>\fR. Gpus are assigned in order to tasks. The first task will
+be assigned the first x number of gpus on the node etc.
 .RE
 
 .TP
@@ -700,13 +728,13 @@ requested in a comma separated list, for example:
 \fB\-\-gpus\-per\-socket\fR and \fB\-\-gpus\-per\-node\fR options.
 This option requires an explicit task count, e.g. -n, --ntasks or "--gpus=X
 --gpus-per-task=Y" rather than an ambiguous range of nodes with -N, --nodes.
+This option will implicitly set --gpu-bind=per_task:<gpus_per_task>, but that
+can be overridden with an explicit --gpu-bind specification.
 .br
-NOTE: This option will not have any impact on GPU binding, specifically
-it won't limit the number of devices set for CUDA_VISIBLE_DEVICES.
 
 .TP
 \fB\-\-gres\fR=<\fIlist\fR>
-Specifies a comma delimited list of generic consumable resources.
+Specifies a comma-delimited list of generic consumable resources.
 The format of each entry on the list is "name[[:type]:count]".
 The name is that of the consumable resource.
 The count is the number of those resources with a default value of 1.
@@ -721,7 +749,7 @@ The available generic consumable resources is configurable by the system
 administrator.
 A list of available generic consumable resources will be printed and the
 command will exit if the option argument is "help".
-Examples of use include "\-\-gres=gpu:2,mic:1", "\-\-gres=gpu:kepler:2", and
+Examples of use include "\-\-gres=gpu:2", "\-\-gres=gpu:kepler:2", and
 "\-\-gres=help".
 
 .TP
@@ -860,25 +888,38 @@ Note that the SlurmDBD must be up for this option to work properly.
 
 .TP
 \fB\-m\fR, \fB\-\-distribution\fR=
-\fIarbitrary\fR|<\fIblock\fR|\fIcyclic\fR|\fIplane=<options>\fR[:\fIblock\fR|\fIcyclic\fR|\fIfcyclic\fR]>
+\fI*\fR|\fIblock\fR|\fIcyclic\fR|\fIarbitrary\fR|\fIplane=<options>
+\fR[:\fI*\fR|\fIblock\fR|\fIcyclic\fR|\fIfcyclic\fR[:\fI*\fR|\fIblock\fR|
+\fIcyclic\fR|\fIfcyclic\fR]][,\fIPack\fR|\fINoPack\fR]
 
 Specify alternate distribution methods for remote processes.
-In salloc, this only sets environment variables that will be used by
-subsequent srun requests.
-This option controls the assignment of tasks to the nodes on which
+For job allocation, this sets environment variables that will be used by
+subsequent srun requests and also affects which cores will be selected for
+job allocation.
+
+This option controls the distribution of tasks to the nodes on which
 resources have been allocated, and the distribution of those resources
 to tasks for binding (task affinity). The first distribution
-method (before the ":") controls the distribution of resources across
-nodes. The optional second distribution method (after the ":")
-controls the distribution of resources across sockets within a node.
-Note that with select/cons_res, the number of cpus allocated on each
-socket and node may be different. Refer to
+method (before the first ":") controls the distribution of tasks to nodes. 
+The second distribution method (after the first ":")
+controls the distribution of allocated CPUs across sockets for binding
+to tasks. The third distribution method (after the second ":") controls
+the distribution of allocated CPUs across cores for binding to tasks.
+The second and third distributions apply only if task affinity is enabled.
+The third distribution is supported only if the task/cgroup plugin is
+configured. The default value for each distribution type is specified by *.
+
+Note that with select/cons_res and select/cons_tres, the number of CPUs
+allocated to each socket and node may be different. Refer to
 https://slurm.schedmd.com/mc_support.html
-for more information on resource allocation, assignment of tasks to
+for more information on resource allocation, distribution of tasks to
 nodes, and binding of tasks to CPUs.
 .RS
+First distribution method (distribution of tasks across nodes):
 
-First distribution method:
+.TP
+.B *
+Use the default method for distributing tasks to nodes (block).
 .TP
 .B block
 The block distribution method will distribute tasks to a node such
@@ -930,27 +971,78 @@ will be laid out on the nodes in the order of the file.
 controls the nodes to be allocated to the job and not the allocation of
 CPUs on those nodes. This option is meant primarily to control a job step's
 task layout in an existing job allocation for the srun command.
+.br
+\fBNOTE:\fR If the number of tasks is given and a list of requested nodes is
+also given, the number of nodes used from that list will be reduced to match
+that of the number of tasks if the number of nodes in the list is greater than
+the number of tasks.
 
 .TP
-Second distribution method:
+Second distribution method (distribution of CPUs across sockets for binding):
+
+.TP
+.B *
+Use the default method for distributing CPUs across sockets (cyclic).
 .TP
 .B block
-The block distribution method will distribute tasks to sockets such
-that consecutive tasks share a socket.
+The block distribution method will distribute allocated CPUs 
+consecutively from the same socket for binding to tasks, before using
+the next consecutive socket.
 .TP
 .B cyclic
-The cyclic distribution method will distribute tasks to sockets such
-that consecutive tasks are distributed over consecutive sockets (in a
-round\-robin fashion).
+The cyclic distribution method will distribute allocated CPUs for
+binding to a given task consecutively from the same socket, and
+from the next consecutive socket for the next task, in a 
+round\-robin fashion across sockets. 
 Tasks requiring more than one CPU will have all of those CPUs allocated on a
 single socket if possible.
 .TP
 .B fcyclic
-The fcyclic distribution method will distribute tasks to sockets such
-that consecutive tasks are distributed over consecutive sockets (in a
-round\-robin fashion).
+The fcyclic distribution method will distribute allocated CPUs 
+for binding to tasks from consecutive sockets in a
+round\-robin fashion across the sockets.
 Tasks requiring more than one CPU will have each CPUs allocated in a cyclic
 fashion across sockets.
+
+.TP
+Third distribution method (distribution of CPUs across cores for binding):
+
+.TP
+.B *
+Use the default method for distributing CPUs across cores
+(inherited from second distribution method).
+.TP
+.B block
+The block distribution method will distribute allocated CPUs 
+consecutively from the same core for binding to tasks, before using
+the next consecutive core.
+.TP
+.B cyclic
+The cyclic distribution method will distribute allocated CPUs for
+binding to a given task consecutively from the same core, and
+from the next consecutive core for the next task, in a 
+round\-robin fashion across cores. 
+.TP
+.B fcyclic
+The fcyclic distribution method will distribute allocated CPUs 
+for binding to tasks from consecutive cores in a
+round\-robin fashion across the cores.
+
+
+.TP
+Optional control for task distribution over nodes:
+
+.TP
+.B Pack
+Rather than evenly distributing a job step's tasks evenly across its allocated
+nodes, pack them as tightly as possible on the nodes.
+This only applies when the "block" task distribution method is used.
+.TP
+.B NoPack
+Rather than packing a job step's tasks as tightly as possible on the nodes,
+distribute them evenly.
+This user option will supersede the SelectTypeParameters CR_Pack_Nodes
+configuration parameter.
 .RE
 
 .TP
@@ -1553,6 +1645,9 @@ To have the signal sent at preemption time see the
 Restrict node selection to nodes with at least the specified number of
 sockets.  See additional information under \fB\-B\fR option above when
 task/affinity plugin is enabled.
+.br
+\fBNOTE\fR: This option may implicitly set the number of tasks (if \fB-n\fR
+was not specified) as one task per requested thread.
 
 .TP
 \fB\-\-spread\-job\fR
@@ -1610,6 +1705,9 @@ per core. NOTE: "Threads" refers to the number of processing units on
 each core rather than the number of application tasks to be launched per core.
 See additional information under \fB\-B\fR option above when task/affinity
 plugin is enabled.
+.br
+\fBNOTE\fR: This option may implicitly set the number of tasks (if \fB-n\fR
+was not specified) as one task per requested thread.
 
 .TP
 \fB\-\-time\-min\fR=<\fItime\fR>
@@ -1744,6 +1842,9 @@ Same as \fB\-\-clusters\fR
 \fBSALLOC_CONSTRAINT\fR
 Same as \fB\-C\fR, \fB\-\-constraint\fR
 .TP
+\fBSALLOC_CONTAINER\fR
+Same as \-\-container\fR.
+.TP
 \fBSALLOC_CORE_SPEC\fR
 Same as \fB\-\-core\-spec\fR
 .TP
@@ -1842,6 +1943,9 @@ Same as \fB\-\-spread\-job\fR
 \fBSALLOC_THREAD_SPEC\fR
 Same as \fB\-\-thread\-spec\fR
 .TP
+\fBSALLOC_THREADS_PER_CORE\fR
+Same as \fB\-\-threads\-per\-core\fR
+.TP
 \fBSALLOC_TIMELIMIT\fR
 Same as \fB\-t, \-\-time\fR
 .TP
@@ -1885,6 +1989,10 @@ for each component.
 .TP
 \fBSLURM_CLUSTER_NAME\fR
 Name of the cluster on which the job is executing.
+.TP
+\fBSLURM_CONTAINER\fR
+OCI Bundle for job.
+Only set if \-\-container\fR is specified.
 .TP
 \fBSLURM_CPUS_PER_GPU\fR
 Number of CPUs requested per allocated GPU.
@@ -1935,12 +2043,16 @@ Account name associated of the job allocation.
 The ID of the job allocation.
 .TP
 \fBSLURM_JOB_CPUS_PER_NODE\fR
-Count of processors available to the job on this node.
-Note the select/linear plugin allocates entire nodes to
-jobs, so the value indicates the total count of CPUs on each node.
-The select/cons_res plugin allocates individual processors
-to jobs, so this number indicates the number of processors
-on each node allocated to the job allocation.
+Count of CPUs available to the job on the nodes in the allocation, using the
+format \fICPU_count\fR[(x\fInumber_of_nodes\fR)][,\fICPU_count\fR
+[(x\fInumber_of_nodes\fR)] ...].
+For example: SLURM_JOB_CPUS_PER_NODE='72(x2),36' indicates that on the
+first and second nodes (as listed by SLURM_JOB_NODELIST) the allocation
+has 72 CPUs, while the third node has 36 CPUs.
+\fBNOTE\fR: The \fBselect/linear\fR plugin allocates entire nodes to jobs, so
+the value indicates the total count of CPUs on allocated nodes. The
+\fBselect/cons_res\fR and \fBselect/cons_tres\fR plugins allocate individual
+CPUs to jobs, so this number indicates the number of CPUs allocated to the job.
 .TP
 \fBSLURM_JOB_NODELIST\fR
 List of nodes allocated to the job.
@@ -2041,6 +2153,13 @@ count, that count is followed by "(x#)" where "#" is the
 repetition count. For example, "SLURM_TASKS_PER_NODE=2(x3),1"
 indicates that the first three nodes will each execute two
 tasks and the fourth node will execute one task.
+.TP
+\fBSLURM_THREADS_PER_CORE\fR
+This is only set if \fB\-\-threads\-per\-core\fR or
+\fBSALLOC_THREADS_PER_CORE\fR were specified. The value will be set to the
+value specified by \fB\-\-threads\-per\-core\fR or
+\fBSALLOC_THREADS_PER_CORE\fR. This is used by subsequent srun calls within the
+job allocation.
 
 .SH "SIGNALS"
 .LP
@@ -2091,7 +2210,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010\-2018 SchedMD LLC.
+Copyright (C) 2010\-2021 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <https://slurm.schedmd.com/>.

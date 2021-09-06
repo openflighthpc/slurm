@@ -41,11 +41,11 @@
 
 /*
  * Any time you have to add to an existing convert update this number.
- * NOTE: 7 was the first version of 19.05.
  * NOTE: 8 was the first version of 20.02.
  * NOTE: 9 was the first version of 20.11.
+ * NOTE: 10 was the first version of 21.08.
  */
-#define CONVERT_VERSION 9
+#define CONVERT_VERSION 10
 
 typedef struct {
 	uint64_t count;
@@ -79,6 +79,58 @@ static int _convert_step_table_post(
 		if (rc != SLURM_SUCCESS)
 			error("%s: Can't convert %s_%s info: %m",
 			      __func__, cluster_name, step_table);
+	}
+
+	return rc;
+}
+
+static int _rename_usage_columns(mysql_conn_t *mysql_conn, char *table)
+{
+	char *query = NULL;
+	int rc = SLURM_SUCCESS;
+
+
+	/*
+	 * Change the names pack_job_id and pack_job_offset to be het_*
+	 */
+	query = xstrdup_printf(
+		"alter table %s change resv_secs plan_secs bigint "
+		"unsigned default 0 not null;",
+		table);
+
+	DB_DEBUG(DB_QUERY, mysql_conn->conn, "query\n%s", query);
+	if ((rc = mysql_db_query(mysql_conn, query)) != SLURM_SUCCESS)
+		error("Can't update %s %m", table);
+	xfree(query);
+
+	return rc;
+}
+
+static int _convert_usage_table_pre(mysql_conn_t *mysql_conn,
+				    char *cluster_name)
+{
+	int rc = SLURM_SUCCESS;
+
+	if (db_curr_ver < 10) {
+		char table[200];
+
+		snprintf(table, sizeof(table), "\"%s_%s\"",
+			 cluster_name, cluster_day_table);
+		if ((rc = _rename_usage_columns(mysql_conn, table))
+		    != SLURM_SUCCESS)
+			return rc;
+
+		snprintf(table, sizeof(table), "\"%s_%s\"",
+			 cluster_name, cluster_hour_table);
+		if ((rc = _rename_usage_columns(mysql_conn, table))
+		    != SLURM_SUCCESS)
+			return rc;
+
+		snprintf(table, sizeof(table), "\"%s_%s\"",
+			 cluster_name, cluster_month_table);
+		if ((rc = _rename_usage_columns(mysql_conn, table))
+		    != SLURM_SUCCESS)
+			return rc;
 	}
 
 	return rc;
@@ -190,6 +242,10 @@ extern int as_mysql_convert_tables_pre_create(mysql_conn_t *mysql_conn)
 	/* make it up to date */
 	itr = list_iterator_create(as_mysql_total_cluster_list);
 	while ((cluster_name = list_next(itr))) {
+		info("pre-converting usage table for %s", cluster_name);
+		if ((rc = _convert_usage_table_pre(mysql_conn, cluster_name)
+		     != SLURM_SUCCESS))
+			break;
 		info("pre-converting job table for %s", cluster_name);
 		if ((rc = _convert_job_table_pre(mysql_conn, cluster_name)
 		     != SLURM_SUCCESS))
@@ -253,19 +309,6 @@ extern int as_mysql_convert_non_cluster_tables_post_create(
 		debug4("%s: No conversion needed, Horray!", __func__);
 		return SLURM_SUCCESS;
 	}
-
-	if (db_curr_ver < 7) {
-		/*
-		 * In 19.05 we changed the name of the TRES bb/cray to be
-		 * bb/datawarp.
-		 */
-		char *query = xstrdup_printf(
-			"update %s set name='datawarp' where type='bb' and name='cray'",
-			tres_table);
-		rc = mysql_db_query(mysql_conn, query);
-		xfree(query);
-	}
-
 
 	if (rc == SLURM_SUCCESS) {
 		char *query = xstrdup_printf(

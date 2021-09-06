@@ -2,8 +2,8 @@
 
 <h1>Elasticsearch Guide</h1>
 
-<p>Slurm provides multiple <a href="jobcompplugins.html">Job Completion
-Plugins</a>. These plugins are an orthogonal way to provide historical job
+<p>Slurm provides multiple Job Completion Plugins.
+These plugins are an orthogonal way to provide historical job
 <a href="accounting.html">accounting</a> data for finished jobs.</p>
 
 <p>In most installations, Slurm is already configured with an
@@ -19,25 +19,14 @@ visualization tools also let you easily create different types of dashboards,
 diagrams, tables, histograms and/or apply customized filters when searching.
 </p>
 
+<h2>Prerequisites</h2>
+<p>The plugin requires additional libraries for compilation:</p>
+<ul>
+	<li><a href="https://curl.se/libcurl">libcurl</a> development files</li>
+	<li><a href="download.html#json">JSON-C</a></li>
+</ul>
+
 <h2>Configuration</h2>
-<p>
-The plugin requires the <a href="https://curl.haxx.se/libcurl/">libcurl</a>
-library to be installed and usable on the controller, and the development
-libraries to be available at configure time. At Slurm configuration time,
-the configure script should emit a message like this if the appropriate
-library and headers have been successfully located:
-
-<pre>checking whether libcurl is usable... yes</pre>
-
-There are two <b>configure</b> options to control whether to look for the
-library or not and where:
-
-<pre>
---with-libcurl=PREFIX	look for the curl library in PREFIX/lib and headers in
-PREFIX/include (default PREFIX is curl-config path or $PATH).
---without-libcurl
-</pre>
-</p>
 
 <p>The Elasticsearch instance should be running and reachable from the multiple
 <a href="slurm.conf.html#OPT_SlurmctldAddr">SlurmctldHost</a> configured.
@@ -76,7 +65,7 @@ reindex API references on how to copy data from one index to another if needed.
 </li>
 <li>
 <a href="slurm.conf.html#OPT_JobCompParams"><b>JobCompParams</b></a> should be
-set to the Elasticsearch server connecting comma delimited options:
+set to the Elasticsearch server connecting comma-delimited options:
 <ul>
 <li>
 <pre>JobCompParams=timeout=5</pre>
@@ -157,6 +146,6 @@ restored.</p>
 <p>The Elasticsearch plugin was created as part of Alejandro Sanchez's
 <a href="https://upcommons.upc.edu/handle/2117/79252">Master's Thesis</a>.</p>
 
-<p style="text-align:center;">Last modified 5 April 2019</p>
+<p style="text-align:center;">Last modified 6 August 2021</p>
 
 <!--#include virtual="footer.txt"-->

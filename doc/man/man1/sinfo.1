@@ -1,4 +1,4 @@
-.TH sinfo "1" "Slurm Commands" "April 2021" "Slurm Commands"
+.TH sinfo "1" "Slurm Commands" "July 2021" "Slurm Commands"
 
 .SH "NAME"
 sinfo \- View information about Slurm nodes and partitions.
@@ -52,6 +52,11 @@ will not be displayed. This is the default behavior.
 Print the state on a periodic basis.
 Sleep for the indicated number of seconds between reports.
 By default prints a time stamp with the header.
+
+.TP
+\f3\-\-json\fP
+Dump node information as JSON. All other formating and filtering arugments will
+be ignored.
 
 .TP
 \fB\-\-local\fR
@@ -363,6 +368,9 @@ Default time for any job in the format "days\-hours:minutes:seconds".
 \fBDisk\fR
 Size of temporary disk space per node in megabytes.
 .TP
+\fBExtra\fR
+Arbitray string on the node.
+.TP
 \fBFeatures\fR
 Features available on the nodes. Also see \fBfeatures_act\fR.
 .TP
@@ -452,6 +460,9 @@ State of nodes, compact form.
 \fBStateLong\fR
 State of nodes, extended form.
 .TP
+\fBStateComplete\fR
+State of nodes, including all node state flags. eg. "idle+cloud+power"
+.TP
 \fBThreads\fR
 Number of threads per core.
 .TP
@@ -529,8 +540,9 @@ If the states are separated by '&', then the nodes must be in all states.
 Possible values include (case insensitive): ALLOC, ALLOCATED, CLOUD,
 COMP, COMPLETING, DOWN, DRAIN (for node in DRAINING or DRAINED
 states), DRAINED, DRAINING, FAIL, FUTURE, FUTR,
-IDLE, MAINT, MIX, MIXED, NO_RESPOND, NPC, PERFCTRS,
-POWER_DOWN, POWERING_DOWN, POWER_UP, RESV, RESERVED, UNK, and UNKNOWN.
+IDLE, MAINT, MIX, MIXED, NO_RESPOND, NPC, PERFCTRS, PLANNED,
+POWER_DOWN, POWERING_DOWN, POWERED_DOWN, POWERING_UP, REBOOT_ISSUED,
+REBOOT_REQUESTED, RESV, RESERVED, UNK, and UNKNOWN.
 By default nodes in the specified state are reported whether
 they are responding or not.
 The \fB\-\-dead\fR and \fB\-\-responding\fR options may be
@@ -554,6 +566,11 @@ Provide detailed event logging through program execution.
 .TP
 \fB\-V\fR, \fB\-\-version\fR
 Print version information and exit.
+
+.TP
+\f3\-\-yaml\fP
+Dump node information as YAML. All other formating and filtering arugments will
+be ignored.
 
 .SH "OUTPUT FIELD DESCRIPTIONS"
 .TP
@@ -639,7 +656,7 @@ the OversubScribe value will be appended to the output.
 State of the nodes.
 Possible states include: allocated, completing, down,
 drained, draining, fail, failing, future, idle, maint, mixed,
-perfctrs, power_down, power_up, reserved, and unknown.
+perfctrs, planned, power_down, power_up, reserved, and unknown.
 Their abbreviated forms are: alloc, comp, down, drain, drng,
 fail, failg, futr, idle, maint, mix, npc, pow_dn, pow_up, resv,
 and unk respectively.
@@ -665,11 +682,13 @@ be placed in the \fBDOWN\fR state (except in the case of
 \fBFAIL\fR, \fBFAILING\fR nodes).
 .TP
 \fB~\fR
-The node is presently in a power saving mode (typically
-running at reduced frequency).
+The node is presently in powered off.
 .TP
 \fB#\fR
 The node is presently being powered up or configured.
+.TP
+\fB!\fR
+The node is pending power down.
 .TP
 \fB%\fR
 The node is presently being powered down.
@@ -679,6 +698,12 @@ The node is currently in a reservation with a flag value of "maintenance".
 .TP
 \fB@\fR
 The node is pending reboot.
+.TP
+\fB^\fR
+The node reboot was issued.
+.TP
+\fB\-\fR
+The node is planned by the backfill scheduler for a higher priority job.
 .TP 12
 \fBALLOCATED\fR
 The node has been allocated to one or more jobs.
@@ -737,11 +762,18 @@ some point in the indefinite future for use.
 \fBIDLE\fR
 The node is not allocated to any jobs and is available for use.
 .TP
+\fBINVAL\fR
+The node registered with an invalid configuration. The node will clear from
+this state with a valid registration (ie. a slurmd restart is required).
+.TP
 \fBMAINT\fR
 The node is currently in a reservation with a flag value of "maintenance".
 .TP
-\fBREBOOT\fR
-The node is currently scheduled to be rebooted.
+\fBREBOOT_ISSUED\fR
+A reboot request has been sent to the agent configured to handle this request.
+.TP
+\fBREBOOT_REQUESTED\fR
+A request to reboot this node has been made, but hasn't been handled yet.
 .TP
 \fBMIXED\fR
 The node has some of its CPUs \fBALLOCATED\fR while others are \fBIDLE\fR.
@@ -750,13 +782,19 @@ The node has some of its CPUs \fBALLOCATED\fR while others are \fBIDLE\fR.
 Network Performance Counters associated with this node are in use, rendering
 this node as not usable for any other jobs
 .TP
+\fBPLANNED\fR
+The node is planned by the backfill scheduler for a higher priority job.
+.TP
 \fBPOWER_DOWN\fR
+The node is pending power down.
+.TP
+\fBPOWERED_DOWN\fR
 The node is currently powered down and not capable of running any jobs.
 .TP
 \fBPOWERING_DOWN\fR
 The node is in the process of powering down and not capable of running any jobs.
 .TP
-\fBPOWER_UP\fR
+\fBPOWERING_UP\fR
 The node is in the process of being powered up.
 .TP
 \fBRESERVED\fR
@@ -892,7 +930,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2009 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010-2017 SchedMD LLC.
+Copyright (C) 2010\-2021 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
 For details, see <https://slurm.schedmd.com/>.
