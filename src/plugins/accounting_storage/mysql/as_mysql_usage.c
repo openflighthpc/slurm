@@ -534,7 +534,7 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		"down_secs",
 		"pdown_secs",
 		"idle_secs",
-		"resv_secs",
+		"plan_secs",
 		"over_secs",
 		"count",
 		"time_start",
@@ -546,7 +546,7 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		CLUSTER_DCPU,
 		CLUSTER_PDCPU,
 		CLUSTER_ICPU,
-		CLUSTER_RCPU,
+		CLUSTER_PCPU,
 		CLUSTER_OCPU,
 		CLUSTER_CNT,
 		CLUSTER_START,
@@ -610,7 +610,7 @@ static int _get_cluster_usage(mysql_conn_t *mysql_conn, uid_t uid,
 		accounting_rec->pdown_secs = slurm_atoull(row[CLUSTER_PDCPU]);
 		accounting_rec->idle_secs = slurm_atoull(row[CLUSTER_ICPU]);
 		accounting_rec->over_secs = slurm_atoull(row[CLUSTER_OCPU]);
-		accounting_rec->resv_secs = slurm_atoull(row[CLUSTER_RCPU]);
+		accounting_rec->plan_secs = slurm_atoull(row[CLUSTER_PCPU]);
 		accounting_rec->period_start = slurm_atoul(row[CLUSTER_START]);
 		list_append(cluster_rec->accounting_list, accounting_rec);
 	}
@@ -909,7 +909,7 @@ extern int as_mysql_roll_usage(mysql_conn_t *mysql_conn, time_t sent_start,
 	//START_TIMER;
 	xassert(!*rollup_stats_list_in);
 	*rollup_stats_list_in = list_create(slurmdb_destroy_rollup_stats);
-	slurm_mutex_lock(&as_mysql_cluster_list_lock);
+	slurm_rwlock_rdlock(&as_mysql_cluster_list_lock);
 	itr = list_iterator_create(as_mysql_cluster_list);
 	while ((cluster_name = list_next(itr))) {
 		local_rollup_t *local_rollup = xmalloc(sizeof(local_rollup_t));
@@ -950,7 +950,7 @@ extern int as_mysql_roll_usage(mysql_conn_t *mysql_conn, time_t sent_start,
 	}
 	slurm_mutex_lock(&rolledup_lock);
 	list_iterator_destroy(itr);
-	slurm_mutex_unlock(&as_mysql_cluster_list_lock);
+	slurm_rwlock_unlock(&as_mysql_cluster_list_lock);
 
 	while (rolledup < roll_started) {
 		slurm_cond_wait(&rolledup_cond, &rolledup_lock);

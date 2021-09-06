@@ -1,4 +1,4 @@
-.TH "job_container.conf" "5" "Slurm Configuration File" "March 2021" "Slurm Configuration File"
+.TH "job_container.conf" "5" "Slurm Configuration File" "May 2021" "Slurm Configuration File"
 
 .SH "NAME"
 job_container.conf \- Slurm configuration file for job_container/tmpfs plugin
@@ -11,7 +11,8 @@ job_container.conf file to find out the configuration settings. Based on them it
 constructs a private mount namespace for the job and mounts /tmp and
 /dev/shm inside it. This gives the job a private view of /tmp and
 /dev/shm. /tmp is mounted inside a location that is specified as 'BasePath' in
-job_container.conf file.
+job_container.conf file. To make use of this plugin, 'PrologFlags=Contain' must
+be present in your \fBslurm.conf\fP file.
 
 The file location can be modified at system build time using the
 DEFAULT_SLURM_CONF parameter or at execution time by setting the SLURM_CONF
@@ -44,12 +45,16 @@ directory to exist. This option can be used on a global or per-line basis.
 This parameter is optional.
 
 .TP
-\fBBasepath\fR
+\fBBasePath\fR
 Specify the \fIPATH\fR that the tmpfs plugin should use to mount private /tmp
 to. This path must be readable and writable by the plugin. The plugin also
 constructs a directory for each job inside this path, which is then used for
-mounting. The basepath gets mounted as 'private' during slurmd start
+mounting. The \fBBasePath\fR gets mounted as 'private' during slurmd start
 and remains mounted until shutdown.
+
+\fBNOTE\fR: The \fBBasePath\fR parameter should not be configured to use
+/tmp or /dev/shm. Using these directories will cause conflicts when trying
+to mount and unmount the private directories for the job.
 
 .TP
 \fBInitScript\fR
@@ -121,7 +126,7 @@ applies.
 Copyright (C) 2021 Regents of the University of California
 Produced at Lawrence Berkeley National Laboratory
 .br
-Copyright (C) 2021 SchedMD LLC.
+Copyright (C) 2021\-2021 SchedMD LLC.
 
 .LP
 This file is part of Slurm, a resource management program.

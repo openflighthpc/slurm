@@ -104,14 +104,19 @@
 #define	bit_fls			slurm_bit_fls
 #define	bit_fill_gaps		slurm_bit_fill_gaps
 #define	bit_super_set		slurm_bit_super_set
+#define	bit_overlap		slurm_bit_overlap
 #define	bit_copy		slurm_bit_copy
+#define	bit_equal		slurm_bit_equal
 #define	bit_pick_cnt		slurm_bit_pick_cnt
 #define bit_nffc		slurm_bit_nffc
 #define bit_noc			slurm_bit_noc
 #define bit_nffs		slurm_bit_nffs
 #define bit_copybits		slurm_bit_copybits
+#define	bit_get_bit_num		slurm_bit_get_bit_num
+#define	bit_get_pos_num		slurm_bit_get_pos_num
 
 /* fd.[ch] functions */
+#define closeall		slurm_closeall
 #define fd_set_blocking		slurm_fd_set_blocking
 #define fd_set_nonblocking	slurm_fd_set_nonblocking
 #define send_fd_over_pipe	slurm_send_fd_over_pipe
@@ -163,20 +168,17 @@
 #define	hostset_within		slurm_hostset_within
 
 /* gres.[ch] functions */
-#define gres_gresid_to_gresname	slurm_gres_gresid_to_gresname
+#define gres_find_id		slurm_gres_find_id
+#define gres_find_sock_by_job_state slurm_gres_find_sock_by_job_state
 #define gres_get_node_used	slurm_gres_get_node_used
 #define gres_get_system_cnt	slurm_gres_get_system_cnt
 #define gres_get_value_by_type	slurm_gres_get_value_by_type
 #define gres_get_job_info	slurm_gres_get_job_info
-#define gres_build_job_details	slurm_gres_build_job_details
 #define gres_get_step_info	slurm_gres_get_step_info
-#define gres_get_step_state	slurm_gres_get_step_state
-#define gres_get_job_state	slurm_gres_get_job_state
-#define gres_2_tres_str		slurm_gres_2_tres_str
-#define gres_set_job_tres_cnt	slurm_gres_set_job_tres_cnt
-#define gres_set_node_tres_cnt	slurm_gres_set_node_tres_cnt
 #define gres_device_major	slurm_gres_device_major
+#define gres_sock_delete	slurm_gres_sock_delete
 #define destroy_gres_device	slurm_destroy_gres_device
+#define destroy_gres_slurmd_conf slurm_destroy_gres_slurmd_conf
 
 /* list.[ch] functions */
 #define	list_create		slurm_list_create
@@ -191,6 +193,7 @@
 #define	list_for_each		slurm_list_for_each
 #define	list_for_each_max	slurm_list_for_each_max
 #define	list_sort		slurm_list_sort
+#define	list_flip		slurm_list_flip
 #define	list_push		slurm_list_push
 #define	list_pop		slurm_list_pop
 #define	list_peek		slurm_list_peek
@@ -456,23 +459,22 @@
 #define stepd_get_uid			slurm_stepd_get_uid
 #define stepd_add_extern_pid		slurm_stepd_add_extern_pid
 #define stepd_get_x11_display		slurm_stepd_get_x11_display
-#define stepd_get_info			slurm_stepd_get_info
 #define stepd_getpw			slurm_stepd_getpw
 #define xfree_struct_passwd		slurm_xfree_struct_passwd
 #define stepd_getgr			slurm_stepd_getgr
 #define xfree_struct_group_array	slurm_xfree_struct_group_array
 #define stepd_get_namespace_fd		slurm_stepd_get_namespace_fd
 
-/* xcgroup_read_config.[ch] */
-#define xcgroup_config_read_mutex       slurm_xcgroup_config_read_mutex
-#define xcgroup_get_slurm_cgroup_conf   slurm_xcgroup_get_slurm_cgroup_conf
-#define xcgroup_fini_slurm_cgroup_conf  slurm_xcgroup_fini_slurm_cgroup_conf
+/* cgroup.[ch] functions */
+#define cgroup_conf_init		slurm_cgroup_conf_init
+#define cgroup_conf_destroy		slurm_cgroup_conf_destroy
 
 #endif /* USE_ALIAS */
 
 /* Include the function definitions after redefining their names. */
 #include "src/common/bitstring.h"
 #include "src/common/callerid.h"
+#include "src/common/cgroup.h"
 #include "src/common/eio.h"
 #include "src/common/env.h"
 #include "src/common/hostlist.h"
@@ -492,7 +494,6 @@
 #include "src/common/switch.h"
 #include "src/common/working_cluster.h"
 #include "src/common/xassert.h"
-#include "src/common/xcgroup_read_config.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"

@@ -1,11 +1,11 @@
-.TH SPANK "8" "Slurm Component" "April 2021" "Slurm Component"
+.TH SPANK "8" "Slurm Component" "August 2021" "Slurm Component"
 
 .SH "NAME"
 \fBSPANK\fR \- Slurm Plug\-in Architecture for Node and job (K)control
 
 .SH "DESCRIPTION"
 This manual briefly describes the capabilities of the Slurm Plug\-in
-architecture for Node and job Kontrol (\fBSPANK\fR) as well as the \fBSPANK\fR
+Architecture for Node and job Kontrol (\fBSPANK\fR) as well as the \fBSPANK\fR
 configuration file: (By default: \fBplugstack.conf\fP.)
 .LP
 \fBSPANK\fR provides a very generic interface for stackable plug\-ins
@@ -18,8 +18,11 @@ the \fBSPANK\fR infrastructure provides administrators and other developers
 a low cost, low effort ability to dynamically modify the runtime
 behavior of Slurm job launch.
 .LP
-\fBNote\fR: \fBSPANK\fR plugins using the Slurm APIs need to be recompiled when
-upgrading Slurm to a new major release.
+\fBNOTE\fR: All \fBSPANK\fR plugins should be recompiled when upgrading Slurm
+to a new major release. The \fBSPANK\fR API is not guaranteed to be ABI
+compatible between major releases. Any \fBSPANK\fR plugin linking to any of the
+Slurm libraries should be carefully checked as the Slurm APIs and headers
+can change between major releases.
 .LP
 
 .SH "SPANK PLUGINS"
@@ -74,7 +77,7 @@ option processing.
 .TP
 \fBslurm_spank_job_prolog\fR
 Called at the same time as the job prolog. If this function returns a
-negative value and the \fBSPANK\fR plugin that contains it is required in the
+non\-zero value and the \fBSPANK\fR plugin that contains it is required in the
 \fBplugstack.conf\fR, the node that this is run on will be drained.
 
 .TP
@@ -123,7 +126,7 @@ In local context, called before \fBsrun\fR exits.
 .TP
 \fBslurm_spank_job_epilog\fR
 Called at the same time as the job epilog. If this function returns a
-negative value and the \fBSPANK\fR plugin that contains it is required in the
+non\-zero value and the \fBSPANK\fR plugin that contains it is required in the
 \fBplugstack.conf\fR, the node that this is run on will be drained.
 .TP
 \fBslurm_spank_slurmd_exit\fR
@@ -576,7 +579,7 @@ int slurm_spank_task_post_fork(spank_t sp, int ac, char **av)
 
     if (setpriority(PRIO_PROCESS, (int) pid, (int) prio)) {
         slurm_error("setpriority: %m");
-        return -ESPANK_ERROR;
+        return ESPANK_ERROR;
     }
 
     return ESPANK_SUCCESS;
@@ -588,16 +591,16 @@ static int _str2prio(const char *str, int *p2int)
     char *p = NULL;
 
     if (!str || str[0] == '\\0')
-        return -ESPANK_BAD_ARG;
+        return ESPANK_BAD_ARG;
 
     l = strtol(str, &p, 10);
 
     if (!p || (*p != '\\0'))
-        return -ESPANK_BAD_ARG;
+        return ESPANK_BAD_ARG;
 
     if ((l < -20) || (l > 20)) {
         slurm_error("Specify value between -20 and 20");
-        return -ESPANK_BAD_ARG;
+        return ESPANK_BAD_ARG;
     }
 
     *p2int = (int) l;
@@ -611,7 +614,7 @@ static int _renice_opt_process(int val, const char *optarg, int remote)
 
     if (optarg == NULL) {
         slurm_error("renice: invalid NULL argument!");
-        return -ESPANK_BAD_ARG;
+        return ESPANK_BAD_ARG;
     }
 
     if ((rc = _str2prio(optarg, &prio))) {
@@ -634,7 +637,7 @@ static int _renice_opt_process(int val, const char *optarg, int remote)
 .fi
 
 .SH "COPYING"
-Portions copyright (C) 2010-2018 SchedMD LLC.
+Portions copyright (C) 2010\-2021 SchedMD LLC.
 Copyright (C) 2006 The Regents of the University of California.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 CODE\-OCEC\-09\-009. All rights reserved.

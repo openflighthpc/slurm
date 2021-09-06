@@ -8,22 +8,22 @@
 <a href="#Running_Jobs">Running Jobs</a><br>
 <a href="#GPU_Management">GPU Management</a><br>
 <a href="#MPS_Management">MPS Management</a><br>
-<a href="#MIC_Management">MIC Management</a><br>
+<a href="#MIG_Management">MIG Management</a><br>
 
 <!-------------------------------------------------------------------------->
 <a id="Overview"></a>
 <h2>Overview</h2>
-<P>Generic resource (GRES) scheduling is supported through a flexible plugin
-mechanism. Support is currently provided for Graphics Processing Units (GPUs),
-CUDA Multi-Process Service (MPS), and
-Intel&reg; Many Integrated Core (MIC) processors.</P>
+<p>Slurm supports the ability to define and schedule arbitrary Generic RESources
+(GRES). Additional built-in features are enabled for specific GRES types,
+including Graphics Processing Units (GPUs) and CUDA Multi-Process Service (MPS)
+devices, through an extensible plugin mechanism.</p>
 
 <!-------------------------------------------------------------------------->
 <a id="Configuration"></a>
 <h2>Configuration</h2>
 
-<P>Slurm supports no generic resources in the default configuration.
-One must explicitly specify which resources are to be managed in the
+<P>By default, no GRES are enabled in the cluster's configuration.
+You must explicitly specify which GRES are to be managed in the
 <I>slurm.conf</I> configuration file. The configuration parameters of
 interest are <B>GresTypes</B> and <B>Gres</B>.
 </P>
@@ -38,7 +38,7 @@ than configured will be placed in a DRAIN state.</P>
 
 <P>Snippet from an example <I>slurm.conf</I> file:</P>
 <PRE>
-# Configure support for our four GPUs (with MPS), plus bandwidth
+# Configure four GPUs (with MPS), plus bandwidth
 GresTypes=gpu,mps,bandwidth
 NodeName=tux[0-7] Gres=gpu:tesla:2,gpu:kepler:2,mps:400,bandwidth:lustre:no_consume:4G
 </PRE>
@@ -78,7 +78,7 @@ To view available <I>gres.conf</I> configuration parameters, see the <a href="gr
 
 <P>Example <I>gres.conf</I> file:</P>
 <PRE>
-# Configure support for four GPUs (with MPS), plus bandwidth
+# Configure four GPUs (with MPS), plus bandwidth
 AutoDetect=nvml
 Name=gpu Type=gp100  File=/dev/nvidia0 Cores=0,1
 Name=gpu Type=gp100  File=/dev/nvidia1 Cores=0,1
@@ -271,7 +271,7 @@ be set to <code class="commandline">CUDA_DEVICE_ORDER=PCI_BUS_ID</code>.</p>
 <p>GPU device files (e.g. <i>/dev/nvidia1</i>) are
 based on the Linux minor number assignment, while NVML's device numbers are
 assigned via PCI bus ID, from lowest to highest. Mapping between these two is
-indeterministic and system dependent, and could vary between boots after
+nondeterministic and system dependent, and could vary between boots after
 hardware or OS changes. For the most part, this assignment seems fairly stable.
 However, an after-bootup check is required to guarantee that a GPU device is
 assigned to a specific device file.</p>
@@ -339,7 +339,7 @@ Some example configurations for Slurm's gres.conf file are shown below.</p>
 
 <PRE>
 # Example 1 of gres.conf
-# Configure support for four GPUs (with MPS)
+# Configure four GPUs (with MPS)
 AutoDetect=nvml
 Name=gpu Type=gp100 File=/dev/nvidia0 Cores=0,1
 Name=gpu Type=gp100 File=/dev/nvidia1 Cores=0,1
@@ -352,7 +352,7 @@ Name=mps Count=400
 <a id="MPS_config_example_2"></a>
 <PRE>
 # Example 2 of gres.conf
-# Configure support for four differernt GPU types (with MPS)
+# Configure four different GPU types (with MPS)
 AutoDetect=nvml
 Name=gpu Type=gtx1080 File=/dev/nvidia0 Cores=0,1
 Name=gpu Type=gtx1070 File=/dev/nvidia1 Cores=0,1
@@ -364,8 +364,8 @@ Name=mps Count=1100   File=/dev/nvidia2
 Name=mps Count=1000   File=/dev/nvidia3
 </PRE>
 
-<P><B>NOTE:</B> Slurm support for gres/mps requires the use of the
-select/cons_tres plugin.</P>
+<p><b>NOTE:</b> <i>gres/mps</i> requires the use of the <i>select/cons_tres</i>
+plugin.</p>
 
 <p>Job requests for MPS will be processed the same as any other GRES except
 that the request must be satisfied using only one GPU per node and only one
@@ -435,34 +435,36 @@ CVE-2018-6260</a> and in the
 <a href="https://nvidia.custhelp.com/app/answers/detail/a_id/4772">
 Security Bulletin: NVIDIA GPU Display Driver - February 2019</a>.</p>
 
-<!-------------------------------------------------------------------------->
-<a id="MIC_Management"></a>
-<h2>MIC Management</h2>
+<a id="MIG_Management"></a>
+<h2>MIG Management</h2>
 
-<P>Slurm can be used to provide resource management for systems with the
-Intel&reg; Many Integrated Core (MIC) processor.
-Slurm sets an <code class="commandline">OFFLOAD_DEVICES</code>
-environment variable, which controls the
-selection of MICs available to a job step.
-The <code class="commandline">OFFLOAD_DEVICES</code>
-environment variable is used by both Intel
-LEO (Language Extensions for Offload) and the MKL (Math Kernel Library)
-automatic offload.
-(This is very similar to how the
-<code class="commandline">CUDA_VISIBLE_DEVICES</code> environment variable is
-used to control which GPUs can be used by CUDA&trade; software.)
-If no MICs are reserved via GRES, the
-<code class="commandline">OFFLOAD_DEVICES</code> variable is set to
--1. This causes the code to ignore the offload directives and run MKL
-routines on the CPU. The code will still run but only on the CPU. This
-also gives a somewhat cryptic warning:</P>
-<pre>offload warning: OFFLOAD_DEVICES device number -1 does not correspond
-to a physical device</pre>
-<P>The offloading is automatically scaled to all the devices, (e.g. if
---gres=mic:2 is defined) then all offloads use two MICs unless
-explicitly defined in the offload pragmas.</P>
-<!-------------------------------------------------------------------------->
+<p>Beginning in version 21.08, Slurm now supports NVIDIA
+<i>Multi-Instance GPU</i> (MIG) devices. This feature allows some newer NVIDIA
+GPUs (like the A100) to split up a GPU into up to seven separate, isolated GPU
+instances. Slurm can treat these MIG instances as individual GPUs, complete with
+cgroup isolation and task binding.</p>
 
-<p style="text-align: center;">Last modified 22 December 2020</p>
+<p>To configure MIGs in Slurm, specify
+<code class="commandline">AutoDetect=nvml</code> in <i>gres.conf</i> for the
+nodes with MIGs, and specify <code class="commandline">Gres</code>
+in <i>slurm.conf</i> as if the MIGs were regular GPUs. An optional
+GRES type can be specified to distinguish MIGs of different sizes from each
+other, as well as from other GPUs in the cluster. This type must be a substring
+of the "MIG Profile" string as reported by the node in its slurmd log under the
+<code class="commandline">debug2</code> log level. Other MIG attributes will be
+displayed as well, including MIG UUID, GPU Instance (GI) ID, Compute Instance
+(CI) ID, GI and CI minor numbers, the associated MIG device files, and
+"UniqueID" (the value Slurm will use to select MIGs via
+<code class="commandline">CUDA_VISIBLE_DEVICES</code>).</p>
+
+<p>The sanity-check AutoDetect mode is not supported for MIGs.
+Slurm expects MIG devices to already be partitioned, and does not support
+dynamic MIG partitioning.</p>
+
+<p>For more information on NVIDIA MIGs (including how to partition them), see
+<a href="https://docs.nvidia.com/datacenter/tesla/mig-user-guide/index.html">
+the MIG user guide</a>.</p>
+
+<p style="text-align: center;">Last modified 23 June 2021</p>
 
 <!--#include virtual="footer.txt"-->

@@ -1,4 +1,4 @@
-.TH slurmd "8" "Slurm Daemon" "September 2020" "Slurm Daemon"
+.TH slurmd "8" "Slurm Daemon" "June 2021" "Slurm Daemon"
 
 .SH "NAME"
 slurmd \- The compute node daemon for Slurm.
@@ -28,9 +28,9 @@ as used in \fBslurm.conf\fR to describe a node's configuration plus its uptime.
 
 .TP
 \fB\--conf-server <host>[:<port>]\fR
-Specify the host and (optionally) port number of the primary slurmctld. This
-host is where slurmd will fetch the configuration from when running in
-"configless" mode.
+Comma\-separated list of controllers, the first being the primary slurmctld. A
+port can (optionally) be specified for each controller. These hosts are where
+the slurmd will fetch the configuration from when running in "configless" mode.
 
 .TP
 \fB\-d <file>\fR
@@ -42,6 +42,11 @@ Run slurmd in the foreground. Error and debug messages will be copied to stderr.
 .TP
 \fB\-f <file>\fR
 Read configuration from the specified file. See \fBNOTES\fR below.
+.TP
+\fB\-F[feature]\fR
+Start this node as a Dynamic Future node. It will try to match a node
+definition with a state of \fBFUTURE\fR, optionally using the specified
+feature to match the node definition.
 .TP
 \fB\-G\fR
 Print Generic RESource (GRES) configuration (based upon slurm.conf GRES merged
@@ -133,7 +138,7 @@ configuration information, which could place additional load on the controller.
 .SH "COPYING"
 Copyright (C) 2002\-2007 The Regents of the University of California.
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
-Copyright (C) 2010\-2016 SchedMD LLC.
+Copyright (C) 2010\-2021 SchedMD LLC.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .LP
 This file is part of Slurm, a resource management program.
