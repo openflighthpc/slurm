@@ -24,13 +24,8 @@
 # For more information on <project>, please visit:
 # https://github.com/openflighthpc/slurm
 #==============================================================================
-export PATH=$PATH:/opt/flight/opt/slurm/bin
+export PATH=$PATH:$flight_ROOT/opt/slurm/bin
 
-flight_slurm_exit() {
-  PATH=$(echo "$PATH" | sed 's,:/opt/flight/opt/slurm/bin,,g')
-}
-
-if [ "${flight_DEFINES}" ]; then
-  flight_DEFINES+=(flight_slurm_exit)
-  flight_DEFINES_exits=(flight_slurm_exit "${flight_DEFINES_exits[@]}")
+if [ -n "$flight_DEFINES_paths" ]; then
+  flight_DEFINES_paths="$flight_DEFINES_paths $flight_ROOT/opt/slurm/bin"
 fi

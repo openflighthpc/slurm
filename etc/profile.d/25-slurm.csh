@@ -24,18 +24,9 @@
 # For more information on <project>, please visit:
 # https://github.com/openflighthpc/slurm
 #==============================================================================
-set path=($path /opt/flight/opt/slurm/bin)
+set path=($path "$flight_ROOT"/opt/slurm/bin)
 
-alias flight_slurm_exit 'set newpath=()\
-  foreach pval ( $path )\
-    if ($pval != "/opt/flight/opt/slurm/bin") then\
-      set newpath=($newpath $pval)\
-    endif\
-  end\
-  set path=($newpath)\
-  unset newpath'
-
-if ($?flight_DEFINES) then
-  setenv flight_DEFINES "${flight_DEFINES} flight_slurm_exit"
-  setenv flight_DEFINES_exits "flight_slurm_exit ${flight_DEFINES_exits}"
+if ( "$flight_DEFINES_paths" != "" ) then
+  set flight_DEFINES_paths = (${flight_DEFINES_paths} "$flight_ROOT"/opt/slurm/bin)
 endif
+
