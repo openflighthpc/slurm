@@ -26,11 +26,13 @@
 #==============================================================================
 export PATH=$PATH:/opt/flight/opt/slurm/bin
 
-flight_slurm_exit() {
-  PATH=$(echo "$PATH" | sed 's,:/opt/flight/opt/slurm/bin,,g')
-}
+if [ "$(type -t flight_HELPER_remove_path)" == "function" ]; then
+  flight_SLURM_exit() {
+    PATH=$(flight_HELPER_remove_path /opt/flight/opt/slurm/bin)
+  }
 
-if [ "${flight_DEFINES}" ]; then
-  flight_DEFINES+=(flight_slurm_exit)
-  flight_DEFINES_exits=(flight_slurm_exit "${flight_DEFINES_exits[@]}")
+  if [ "${flight_DEFINES}" ]; then
+    flight_DEFINES+=(flight_SLURM_exit)
+    flight_DEFINES_exits+=(flight_SLURM_exit)
+  fi
 fi
