@@ -26,16 +26,12 @@
 #==============================================================================
 set path=($path /opt/flight/opt/slurm/bin)
 
-alias flight_slurm_exit 'set newpath=()\
-  foreach pval ( $path )\
-    if ($pval != "/opt/flight/opt/slurm/bin") then\
-      set newpath=($newpath $pval)\
-    endif\
-  end\
-  set path=($newpath)\
-  unset newpath'
+alias | grep "^flight_HELPER_remove_path" >/dev/null
+if ( $? == 0 ) then
+  alias flight_SLURM_exit set 'path=`flight_HELPER_remove_path /opt/flight/opt/slurm/bin`'
 
-if ($?flight_DEFINES) then
-  setenv flight_DEFINES "${flight_DEFINES} flight_slurm_exit"
-  setenv flight_DEFINES_exits "flight_slurm_exit ${flight_DEFINES_exits}"
+  if ($?flight_DEFINES) then
+    setenv flight_DEFINES "${flight_DEFINES} flight_SLURM_exit"
+    setenv flight_DEFINES_exits "${flight_DEFINES_exits} flight_SLURM_exit"
+  endif
 endif
