@@ -211,6 +211,8 @@ extern void slurm_msg_t_copy(slurm_msg_t *dest, slurm_msg_t *src)
 #endif
 
 	dest->orig_addr.ss_family = AF_UNSPEC;
+	if (src->auth_uid_set)
+		slurm_msg_set_r_uid(dest, src->auth_uid);
 }
 
 /* here to add \\ to all \" in a string this needs to be xfreed later */
@@ -3484,6 +3486,8 @@ extern char *bb_state_string(uint16_t state)
 		return "staged-in";
 	if (state == BB_STATE_PRE_RUN)
 		return "pre-run";
+	if (state == BB_STATE_ALLOC_REVOKE)
+		return "alloc-revoke";
 	if (state == BB_STATE_RUNNING)
 		return "running";
 	if (state == BB_STATE_SUSPEND)
@@ -3523,6 +3527,8 @@ extern uint16_t bb_state_num(char *tok)
 		return BB_STATE_STAGED_IN;
 	if (!xstrcasecmp(tok, "pre-run"))
 		return BB_STATE_PRE_RUN;
+	if (!xstrcasecmp(tok, "alloc-revoke"))
+		return BB_STATE_ALLOC_REVOKE;
 	if (!xstrcasecmp(tok, "running"))
 		return BB_STATE_RUNNING;
 	if (!xstrcasecmp(tok, "suspend"))

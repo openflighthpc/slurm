@@ -314,9 +314,6 @@ static void _internal_step_complete(step_record_t *step_ptr, int remaining)
 	select_g_step_finish(step_ptr, false);
 
 	_step_dealloc_lps(step_ptr);
-	gres_ctld_step_dealloc(step_ptr->gres_list_alloc,
-			       job_ptr->gres_list_alloc, job_ptr->job_id,
-			       step_ptr->step_id.step_id);
 
 	/* Don't need to set state. Will be destroyed in next steps. */
 	/* step_ptr->state = JOB_COMPLETE; */
@@ -692,6 +689,7 @@ void signal_step_tasks(step_record_t *step_ptr, uint16_t signal,
 	}
 
 	agent_args->msg_args = signal_tasks_msg;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -737,6 +735,7 @@ void signal_step_tasks_on_node(char* node_name, step_record_t *step_ptr,
 	       sizeof(signal_tasks_msg->step_id));
 	signal_tasks_msg->signal      = signal;
 	agent_args->msg_args = signal_tasks_msg;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -1496,6 +1495,15 @@ static bitstr_t *_pick_step_nodes(job_record_t *job_ptr,
 				cpu_count /= req_tpc;
 				cpu_count *=
 					node_record_table_ptr[first_inx].vpus;
+			} else if (req_tpc >
+				   node_record_table_ptr[first_inx].vpus) {
+				log_flag(STEPS, "%s: requested more threads per core than possible in allocation (%u > %u) for %pJ",
+					 __func__,
+					 req_tpc,
+					 node_record_table_ptr[first_inx].vpus,
+					 job_ptr);
+				*return_code = ESLURM_BAD_THREAD_PER_CORE;
+				goto cleanup;
 			}
 		}
 
@@ -1780,6 +1788,69 @@ static int _count_cpus(job_record_t *job_ptr, bitstr_t *bitmap,
 	return sum;
 }
 
+/* Return true if a core was picked, false if not */
+static bool _pick_step_core(step_record_t *step_ptr,
+			    job_resources_t *job_resrcs_ptr, int job_node_inx,
+			    int sock_inx, int core_inx, bool use_all_cores,
+			    bool oversubscribing_cpus)
+{
+	int bit_offset;
+
+	bit_offset = get_job_resources_offset(job_resrcs_ptr,
+					      job_node_inx,
+					      sock_inx,
+					      core_inx);
+	if (bit_offset < 0)
+		fatal("get_job_resources_offset");
+
+	if (!bit_test(job_resrcs_ptr->core_bitmap, bit_offset))
+		return false;
+
+	if (oversubscribing_cpus) {
+		/* Already allocated CPUs, now we are oversubscribing CPUs */
+		if (bit_test(step_ptr->core_bitmap_job, bit_offset))
+			return false; /* already taken by this step */
+
+		log_flag(STEPS, "%s: over-subscribe alloc Node:%d Socket:%d Core:%d",
+			 __func__, job_node_inx, sock_inx, core_inx);
+	} else {
+		/* Check and set the job's used cores. */
+		if ((use_all_cores == false) &&
+		    bit_test(job_resrcs_ptr->core_bitmap_used, bit_offset))
+			return false;
+
+		bit_set(job_resrcs_ptr->core_bitmap_used, bit_offset);
+
+		log_flag(STEPS, "%s: alloc Node:%d Socket:%d Core:%d",
+			 __func__, job_node_inx, sock_inx, core_inx);
+	}
+
+	bit_set(step_ptr->core_bitmap_job, bit_offset);
+
+	return true;
+}
+
+static bool _handle_core_select(step_record_t *step_ptr,
+			       job_resources_t *job_resrcs_ptr,
+			       int job_node_inx,
+			       int sock_inx, int core_inx, bool use_all_cores,
+			       bool oversubscribing_cpus, int *cpu_cnt)
+{
+	xassert(cpu_cnt);
+
+	if (!_pick_step_core(step_ptr,
+			     job_resrcs_ptr,
+			     job_node_inx, sock_inx,
+			     core_inx, use_all_cores,
+			     oversubscribing_cpus))
+		return false;
+
+	if (--(*cpu_cnt) == 0)
+		return true;
+
+	return false;
+}
+
 /* Update the step's core bitmaps, create as needed.
  *	Add the specified task count for a specific node in the job's
  *	and step's allocation */
@@ -1787,7 +1858,7 @@ static int _pick_step_cores(step_record_t *step_ptr,
 			    job_resources_t *job_resrcs_ptr, int job_node_inx,
 			    uint16_t task_cnt, uint16_t cpus_per_core)
 {
-	int bit_offset, core_inx, i, sock_inx;
+	int core_inx, i, sock_inx;
 	uint16_t sockets, cores;
 	int cpu_cnt = (int) task_cnt;
 	bool use_all_cores;
@@ -1825,31 +1896,39 @@ static int _pick_step_cores(step_record_t *step_ptr,
 	}
 
 	/* select idle cores first */
-	for (sock_inx=0; sock_inx<sockets; sock_inx++) {
-		for (core_inx=0; core_inx<cores; core_inx++) {
-			bit_offset = get_job_resources_offset(job_resrcs_ptr,
-							       job_node_inx,
-							       sock_inx,
-							       core_inx);
-			if (bit_offset < 0)
-				fatal("get_job_resources_offset");
-			if (!bit_test(job_resrcs_ptr->core_bitmap, bit_offset))
-				continue;
-			if ((use_all_cores == false) &&
-			    bit_test(job_resrcs_ptr->core_bitmap_used,
-				     bit_offset)) {
-				continue;
+	/*
+	 * Figure out the task distribution. The default is to cyclically
+	 * distribute to sockets.
+	 */
+	if (step_ptr->step_layout &&
+	    (step_ptr->step_layout->task_dist & SLURM_DIST_SOCKBLOCK)) {
+		/* Fill sockets before allocating to the next socket */
+		for (sock_inx=0; sock_inx < sockets; sock_inx++) {
+			for (core_inx=0; core_inx < cores; core_inx++) {
+				if (_handle_core_select(step_ptr,
+							job_resrcs_ptr,
+							job_node_inx, sock_inx,
+							core_inx,
+							use_all_cores,
+							false, &cpu_cnt))
+					return SLURM_SUCCESS;
 			}
-			bit_set(job_resrcs_ptr->core_bitmap_used, bit_offset);
-			bit_set(step_ptr->core_bitmap_job, bit_offset);
-
-			log_flag(STEPS, "%s: alloc Node:%d Socket:%d Core:%d",
-				 __func__, job_node_inx, sock_inx, core_inx);
-
-			if (--cpu_cnt == 0)
-				return SLURM_SUCCESS;
+		}
+	} else {
+		/* Cyclically allocate cores across sockets */
+		for (core_inx=0; core_inx < cores; core_inx++) {
+			for (sock_inx=0; sock_inx < sockets; sock_inx++) {
+				if (_handle_core_select(step_ptr,
+							job_resrcs_ptr,
+							job_node_inx, sock_inx,
+							core_inx,
+							use_all_cores,
+							false, &cpu_cnt))
+					return SLURM_SUCCESS;
+			}
 		}
 	}
+
 	/* The test for cores==0 is just to avoid CLANG errors.
 	 * It should never happen */
 	if (use_all_cores || (cores == 0))
@@ -1868,26 +1947,34 @@ static int _pick_step_cores(step_record_t *step_ptr,
 		((step_ptr->flags & SSF_OVERCOMMIT) ? 'T' : 'F'),
 		((step_ptr->flags & SSF_EXCLUSIVE) ? 'T' : 'F'));
 	last_core_inx = (last_core_inx + 1) % cores;
-	for (i=0; i<cores; i++) {
-		core_inx = (last_core_inx + i) % cores;
-		for (sock_inx=0; sock_inx<sockets; sock_inx++) {
-			bit_offset = get_job_resources_offset(job_resrcs_ptr,
-							       job_node_inx,
-							       sock_inx,
-							       core_inx);
-			if (bit_offset < 0)
-				fatal("get_job_resources_offset");
-			if (!bit_test(job_resrcs_ptr->core_bitmap, bit_offset))
-				continue;
-			if (bit_test(step_ptr->core_bitmap_job, bit_offset))
-				continue;   /* already taken by this step */
-			bit_set(step_ptr->core_bitmap_job, bit_offset);
 
-			log_flag(STEPS, "%s: over-subscribe alloc Node:%d Socket:%d Core:%d",
-				 __func__, job_node_inx, sock_inx, core_inx);
-
-			if (--cpu_cnt == 0)
-				return SLURM_SUCCESS;
+	if (step_ptr->step_layout &&
+	    (step_ptr->step_layout->task_dist & SLURM_DIST_SOCKBLOCK)) {
+		/* Fill sockets before allocating to the next socket */
+		for (sock_inx=0; sock_inx < sockets; sock_inx++) {
+			for (i=0; i < cores; i++) {
+				core_inx = (last_core_inx + i) % cores;
+				if (_handle_core_select(step_ptr,
+							job_resrcs_ptr,
+							job_node_inx, sock_inx,
+							core_inx,
+							use_all_cores,
+							true, &cpu_cnt))
+					return SLURM_SUCCESS;
+			}
+		}
+	} else {
+		for (i=0; i < cores; i++) {
+			core_inx = (last_core_inx + i) % cores;
+			for (sock_inx=0; sock_inx < sockets; sock_inx++) {
+				if (_handle_core_select(step_ptr,
+							job_resrcs_ptr,
+							job_node_inx, sock_inx,
+							core_inx,
+							use_all_cores,
+							true, &cpu_cnt))
+					return SLURM_SUCCESS;
+			}
 		}
 	}
 
@@ -1917,10 +2004,11 @@ static int _step_alloc_lps(step_record_t *step_ptr)
 {
 	job_record_t *job_ptr = step_ptr->job_ptr;
 	job_resources_t *job_resrcs_ptr = job_ptr->job_resrcs;
-	int cpus_alloc, cpus_alloc_mem;
+	int cpus_alloc, cpus_alloc_mem, cpu_array_inx = 0;
 	int i_node, i_first, i_last;
-	int job_node_inx = -1, step_node_inx = -1;
+	int job_node_inx = -1, step_node_inx = -1, node_cnt = 0;
 	bool first_step_node = true, pick_step_cores = true;
+	bool all_job_mem = false;
 	uint32_t rem_nodes;
 	int rc = SLURM_SUCCESS;
 	uint16_t req_tpc = NO_VAL16;
@@ -1968,10 +2056,15 @@ static int _step_alloc_lps(step_record_t *step_ptr)
 		step_ptr->pn_min_memory = 0;
 	}
 
+	if (!step_ptr->pn_min_memory)
+		all_job_mem = true;
+
 	rem_nodes = bit_set_count(step_ptr->step_node_bitmap);
 	step_ptr->memory_allocated = xcalloc(rem_nodes, sizeof(uint64_t));
 	for (i_node = i_first; i_node <= i_last; i_node++) {
 		uint64_t gres_step_node_mem_alloc = 0;
+		uint16_t vpus;
+
 		if (!bit_test(job_resrcs_ptr->node_bitmap, i_node))
 			continue;
 		job_node_inx++;
@@ -1993,18 +2086,52 @@ static int _step_alloc_lps(step_record_t *step_ptr)
 		if (first_step_node)
 			step_ptr->cpu_count = 0;
 
+		if ((++node_cnt) >
+		    job_resrcs_ptr->cpu_array_reps[cpu_array_inx]) {
+			cpu_array_inx++;
+			node_cnt = 0;
+		}
+
+		vpus = node_record_table_ptr[i_node].vpus;
 		if (step_ptr->flags & SSF_WHOLE) {
-			cpus_alloc_mem =
-				job_resrcs_ptr->cpu_array_value[job_node_inx];
-			cpus_alloc =
+			cpus_alloc_mem = cpus_alloc =
 				job_resrcs_ptr->cpus[job_node_inx];
+
+			/*
+			 * If we are requesting all the memory in the job
+			 * (--mem=0) we get it all, otherwise we use what was
+			 * requested specifically for the step.
+			 *
+			 * Else factor in the tpc so we get the correct amount
+			 * of memory.
+			 */
+			if (all_job_mem)
+				cpus_alloc_mem =
+					job_resrcs_ptr->
+					cpu_array_value[cpu_array_inx];
+			else if ((req_tpc != NO_VAL16) &&
+				 (req_tpc < vpus)) {
+				cpus_alloc_mem += vpus - 1;
+				cpus_alloc_mem /= vpus;
+				cpus_alloc_mem *= req_tpc;
+			}
 		} else {
 			uint16_t cpus_per_task = step_ptr->cpus_per_task;
-			uint16_t vpus = node_record_table_ptr[i_node].vpus;
-
-			cpus_alloc_mem = cpus_alloc =
+			cpus_alloc =
 				step_ptr->step_layout->tasks[step_node_inx] *
 				cpus_per_task;
+
+			/*
+			 * If we are requesting all the memory in the job
+			 * (--mem=0) we get it all, otherwise we use what was
+			 * requested specifically for the step.
+			 */
+			if (all_job_mem)
+				cpus_alloc_mem =
+					job_resrcs_ptr->
+					cpu_array_value[cpu_array_inx];
+			else
+				cpus_alloc_mem = cpus_alloc;
 
 			/*
 			 * If we are doing threads per core we need the whole
@@ -2041,6 +2168,7 @@ static int _step_alloc_lps(step_record_t *step_ptr)
 			/* If we aren't requesting memory get it from the job */
 			step_ptr->pn_min_memory =
 				job_ptr->details->pn_min_memory;
+			step_ptr->flags |= SSF_MEM_ZERO;
 		}
 
 		if (step_ptr->pn_min_memory && _is_mem_resv()) {
@@ -2053,7 +2181,13 @@ static int _step_alloc_lps(step_record_t *step_ptr)
 				mem_use = step_ptr->pn_min_memory;
 			}
 			step_ptr->memory_allocated[step_node_inx] = mem_use;
-			job_resrcs_ptr->memory_used[job_node_inx] += mem_use;
+			/*
+			 * Do not count against the job's memory allocation if
+			 * --mem=0 was requested.
+			 */
+			if (!(step_ptr->flags & SSF_MEM_ZERO))
+				job_resrcs_ptr->memory_used[job_node_inx] +=
+					mem_use;
 		} else if (_is_mem_resv()) {
 			step_ptr->memory_allocated[step_node_inx] =
 				gres_step_node_mem_alloc;
@@ -2114,6 +2248,10 @@ static int _step_alloc_lps(step_record_t *step_ptr)
 		info("Step Alloc GRES:");
 	gres_step_state_log(step_ptr->gres_list_alloc, job_ptr->job_id,
 			    step_ptr->step_id.step_id);
+
+	if (rc != SLURM_SUCCESS)
+		_step_dealloc_lps(step_ptr);
+
 	return rc;
 }
 
@@ -2242,7 +2380,8 @@ static void _step_dealloc_lps(step_record_t *step_ptr)
 			      cpus_alloc, job_node_inx);
 			job_resrcs_ptr->cpus_used[job_node_inx] = 0;
 		}
-		if (step_ptr->memory_allocated && _is_mem_resv()) {
+		if (step_ptr->memory_allocated && _is_mem_resv() &&
+		    !(step_ptr->flags & SSF_MEM_ZERO)) {
 			uint64_t mem_use =
 				step_ptr->memory_allocated[step_node_inx];
 			if (job_resrcs_ptr->memory_used[job_node_inx] >=
@@ -2296,6 +2435,10 @@ static void _step_dealloc_lps(step_record_t *step_ptr)
 		}
 		FREE_NULL_BITMAP(step_ptr->core_bitmap_job);
 	}
+
+	gres_ctld_step_dealloc(step_ptr->gres_list_alloc,
+			       job_ptr->gres_list_alloc, job_ptr->job_id,
+			       step_ptr->step_id.step_id);
 }
 
 static int _test_strlen(char *test_str, char *str_name, int max_str_len)
@@ -2481,23 +2624,30 @@ static void _clear_zero_tres(char **tres_spec)
 }
 
 /*
- * If a job step specification does not include any TRES specification,
- * then copy those values from the job record
+ * If a job step specification does not include any GRES specification,
+ * then copy those values from the job record.
+ * Currently we only want to check if the step lacks a "gres" request.
+ * "tres_per_[step|task]" has "cpu:<count>" in it, so we need to search for
+ * "gres" in the strings.
  */
 static void _copy_job_tres_to_step(job_step_create_request_msg_t *step_specs,
 				   job_record_t *job_ptr)
 {
 	if (!xstrcasecmp(step_specs->tres_per_node, "NONE")) {
 		xfree(step_specs->tres_per_node);
-	} else if (step_specs->tres_per_step	||
-		   step_specs->tres_per_node	||
-		   step_specs->tres_per_socket	||
-		   step_specs->tres_per_task) {
+	} else if (xstrstr(step_specs->tres_per_step, "gres")	||
+		   xstrstr(step_specs->tres_per_node, "gres")	||
+		   xstrstr(step_specs->tres_per_socket, "gres")	||
+		   xstrstr(step_specs->tres_per_task, "gres")) {
 		_clear_zero_tres(&step_specs->tres_per_step);
 		_clear_zero_tres(&step_specs->tres_per_node);
 		_clear_zero_tres(&step_specs->tres_per_socket);
 		_clear_zero_tres(&step_specs->tres_per_task);
 	} else {
+		xfree(step_specs->tres_per_step);
+		xfree(step_specs->tres_per_node);
+		xfree(step_specs->tres_per_socket);
+		xfree(step_specs->tres_per_task);
 		step_specs->tres_per_step   = xstrdup(job_ptr->tres_per_job);
 		step_specs->tres_per_node   = xstrdup(job_ptr->tres_per_node);
 		step_specs->tres_per_socket = xstrdup(job_ptr->tres_per_socket);
@@ -2588,6 +2738,12 @@ extern int step_create(job_step_create_request_msg_t *step_specs,
 		else
 			return ESLURM_DUPLICATE_STEP_ID;
 	}
+
+	/* A step cannot request more threads per core than its allocation. */
+	if ((step_specs->threads_per_core != NO_VAL16) &&
+	    (step_specs->threads_per_core >
+	     job_ptr->job_resrcs->threads_per_core))
+		return ESLURM_BAD_THREAD_PER_CORE;
 
 	task_dist = step_specs->task_dist & SLURM_DIST_STATE_BASE;
 	/* Set to block in the case that mem is 0. srun leaves the dist
@@ -2908,6 +3064,7 @@ extern int step_create(job_step_create_request_msg_t *step_specs,
 		job_record_t *het_job_ptr;
 		step_record_t *het_step_ptr;
 		bitstr_t *het_grp_bits = NULL;
+		uint32_t tmp_job_id = step_ptr->step_id.job_id;
 
 		/*
 		 * Het job compontents are sent across on the network
@@ -2915,6 +3072,13 @@ extern int step_create(job_step_create_request_msg_t *step_specs,
 		 */
 		if (!step_specs->step_het_grps) {
 			het_job_ptr = find_job_record(job_ptr->het_job_id);
+			/*
+			 * Temporarily set the job_id to that of the het_job_ptr
+			 * or find_step_record will not work correctly.  This is
+			 * only needed for a regular het job not for the
+			 * het step code on the else below here.
+			 */
+			step_ptr->step_id.job_id = het_job_ptr->job_id;
 		} else {
 			int first_bit = 0;
 			het_grp_bits = bit_alloc(128);
@@ -2940,6 +3104,7 @@ extern int step_create(job_step_create_request_msg_t *step_specs,
 		het_step_ptr = find_step_record(het_job_ptr,
 						&step_ptr->step_id);
 
+		step_ptr->step_id.job_id = tmp_job_id;
 		jobid = job_ptr->het_job_id;
 		if (!het_step_ptr || !het_step_ptr->switch_job) {
 			job_record_t *het_job_comp_ptr;
@@ -4696,11 +4861,12 @@ static void _signal_step_timelimit(step_record_t *step_ptr, time_t now)
 			select_g_select_jobinfo_free(
 				kill_step->select_jobinfo);
 		}
-		xfree(kill_step);
+		slurm_free_kill_job_msg(kill_step);
 		return;
 	}
 
 	agent_args->msg_args = kill_step;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }

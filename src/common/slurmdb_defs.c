@@ -3044,6 +3044,7 @@ extern int slurmdb_send_accounting_update(List update_list, char *cluster,
 	slurm_set_addr(&req.address, port, host);
 
 	req.protocol_version = rpc_version;
+	slurm_msg_set_r_uid(&req, SLURM_AUTH_UID_ANY);
 
 	req.msg_type = ACCOUNTING_UPDATE_MSG;
 	if (slurmdbd_conf)
@@ -3473,6 +3474,8 @@ extern void slurmdb_copy_qos_rec_limits(slurmdb_qos_rec_t *out,
 
 	out->max_jobs_pa = in->max_jobs_pa;
 	out->max_jobs_pu = in->max_jobs_pu;
+	out->max_jobs_accrue_pa = in->max_jobs_accrue_pa;
+	out->max_jobs_accrue_pu = in->max_jobs_accrue_pu;
 	out->max_submit_jobs_pa = in->max_submit_jobs_pa;
 	out->max_submit_jobs_pu = in->max_submit_jobs_pu;
 	xfree(out->max_tres_mins_pj);
@@ -3490,6 +3493,7 @@ extern void slurmdb_copy_qos_rec_limits(slurmdb_qos_rec_t *out,
 	xfree(out->max_tres_run_mins_pu);
 	out->max_tres_run_mins_pu = xstrdup(in->max_tres_run_mins_pu);
 	out->max_wall_pj = in->max_wall_pj;
+	out->min_prio_thresh = in->min_prio_thresh;
 	xfree(out->min_tres_pj);
 	out->min_tres_pj = xstrdup(in->min_tres_pj);
 

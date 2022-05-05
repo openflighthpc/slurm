@@ -573,7 +573,11 @@ _service_connection(void *arg)
 		 * to are taken care of and sent back. This way the control
 		 * also has a better idea what happened to us
 		 */
-		slurm_send_rc_msg(msg, rc);
+		if (msg->auth_uid_set)
+			slurm_send_rc_msg(msg, rc);
+		else
+			debug("%s: incomplete message", __func__);
+
 		goto cleanup;
 	}
 	debug2("Start processing RPC: %s", rpc_num2string(msg->msg_type));
@@ -926,6 +930,7 @@ _read_config(void)
 		conf->port = cf->slurmd_port;
 	else
 		conf->port = slurm_conf_get_port(conf->node_name);
+	slurm_conf.slurmd_port = conf->port;
 	slurm_conf_get_cpus_bsct(conf->node_name,
 				 &conf->conf_cpus, &conf->conf_boards,
 				 &conf->conf_sockets, &conf->conf_cores,
@@ -949,9 +954,9 @@ _read_config(void)
 	_massage_pathname(&conf->spooldir);
 	/*
 	 * Only rebuild this if running configless, which is indicated by
-	 * the presence of a conf_server value.
+	 * the presence of a conf_cache value.
 	 */
-	if (conf->conf_server)
+	if (conf->conf_cache)
 		_free_and_set(conf->conf_cache,
 			      xstrdup_printf("%s/conf-cache", conf->spooldir));
 
@@ -960,8 +965,8 @@ _read_config(void)
 
 	conf->actual_cpus = 0;
 
-	if (!conf->conf_server && xstrcasestr(cf->slurmctld_params,
-					      "enable_configless"))
+	if (!conf->conf_cache && xstrcasestr(cf->slurmctld_params,
+					     "enable_configless"))
 		error("Running with local config file despite slurmctld having been setup for configless operation");
 
 	/*
@@ -1674,7 +1679,7 @@ _slurmd_init(void)
 	struct rlimit rlim;
 	struct stat stat_buf;
 	uint32_t cpu_cnt;
-	node_record_t *node_rec;
+	node_record_t *node_rec = NULL;
 	List gres_list = NULL;
 	int rc;
 
@@ -1724,7 +1729,9 @@ _slurmd_init(void)
 	 */
 	_read_config();
 
-	if (!(node_rec = find_node_record(conf->node_name)))
+	/* Dynamic nodes won't be found at this point */
+	if (!conf->dynamic &&
+	    !(node_rec = find_node_record(conf->node_name)))
 		return SLURM_ERROR;
 
 	/*
@@ -1756,7 +1763,8 @@ _slurmd_init(void)
 
 	fini_job_cnt = cpu_cnt = MAX(conf->conf_cpus, conf->block_map_size);
 	fini_job_id = xmalloc(sizeof(uint32_t) * fini_job_cnt);
-	if (node_rec->config_ptr) {
+	/* node_rec==NULL is expected for dynamic nodes */
+	if (node_rec && node_rec->config_ptr) {
 		(void) gres_init_node_config(conf->node_name,
 					     node_rec->config_ptr->gres,
 					     &gres_list);
@@ -1817,7 +1825,7 @@ _slurmd_init(void)
 		setrlimit(RLIMIT_CORE, &rlim);
 	}
 
-	rlimits_adjust_nofile();
+	rlimits_use_max_nofile();
 
 	/*
 	 * Create a context for verifying slurm job credentials

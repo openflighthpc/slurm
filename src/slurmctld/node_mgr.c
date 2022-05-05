@@ -488,8 +488,22 @@ extern int load_all_node_state ( bool state_only )
 			       node_name);
 		} else if (state_only) {
 			uint32_t orig_flags;
-			if (IS_NODE_CLOUD(node_ptr) ||
+			if ((IS_NODE_CLOUD(node_ptr) ||
+			    (node_state & NODE_STATE_DYNAMIC)) &&
+			    comm_name && node_hostname) {
+				/* Recover NodeAddr and NodeHostName */
+				set_node_comm_name(node_ptr,
+						   comm_name,
+						   node_hostname);
+				comm_name = NULL;
+				node_hostname = NULL;
+			}
+			if (IS_NODE_FUTURE(node_ptr) &&
 			    (node_state & NODE_STATE_DYNAMIC)) {
+				/* Preserve active dynamic future node state */
+				node_ptr->node_state    = node_state;
+
+			} else if (IS_NODE_CLOUD(node_ptr)) {
 				if ((!power_save_mode) &&
 				    ((node_state & NODE_STATE_POWERED_DOWN) ||
 				     (node_state & NODE_STATE_POWERING_DOWN) ||
@@ -502,15 +516,31 @@ extern int load_all_node_state ( bool state_only )
 					else
 						hs = hostset_create(node_name);
 				}
-				if (comm_name && node_hostname) {
-					/* Recover NodeAddr and NodeHostName */
-					set_node_comm_name(node_ptr,
-							   comm_name,
-							   node_hostname);
-					comm_name = NULL;
-					node_hostname = NULL;
+				/*
+				 * Replace FUTURE state with new state (idle),
+				 * but preserve recovered state flags
+				 * (e.g. POWER*).
+				 */
+				if ((node_state & NODE_STATE_BASE) ==
+				    NODE_STATE_FUTURE) {
+					node_state =
+						((node_ptr->node_state &
+						  NODE_STATE_BASE) |
+						 (node_state &
+						  NODE_STATE_FLAGS));
+
+					/*
+					 * If node was FUTURE, then it wasn't up
+					 * so mark it as powered down.
+					 */
+					if (power_save_mode)
+						node_state |=
+							NODE_STATE_POWERED_DOWN;
 				}
-				node_ptr->node_state    = node_state;
+
+				node_ptr->node_state =
+					node_state | NODE_STATE_CLOUD;
+
 			} else if (IS_NODE_UNKNOWN(node_ptr)) {
 				if (base_state == NODE_STATE_DOWN) {
 					orig_flags = node_ptr->node_state &
@@ -1617,7 +1647,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 				node_ptr->node_state &= (~NODE_STATE_FAIL);
 				if (!IS_NODE_NO_RESPOND(node_ptr) ||
 				     IS_NODE_POWERED_DOWN(node_ptr))
-					make_node_avail(node_inx);
+					make_node_avail(node_ptr);
 				bit_set (idle_node_bitmap, node_inx);
 				bit_set (up_node_bitmap, node_inx);
 				if (IS_NODE_POWERED_DOWN(node_ptr))
@@ -1628,7 +1658,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 				if (!IS_NODE_DRAIN(node_ptr) &&
 				    !IS_NODE_FAIL(node_ptr)  &&
 				    !IS_NODE_NO_RESPOND(node_ptr))
-					make_node_avail(node_inx);
+					make_node_avail(node_ptr);
 				bit_set (up_node_bitmap, node_inx);
 				bit_clear (idle_node_bitmap, node_inx);
 			} else if ((state_val == NODE_STATE_DRAIN) ||
@@ -1669,11 +1699,46 @@ int update_node ( update_node_msg_t * update_node_msg )
 					continue;
 				}
 
+				/* Abort reboot request */
+				if (IS_NODE_REBOOT_REQUESTED(node_ptr) ||
+				    IS_NODE_REBOOT_ISSUED(node_ptr)) {
+					/*
+					 * A node is DOWN+REBOOT_ISSUED when the
+					 * reboot has been issued. Set node
+					 * state back to idle only if the reboot
+					 * has been issued. Node will remain
+					 * cleared in the avail_node_bitmap
+					 * until the node is powered down.
+					 */
+					if (IS_NODE_REBOOT_ISSUED(node_ptr) &&
+					    IS_NODE_DOWN(node_ptr)) {
+						node_ptr->node_state =
+							NODE_STATE_IDLE |
+							(node_ptr->node_state &
+							 NODE_STATE_FLAGS);
+					}
+
+					node_ptr->node_state &=
+						(~NODE_STATE_REBOOT_REQUESTED);
+					node_ptr->node_state &=
+						(~NODE_STATE_REBOOT_ISSUED);
+					xfree(node_ptr->reason);
+
+					info("Canceling REBOOT on node %s",
+					     this_node_name);
+				}
+
 				if (IS_NODE_POWERED_DOWN(node_ptr)) {
 					node_ptr->node_state &=
 						(~NODE_STATE_POWERED_DOWN);
 					info("power down request repeating "
 					     "for node %s", this_node_name);
+				} else if (IS_NODE_POWERING_DOWN(node_ptr)) {
+					info("ignoring power down request for node %s, already powering down",
+					     this_node_name);
+					node_ptr->next_state = NO_VAL;
+					free(this_node_name);
+					continue;
 				} else
 					info("powering down node %s",
 					     this_node_name);
@@ -1700,6 +1765,16 @@ int update_node ( update_node_msg_t * update_node_msg )
 
 				node_ptr->node_state |=
 					NODE_STATE_POWER_DOWN;
+
+				if (IS_NODE_IDLE(node_ptr)) {
+					/*
+					 * remove node from avail_node_bitmap so
+					 * that it will power_down before jobs
+					 * get on it.
+					 */
+					bit_clear(avail_node_bitmap, node_inx);
+				}
+
 				node_ptr->next_state = NO_VAL;
 				bit_clear(rs_node_bitmap, node_inx);
 				free(this_node_name);
@@ -2881,6 +2956,11 @@ extern int validate_node_specs(slurm_msg_t *slurm_msg, bool *newly_up)
 		}
 	} else {
 		if (IS_NODE_UNKNOWN(node_ptr) || IS_NODE_FUTURE(node_ptr)) {
+			bool unknown = 0;
+
+			if (IS_NODE_UNKNOWN(node_ptr))
+				unknown = 1;
+
 			debug("validate_node_specs: node %s registered with "
 			      "%u jobs",
 			      reg_msg->node_name,reg_msg->job_count);
@@ -2902,7 +2982,7 @@ extern int validate_node_specs(slurm_msg_t *slurm_msg, bool *newly_up)
 			last_node_update = now;
 
 			/* don't send this on a slurmctld unless needed */
-			if (IS_NODE_UNKNOWN(node_ptr) && slurmctld_init_db
+			if (unknown && slurmctld_init_db
 			    && !IS_NODE_DRAIN(node_ptr)
 			    && !IS_NODE_FAIL(node_ptr)) {
 				/* reason information is handled in
@@ -2926,10 +3006,8 @@ extern int validate_node_specs(slurm_msg_t *slurm_msg, bool *newly_up)
 			    NODE_STATE_DOWN) {
 				node_ptr->node_state = NODE_STATE_DOWN |
 						       node_flags;
-				if (node_ptr->reason) {
-					xstrcat(node_ptr->reason,
-						" : reboot complete");
-				}
+				set_node_reboot_reason(node_ptr,
+						       "reboot complete");
 			} else if (reg_msg->job_count) {
 				node_ptr->node_state = NODE_STATE_ALLOCATED |
 						       node_flags;
@@ -3420,7 +3498,7 @@ static void _sync_bitmaps(node_record_t *node_ptr, int job_count)
 	    IS_NODE_FAIL(node_ptr) || IS_NODE_NO_RESPOND(node_ptr))
 		bit_clear (avail_node_bitmap, node_inx);
 	else
-		make_node_avail(node_inx);
+		make_node_avail(node_ptr);
 	if (IS_NODE_DOWN(node_ptr))
 		bit_clear (up_node_bitmap, node_inx);
 	else
@@ -3520,8 +3598,10 @@ static void _node_did_resp(node_record_t *node_ptr)
 		bit_set (idle_node_bitmap, node_inx);
 		bit_set (share_node_bitmap, node_inx);
 	}
-	if (IS_NODE_DOWN(node_ptr) || IS_NODE_DRAIN(node_ptr) ||
-	    IS_NODE_FAIL(node_ptr)) {
+	if (IS_NODE_DOWN(node_ptr) ||
+	    IS_NODE_DRAIN(node_ptr) ||
+	    IS_NODE_FAIL(node_ptr) ||
+	    (IS_NODE_POWER_DOWN(node_ptr) && !IS_NODE_ALLOCATED(node_ptr))) {
 		bit_clear (avail_node_bitmap, node_inx);
 	} else
 		bit_set   (avail_node_bitmap, node_inx);
@@ -3829,6 +3909,7 @@ void msg_to_slurmd (slurm_msg_type_t msg_type)
 		xfree (kill_agent_args);
 	} else {
 		debug ("Spawning agent msg_type=%d", msg_type);
+		set_agent_arg_r_uid(kill_agent_args, SLURM_AUTH_UID_ANY);
 		agent_queue_request(kill_agent_args);
 	}
 }
@@ -3914,6 +3995,7 @@ void push_reconfig_to_slurmd(char **slurmd_config_files)
 		xfree(curr_args);
 	} else {
 		debug("Spawning agent msg_type=%d", curr_args->msg_type);
+		set_agent_arg_r_uid(curr_args, SLURM_AUTH_UID_ANY);
 		agent_queue_request(curr_args);
 	}
 
@@ -3923,6 +4005,7 @@ void push_reconfig_to_slurmd(char **slurmd_config_files)
 		xfree(prev_args);
 	} else {
 		debug("Spawning agent msg_type=%d", prev_args->msg_type);
+		set_agent_arg_r_uid(prev_args, SLURM_AUTH_UID_ANY);
 		agent_queue_request(prev_args);
 	}
 
@@ -3932,6 +4015,7 @@ void push_reconfig_to_slurmd(char **slurmd_config_files)
 		xfree(old_args);
 	} else {
 		debug("Spawning agent msg_type=%d", old_args->msg_type);
+		set_agent_arg_r_uid(old_args, SLURM_AUTH_UID_ANY);
 		agent_queue_request(old_args);
 	}
 #else
@@ -3982,8 +4066,11 @@ extern void make_node_alloc(node_record_t *node_ptr, job_record_t *job_ptr)
 }
 
 /* make_node_avail - flag specified node as available */
-extern void make_node_avail(int node_inx)
+extern void make_node_avail(node_record_t *node_ptr)
 {
+	int node_inx = node_ptr - node_record_table_ptr;
+	if (IS_NODE_POWER_DOWN(node_ptr) || IS_NODE_POWERING_DOWN(node_ptr))
+		return;
 	bit_set(avail_node_bitmap, node_inx);
 
 	/*
@@ -4033,7 +4120,10 @@ extern void make_node_comp(node_record_t *node_ptr, job_record_t *job_ptr,
 		}
 	}
 
-	if (!IS_NODE_DOWN(node_ptr) && !IS_NODE_POWERING_UP(node_ptr)) {
+	/* Sync up conditionals with deallocate_nodes() */
+	if (!IS_NODE_DOWN(node_ptr) &&
+	    !IS_NODE_POWERED_DOWN(node_ptr) &&
+	    !IS_NODE_POWERING_UP(node_ptr)) {
 		/* Don't verify RPC if node in DOWN or POWER_UP state */
 		(node_ptr->comp_job_cnt)++;
 		node_ptr->node_state |= NODE_STATE_COMPLETING;
@@ -4182,9 +4272,10 @@ void make_node_idle(node_record_t *node_ptr, job_record_t *job_ptr)
 	}
 
 	node_flags = node_ptr->node_state & NODE_STATE_FLAGS;
-	if (IS_NODE_DOWN(node_ptr)) {
-		debug3("%s: %pJ node %s being left DOWN",
-		       __func__, job_ptr, node_ptr->name);
+	if (IS_NODE_DOWN(node_ptr) || IS_NODE_FUTURE(node_ptr)) {
+		debug3("%s: %pJ node %s being left %s",
+		       __func__, job_ptr, node_ptr->name,
+		       node_state_base_string(node_ptr->node_state));
 		goto fini;
 	}
 	bit_set(up_node_bitmap, inx);
@@ -4193,7 +4284,7 @@ void make_node_idle(node_record_t *node_ptr, job_record_t *job_ptr)
 	    IS_NODE_NO_RESPOND(node_ptr))
 		bit_clear(avail_node_bitmap, inx);
 	else
-		make_node_avail(inx);
+		make_node_avail(node_ptr);
 
 	if ((IS_NODE_DRAIN(node_ptr) || IS_NODE_FAIL(node_ptr)) &&
 	    (node_ptr->run_job_cnt == 0) && (node_ptr->comp_job_cnt == 0)) {
@@ -4212,16 +4303,25 @@ void make_node_idle(node_record_t *node_ptr, job_record_t *job_ptr)
 		node_ptr->node_state = NODE_STATE_ALLOCATED | node_flags;
 		if (!IS_NODE_NO_RESPOND(node_ptr) &&
 		     !IS_NODE_FAIL(node_ptr) && !IS_NODE_DRAIN(node_ptr))
-			make_node_avail(inx);
+			make_node_avail(node_ptr);
 	} else {
 		node_ptr->node_state = NODE_STATE_IDLE | node_flags;
 		if (!IS_NODE_NO_RESPOND(node_ptr) &&
 		     !IS_NODE_FAIL(node_ptr) && !IS_NODE_DRAIN(node_ptr))
-			make_node_avail(inx);
+			make_node_avail(node_ptr);
 		if (!IS_NODE_NO_RESPOND(node_ptr) &&
 		    !IS_NODE_COMPLETING(node_ptr))
 			bit_set(idle_node_bitmap, inx);
 		node_ptr->last_busy = now;
+	}
+
+	if (IS_NODE_IDLE(node_ptr) && IS_NODE_POWER_DOWN(node_ptr)) {
+		/*
+		 * Now that the node is idle and is to be powered off, remove
+		 * from the avail_node_bitmap to prevent jobs being scheduled on
+		 * the node before it power's off.
+		 */
+		bit_clear(avail_node_bitmap, inx);
 	}
 
 fini:
@@ -4349,18 +4449,8 @@ extern void check_reboot_nodes()
 		if (IS_NODE_REBOOT_ISSUED(node_ptr) &&
 		    node_ptr->boot_req_time &&
 		    (node_ptr->boot_req_time + resume_timeout < now)) {
-			char *timeout_msg = "reboot timed out";
-
-			if ((node_ptr->next_state != NO_VAL) &&
-			    node_ptr->reason) {
-				xstrfmtcat(node_ptr->reason, " : %s",
-					   timeout_msg);
-			} else {
-				xfree(node_ptr->reason);
-				node_ptr->reason = xstrdup(timeout_msg);
-			}
-			node_ptr->reason_time = now;
-			node_ptr->reason_uid = slurm_conf.slurm_user_id;
+			set_node_reboot_reason(node_ptr,
+					       "reboot timed out");
 
 			/*
 			 * Remove states now so that event state shows as DOWN.
@@ -4395,7 +4485,8 @@ extern bool waiting_for_node_power_down(node_record_t *node_ptr)
 
 	if (IS_NODE_POWERING_DOWN(node_ptr) &&
 	    node_ptr->power_save_req_time &&
-	    (node_ptr->boot_time < node_ptr->last_response)) {
+	    (node_ptr->boot_time <
+	     (node_ptr->power_save_req_time + slurm_conf.suspend_timeout))) {
 		debug("Still waiting for node '%s' to power off",
 		      node_ptr->name);
 		return true;
@@ -4416,4 +4507,26 @@ extern void set_node_comm_name(node_record_t *node_ptr, char *comm_name,
 	slurm_reset_alias(node_ptr->name,
 			  node_ptr->comm_name,
 			  node_ptr->node_hostname);
+}
+
+extern void set_node_reboot_reason(node_record_t *node_ptr, char *message)
+{
+	xassert(verify_lock(CONF_LOCK, READ_LOCK));
+	xassert(node_ptr);
+
+	if (message == NULL) {
+		xfree(node_ptr->reason);
+		node_ptr->reason_time = 0;
+		node_ptr->reason_uid = NO_VAL;
+	} else {
+		if (node_ptr->reason &&
+		    !xstrstr(node_ptr->reason, message)) {
+			xstrfmtcat(node_ptr->reason, " : %s", message);
+		} else {
+			xfree(node_ptr->reason);
+			node_ptr->reason = xstrdup(message);
+		}
+		node_ptr->reason_time = time(NULL);
+		node_ptr->reason_uid = slurm_conf.slurm_user_id;
+	}
 }

@@ -1115,8 +1115,16 @@ static char *arg_get_cpu_bind(slurm_opt_t *opt)
 static void arg_reset_cpu_bind(slurm_opt_t *opt)
 {
 	if (opt->srun_opt) {
+		bool cpu_bind_verbose = false;
+		if (opt->srun_opt->cpu_bind_type & CPU_BIND_VERBOSE)
+			cpu_bind_verbose = true;
+
 		xfree(opt->srun_opt->cpu_bind);
 		opt->srun_opt->cpu_bind_type = 0;
+		if (cpu_bind_verbose)
+			slurm_verify_cpu_bind("verbose",
+					      &opt->srun_opt->cpu_bind,
+					      &opt->srun_opt->cpu_bind_type);
 	}
 }
 static slurm_cli_opt_t slurm_opt_cpu_bind = {
@@ -2064,7 +2072,15 @@ static int arg_set_gres(slurm_opt_t *opt, const char *arg)
 	}
 
 	xfree(opt->gres);
-	opt->gres = gres_prepend_tres_type(arg);
+	/*
+	 * Do not prepend "gres:" to none; none is handled specially by
+	 * slurmctld to mean "do not copy the job's GRES to the step" -
+	 * see _copy_job_tres_to_step()
+	 */
+	if (!xstrcasecmp(arg, "none"))
+		opt->gres = xstrdup(arg);
+	else
+		opt->gres = gres_prepend_tres_type(arg);
 
 	return SLURM_SUCCESS;
 }
@@ -2081,7 +2097,16 @@ static int arg_set_data_gres(slurm_opt_t *opt, const data_t *arg,
 		ADD_DATA_ERROR("GRES \"help\" not supported", rc);
 	} else {
 		xfree(opt->gres);
-		opt->gres = gres_prepend_tres_type(str);
+		/*
+		 * Do not prepend "gres:" to none; none is handled specially by
+		 * slurmctld to mean "do not copy the job's GRES to the step" -
+		 * see _copy_job_tres_to_step()
+		 */
+		if (!xstrcasecmp(str, "none")) {
+			opt->gres = str;
+			str = NULL;
+		} else
+			opt->gres = gres_prepend_tres_type(str);
 	}
 
 	xfree(str);
@@ -5758,10 +5783,17 @@ static void _validate_threads_per_core_option(slurm_opt_t *opt)
 
 	if (!slurm_option_isset(opt, "cpu-bind")) {
 		verbose("Setting --cpu-bind=threads as a default of --threads-per-core use");
-		slurm_option_set(opt, "cpu-bind", "threads", false);
-	} else if (opt->srun_opt->cpu_bind_type == CPU_BIND_VERBOSE) {
+		if (opt->srun_opt)
+			slurm_verify_cpu_bind("threads",
+					      &opt->srun_opt->cpu_bind,
+					      &opt->srun_opt->cpu_bind_type);
+	} else if (opt->srun_opt &&
+		   (opt->srun_opt->cpu_bind_type == CPU_BIND_VERBOSE)) {
 		verbose("Setting --cpu-bind=threads,verbose as a default of --threads-per-core use");
-		slurm_option_set(opt, "cpu-bind", "threads,verbose", false);
+		if (opt->srun_opt)
+			slurm_verify_cpu_bind("threads,verbose",
+					      &opt->srun_opt->cpu_bind,
+					      &opt->srun_opt->cpu_bind_type);
 	} else {
 		debug3("Not setting --cpu-bind=threads because of --threads-per-core since --cpu-bind already set by cli option or environment variable");
 	}
@@ -5770,27 +5802,34 @@ static void _validate_threads_per_core_option(slurm_opt_t *opt)
 extern int validate_hint_option(slurm_opt_t *opt)
 {
 	if (slurm_option_set_by_cli(opt, LONG_OPT_HINT) &&
-	    (slurm_option_set_by_cli(opt, LONG_OPT_NTASKSPERCORE) ||
-	     slurm_option_set_by_cli(opt, LONG_OPT_THREADSPERCORE) ||
-	     slurm_option_set_by_cli(opt, 'B')) ) {
+	    ((slurm_option_set_by_cli(opt, LONG_OPT_NTASKSPERCORE) ||
+	      slurm_option_set_by_cli(opt, LONG_OPT_THREADSPERCORE) ||
+	      slurm_option_set_by_cli(opt, 'B') ||
+	      (slurm_option_set_by_cli(opt, LONG_OPT_CPU_BIND) &&
+	       (opt->srun_opt->cpu_bind_type & ~CPU_BIND_VERBOSE))))) {
 		if (opt->verbose)
-			info("Following options are mutually exclusive: --hint, --ntasks-per-core, --threads-per-core, -B. Ignoring --hint.");
+			info("Following options are mutually exclusive with --hint: --ntasks-per-core, --threads-per-core, -B and --cpu-bind (other then --cpu-bind=verbose). Ignoring --hint.");
+		slurm_option_reset(opt, "hint");
 		return SLURM_ERROR;
 	} else if (slurm_option_set_by_cli(opt, LONG_OPT_HINT)) {
 		slurm_option_reset(opt, "ntasks-per-core");
 		slurm_option_reset(opt, "threads-per-core");
 		slurm_option_reset(opt, "extra-node-info");
+		slurm_option_reset(opt, "cpu-bind");
 	} else if (slurm_option_set_by_cli(opt, LONG_OPT_NTASKSPERCORE) ||
 		   slurm_option_set_by_cli(opt, LONG_OPT_THREADSPERCORE) ||
-		   slurm_option_set_by_cli(opt, 'B')) {
+		   slurm_option_set_by_cli(opt, 'B') ||
+		   slurm_option_set_by_cli(opt, LONG_OPT_CPU_BIND)) {
 		slurm_option_reset(opt, "hint");
 		return SLURM_ERROR;
 	} else if (slurm_option_set_by_env(opt, LONG_OPT_HINT) &&
 		   (slurm_option_set_by_env(opt, LONG_OPT_NTASKSPERCORE) ||
 		    slurm_option_set_by_env(opt, LONG_OPT_THREADSPERCORE) ||
-		    slurm_option_set_by_env(opt, 'B'))) {
+		    slurm_option_set_by_env(opt, 'B') ||
+		    slurm_option_set_by_env(opt, LONG_OPT_CPU_BIND))) {
 		if (opt->verbose)
-			info("Following options are mutually exclusive: --hint, --ntasks-per-core, --threads-per-core, -B, but more than one set by environment variables. Ignoring SLURM_HINT.");
+			info("Following options are mutually exclusive with --hint: --ntasks-per-core, --threads-per-core, -B and --cpu-bind, but more than one set by environment variables. Ignoring SLURM_HINT.");
+		slurm_option_reset(opt, "hint");
 		return SLURM_ERROR;
 	}
 	return SLURM_SUCCESS;
@@ -5809,13 +5848,23 @@ static void _validate_ntasks_per_gpu(slurm_opt_t *opt)
 
 	/* Validate --ntasks-per-gpu and --ntasks-per-gpu */
 	if (gpu && tres) {
-		fatal("--ntasks-per-gpu and --ntasks-per-tres are mutually exclusive");
+		if (opt->ntasks_per_gpu != opt->ntasks_per_tres)
+			fatal("Inconsistent values set to --ntasks-per-gpu=%d and --ntasks-per-tres=%d ",
+			      opt->ntasks_per_gpu,
+			      opt->ntasks_per_tres);
 	} else if (gpu && tres_env) {
-		fatal("--ntasks-per-gpu and SLURM_NTASKS_PER_TRES are mutually exclusive");
+		if (opt->verbose)
+			info("Ignoring SLURM_NTASKS_PER_TRES since --ntasks-per-gpu given as command line option");
+		slurm_option_reset(opt, "ntasks-per-tres");
 	} else if (tres && gpu_env) {
-		fatal("--ntasks-per-tres and SLURM_NTASKS_PER_GPU are mutually exclusive");
+		if (opt->verbose)
+			info("Ignoring SLURM_NTASKS_PER_GPU since --ntasks-per-tres given as command line option");
+		slurm_option_reset(opt, "ntasks-per-gpu");
 	} else if (gpu_env && tres_env) {
-		fatal("SLURM_NTASKS_PER_GPU and SLURM_NTASKS_PER_TRES are mutually exclusive");
+		if (opt->ntasks_per_gpu != opt->ntasks_per_tres)
+			fatal("Inconsistent values set by environment variables SLURM_NTASKS_PER_GPU=%d and SLURM_NTASKS_PER_TRES=%d ",
+			      opt->ntasks_per_gpu,
+			      opt->ntasks_per_tres);
 	}
 
 	if (slurm_option_set_by_cli(opt, LONG_OPT_GPUS_PER_TASK))
@@ -5883,7 +5932,8 @@ extern char *slurm_option_get_argv_str(const int argc, char **argv)
 	return submit_line;
 }
 
-extern job_desc_msg_t *slurm_opt_create_job_desc(slurm_opt_t *opt_local)
+extern job_desc_msg_t *slurm_opt_create_job_desc(slurm_opt_t *opt_local,
+						 bool set_defaults)
 {
 	job_desc_msg_t *job_desc = xmalloc_nz(sizeof(*job_desc));
 	List tmp_gres_list = NULL;
@@ -5910,7 +5960,12 @@ extern job_desc_msg_t *slurm_opt_create_job_desc(slurm_opt_t *opt_local)
 	job_desc->cluster_features = xstrdup(opt_local->c_constraint);
 	job_desc->comment = xstrdup(opt_local->comment);
 	job_desc->req_context = xstrdup(opt_local->context);
-	job_desc->contiguous = opt_local->contiguous;
+
+	if (set_defaults || slurm_option_isset(opt_local, "contiguous"))
+		job_desc->contiguous = opt_local->contiguous;
+	else
+		job_desc->contiguous = NO_VAL16;
+
 	if (opt_local->core_spec != NO_VAL16)
 		job_desc->core_spec = opt_local->core_spec;
 
@@ -5960,7 +6015,8 @@ extern job_desc_msg_t *slurm_opt_create_job_desc(slurm_opt_t *opt_local)
 
 	job_desc->licenses = xstrdup(opt_local->licenses);
 
-	job_desc->mail_type = opt_local->mail_type;
+	if (set_defaults || slurm_option_isset(opt_local, "mail_type"))
+		job_desc->mail_type = opt_local->mail_type;
 
 	job_desc->mail_user = xstrdup(opt_local->mail_user);
 
@@ -5973,7 +6029,8 @@ extern job_desc_msg_t *slurm_opt_create_job_desc(slurm_opt_t *opt_local)
 		xstrfmtcat(job_desc->mem_per_tres, "gres:gpu:%"PRIu64,
 			   opt_local->mem_per_gpu);
 
-	job_desc->name = xstrdup(opt_local->job_name);
+	if (set_defaults || slurm_option_isset(opt_local, "name"))
+		job_desc->name = xstrdup(opt_local->job_name);
 
 	job_desc->network = xstrdup(opt_local->network);
 
@@ -5992,14 +6049,15 @@ extern job_desc_msg_t *slurm_opt_create_job_desc(slurm_opt_t *opt_local)
 	/* other_port not filled in here */
 
 	if (opt_local->overcommit) {
-		job_desc->min_cpus = MAX(opt_local->min_nodes, 1);
+		if (set_defaults || (opt_local->min_nodes > 0))
+			job_desc->min_cpus = MAX(opt_local->min_nodes, 1);
 		job_desc->overcommit = opt_local->overcommit;
 	} else if (opt_local->cpus_set)
 		job_desc->min_cpus =
 			opt_local->ntasks * opt_local->cpus_per_task;
 	else if (opt_local->nodes_set && (opt_local->min_nodes == 0))
 		job_desc->min_cpus = 0;
-	else
+	else if (set_defaults)
 		job_desc->min_cpus = opt_local->ntasks;
 
 	job_desc->partition = xstrdup(opt_local->partition);
@@ -6009,9 +6067,12 @@ extern job_desc_msg_t *slurm_opt_create_job_desc(slurm_opt_t *opt_local)
 
 	job_desc->power_flags = opt_local->power;
 
-	if (opt_local->hold)
-		job_desc->priority = 0;
-	else if (opt_local->priority)
+	if (slurm_option_isset(opt_local, "hold")) {
+		if (opt_local->hold)
+			job_desc->priority = 0;
+		else
+			job_desc->priority = INFINITE;
+	} else if (opt_local->priority)
 		job_desc->priority = opt_local->priority;
 
 	job_desc->profile = opt_local->profile;
@@ -6078,6 +6139,7 @@ extern job_desc_msg_t *slurm_opt_create_job_desc(slurm_opt_t *opt_local)
 	xfmt_tres(&job_desc->tres_per_job, "gres:gpu", opt_local->gpus);
 	xfmt_tres(&job_desc->tres_per_node, "gres:gpu",
 		  opt_local->gpus_per_node);
+	/* --gres=none for jobs means no GRES, so don't send it to slurmctld */
 	if (opt_local->gres && xstrcasecmp(opt_local->gres, "NONE")) {
 		if (job_desc->tres_per_node)
 			xstrfmtcat(job_desc->tres_per_node, ",%s",
@@ -6098,7 +6160,8 @@ extern job_desc_msg_t *slurm_opt_create_job_desc(slurm_opt_t *opt_local)
 	job_desc->warn_signal = opt_local->warn_signal;
 	job_desc->warn_time = opt_local->warn_time;
 
-	job_desc->work_dir = xstrdup(opt_local->chdir);
+	if (set_defaults || slurm_option_isset(opt_local, "chdir"))
+		job_desc->work_dir = xstrdup(opt_local->chdir);
 
 	if (opt_local->cpus_set) {
 		job_desc->bitflags |= JOB_CPUS_SET;

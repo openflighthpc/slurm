@@ -467,11 +467,13 @@ sacct [<OPTION>]                                                            \n \
      -V, --version: Print version.                                          \n\
      -W, --wckeys:                                                          \n\
                    Only send data about these wckeys.  Default is all.      \n\
-     --whole-hetjob=[yes|no]:                                               \n\
-		   If set to 'yes' (or not set), then information about all \n\
-		   the heterogeneous components will be retrieved. If set   \n\
-		   to 'no' only the specific filtered components will be    \n\
-		   retrieved.                                               \n\
+     --whole-hetjob[=yes|no]:                                               \n\
+		   If set to 'yes' (or no argument), then information about \n\
+		   all the heterogeneous components will be retrieved. If   \n\
+		   set to 'no' only the specific filtered components will   \n\
+		   be retrieved. The default behavior without this option is\n\
+		   that all components are retrieved only if filtering the  \n\
+		   leader component with --jobs.                            \n\
      -x, --associations:                                                    \n\
                    Only send data about these association id.  Default is all.\n\
      -X, --allocations:                                                     \n\
@@ -846,8 +848,14 @@ extern void parse_command_line(int argc, char **argv)
 			job_cond->flags |= JOBCOND_FLAG_NO_STEP;
 			break;
 		case 'f':
-			xfree(params.opt_filein);
-			params.opt_filein = xstrdup(optarg);
+			xfree(slurm_conf.job_comp_loc);
+			if ((stat(optarg, &stat_buf) != 0) ||
+			    (!S_ISREG(stat_buf.st_mode))) {
+				fprintf(stderr, "%s is not a valid file\n",
+					optarg);
+				exit(1);
+			}
+			slurm_conf.job_comp_loc = xstrdup(optarg);
 			break;
 		case 'F':
 			job_cond->db_flags = str_2_job_flags(optarg);
@@ -1155,10 +1163,9 @@ extern void parse_command_line(int argc, char **argv)
 	      (job_cond->flags & JOBCOND_FLAG_NO_WHOLE_HETJOB ? "no" : 0));
 
 	if (params.opt_completion) {
-		slurmdb_jobcomp_init(params.opt_filein);
+		slurmdb_jobcomp_init(slurm_conf.job_comp_loc);
 
-		if (!xstrcmp(slurm_conf.job_comp_type, "jobcomp/none")
-		    &&  (stat(params.opt_filein, &stat_buf) != 0)) {
+		if (!xstrcmp(slurm_conf.job_comp_type, "jobcomp/none")) {
 			fprintf(stderr, "Slurm job completion is disabled\n");
 			exit(1);
 		}
@@ -1202,7 +1209,7 @@ extern void parse_command_line(int argc, char **argv)
 
 	/* specific clusters requested? */
 	if (params.opt_federation && !all_clusters && !job_cond->cluster_list &&
-	    !params.opt_local) {
+	    !params.opt_local && !params.opt_completion) {
 		/* Test if in federated cluster and if so, get information from
 		 * all clusters in that federation */
 		slurmdb_federation_rec_t *fed = NULL;
@@ -1599,6 +1606,5 @@ extern void sacct_fini(void)
 		slurm_acct_storage_fini();
 	}
 	xfree(params.opt_field_list);
-	xfree(params.opt_filein);
 	slurmdb_destroy_job_cond(params.job_cond);
 }

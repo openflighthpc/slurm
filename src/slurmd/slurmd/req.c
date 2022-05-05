@@ -443,7 +443,7 @@ rwfail:
 
 static int
 _send_slurmstepd_init(int fd, int type, void *req,
-		      slurm_addr_t *cli, slurm_addr_t *self,
+		      slurm_addr_t *cli, uid_t cli_uid, slurm_addr_t *self,
 		      hostset_t step_hset, uint16_t protocol_version)
 {
 	int len = 0;
@@ -574,6 +574,7 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	safe_write(fd, get_buf_data(buffer), len);
 	free_buf(buffer);
 	buffer = NULL;
+	safe_write(fd, &cli_uid, sizeof(uid_t));
 
 	/* send self address over to slurmstepd */
 	if (self) {
@@ -655,7 +656,7 @@ rwfail:
  */
 static int
 _forkexec_slurmstepd(uint16_t type, void *req,
-		     slurm_addr_t *cli, slurm_addr_t *self,
+		     slurm_addr_t *cli, uid_t cli_uid, slurm_addr_t *self,
 		     const hostset_t step_hset, uint16_t protocol_version)
 {
 	pid_t pid;
@@ -697,7 +698,7 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 			error("Unable to close write to_slurmd in parent: %m");
 
 		if ((rc = _send_slurmstepd_init(to_stepd[1], type,
-						req, cli, self,
+						req, cli, cli_uid, self,
 						step_hset,
 						protocol_version)) != 0) {
 			error("Unable to init slurmstepd");
@@ -1164,7 +1165,7 @@ static int _check_job_credential(launch_tasks_request_msg_t *req,
 	 * Overwrite any memory limits in the RPC with contents of the
 	 * memory limit within the credential.
 	 */
-	slurm_cred_get_mem(cred, node_id, __func__, &req->job_mem_lim,
+	slurm_cred_get_mem(cred, conf->node_name, __func__, &req->job_mem_lim,
 			   &req->step_mem_lim);
 
 	/* Reset the CPU count on this node to correct value. */
@@ -1403,8 +1404,6 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	int node_id = 0;
 	bitstr_t *numa_bitmap = NULL;
 
-	slurm_mutex_lock(&launch_mutex);
-
 #ifndef HAVE_FRONT_END
 	/* It is always 0 for front end systems */
 	node_id = nodelist_find(req->complete_nodelist, conf->node_name);
@@ -1547,7 +1546,7 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	if (slurm_cred_revoked(conf->vctx, req->cred)) {
 		info("Job %u already killed, do not launch %ps",
 		     req->step_id.job_id, &req->step_id);
-		errnum = ESLURMD_CREDENTIAL_REVOKED;
+		errnum = SLURM_SUCCESS;
 		goto done;
 	}
 #endif
@@ -1598,11 +1597,15 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 		errnum = errno;
 		goto done;
 	}
+	slurm_mutex_lock(&launch_mutex);
 
 	debug3("%s: call to _forkexec_slurmstepd", __func__);
-	errnum = _forkexec_slurmstepd(LAUNCH_TASKS, (void *)req, cli, &self,
-				      step_hset, msg->protocol_version);
+	errnum = _forkexec_slurmstepd(LAUNCH_TASKS, (void *)req, cli,
+				      msg->auth_uid, &self, step_hset,
+				      msg->protocol_version);
 	debug3("%s: return from _forkexec_slurmstepd", __func__);
+
+	slurm_mutex_unlock(&launch_mutex);
 	_launch_complete_add(req->step_id.job_id);
 
 done:
@@ -1630,7 +1633,6 @@ done:
 		send_registration_msg(errnum, false);
 	}
 
-	slurm_mutex_unlock(&launch_mutex);
 }
 
 /*
@@ -1746,6 +1748,88 @@ static int _open_as_other(char *path_name, int flags, int mode, uint32_t jobid,
 	_exit(SLURM_SUCCESS);
 }
 
+/*
+ * Connect to unix socket based upon permissions of a different user
+ * IN sock_name - name of socket to open
+ * IN uid - User ID to use for file access check
+ * IN gid - Group ID to use for file access check
+ * OUT fd - File descriptor
+ * RET error or SLURM_SUCCESS
+ * */
+static int _connect_as_other(char *sock_name, uid_t uid, gid_t gid, int *fd)
+{
+	pid_t child;
+	int pipe[2];
+	int rc = 0;
+	struct sockaddr_un sa;
+
+	*fd = -1;
+	if (strlen(sock_name) >= sizeof(sa.sun_path)) {
+		error("%s: Unix socket path '%s' is too long. (%ld > %ld)",
+		      __func__, sock_name,
+		      (long int)(strlen(sock_name) + 1),
+		      (long int)sizeof(sa.sun_path));
+		return EINVAL;
+	}
+
+	/* child process will setuid to the user, register the process
+	 * with the container, and open the file for us. */
+	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pipe) != 0) {
+		error("%s: Failed to open pipe: %m", __func__);
+		return SLURM_ERROR;
+	}
+
+	child = fork();
+	if (child == -1) {
+		error("%s: fork failure", __func__);
+		close(pipe[0]);
+		close(pipe[1]);
+		return SLURM_ERROR;
+	} else if (child > 0) {
+		int exit_status = -1;
+		close(pipe[0]);
+		(void) waitpid(child, &rc, 0);
+		if (WIFEXITED(rc) && (WEXITSTATUS(rc) == 0))
+			*fd = receive_fd_over_pipe(pipe[1]);
+		exit_status = WEXITSTATUS(rc);
+		close(pipe[1]);
+		return exit_status;
+	}
+
+	/* child process below here */
+
+	close(pipe[1]);
+
+	if (setgid(gid) < 0) {
+		error("%s: uid:%u setgid(%u): %m", __func__, uid, gid);
+		_exit(errno);
+	}
+	if (setuid(uid) < 0) {
+		error("%s: getuid(%u): %m", __func__, uid);
+		_exit(errno);
+	}
+
+	*fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (*fd < 0) {
+		error("%s:failed creating UNIX domain socket: %m", __func__ );
+		_exit(errno);
+	}
+
+	memset(&sa, 0, sizeof(sa));
+	sa.sun_family = AF_UNIX;
+	strcpy(sa.sun_path, sock_name);
+	while (((rc = connect(*fd, (struct sockaddr *)&sa,
+			      SUN_LEN(&sa))) < 0) && (errno == EINTR));
+
+	if (rc < 0) {
+		debug2("%s: failed connecting to specified socket '%s': %m",
+		       __func__, sock_name);
+		_exit(errno);
+	}
+	send_fd_over_pipe(pipe[0], *fd);
+	close(*fd);
+	_exit(SLURM_SUCCESS);
+}
 
 static void
 _prolog_error(batch_job_launch_msg_t *req, int rc)
@@ -1839,8 +1923,8 @@ _set_batch_job_limits(slurm_msg_t *msg)
 		return;
 	req->job_core_spec = arg.job_core_spec;	/* Prevent user reset */
 
-	/* We only should ever have 1 in here so just get the first */
-	slurm_cred_get_mem(req->cred, 0, __func__, &req->job_mem, NULL);
+	slurm_cred_get_mem(req->cred, conf->node_name, __func__, &req->job_mem,
+			   NULL);
 
 	/*
 	 * handle x11 settings here since this is the only access to the cred
@@ -1916,8 +2000,7 @@ static int _convert_job_mem(slurm_msg_t *msg)
 {
 	prolog_launch_msg_t *req = (prolog_launch_msg_t *)msg->data;
 	slurm_cred_arg_t arg;
-	hostset_t j_hset = NULL;
-	int rc, host_index;
+	int rc;
 
 	rc = slurm_cred_verify(conf->vctx, req->cred, &arg,
 			       msg->protocol_version);
@@ -1934,18 +2017,10 @@ static int _convert_job_mem(slurm_msg_t *msg)
 
 	req->nnodes = arg.job_nhosts;
 
-	if (!(j_hset = hostset_create(arg.job_hostlist))) {
-		error("%s: Unable to parse credential hostlist: `%s'",
-		      __func__, arg.job_hostlist);
-		goto fini;
-	}
-	host_index = hostset_find(j_hset, conf->node_name);
-	hostset_destroy(j_hset);
+	slurm_cred_get_mem(req->cred, conf->node_name, __func__,
+			   &req->job_mem_limit, NULL);
 
-	slurm_cred_get_mem(req->cred, host_index, __func__, &req->job_mem_limit,
-			   NULL);
-
-fini:	slurm_cred_free_args(&arg);
+	slurm_cred_free_args(&arg);
 	return SLURM_SUCCESS;
 }
 
@@ -2109,7 +2184,7 @@ static int _spawn_prolog_stepd(slurm_msg_t *msg)
 
 		debug3("%s: call to _forkexec_slurmstepd", __func__);
 		rc =  _forkexec_slurmstepd(LAUNCH_TASKS, (void *)launch_req,
-					   cli, &self, step_hset,
+					   cli, msg->auth_uid, &self, step_hset,
 					   msg->protocol_version);
 		debug3("%s: return from _forkexec_slurmstepd %d",
 		       __func__, rc);
@@ -2186,6 +2261,7 @@ static void _rpc_prolog(slurm_msg_t *msg)
 
 		job_env.jobid = req->job_id;
 		job_env.step_id = 0;	/* not available */
+		job_env.node_aliases = req->alias_list;
 		job_env.node_list = req->nodes;
 		job_env.het_job_id = req->het_job_id;
 		job_env.partition = req->partition;
@@ -2266,6 +2342,7 @@ notify_result:
 
 static void _rpc_batch_job(slurm_msg_t *msg)
 {
+	slurm_cred_arg_t cred_arg;
 	batch_job_launch_msg_t *req = (batch_job_launch_msg_t *)msg->data;
 	bool     first_job_run;
 	int      rc = SLURM_SUCCESS, node_id = 0;
@@ -2295,14 +2372,23 @@ static void _rpc_batch_job(slurm_msg_t *msg)
 		goto done;
 	}
 
-	/* lookup user_name if not provided by slurmctld */
-	if (!req->user_name)
+	slurm_cred_get_args(req->cred, &cred_arg);
+	xfree(req->user_name); /* Never sent by slurmctld */
+	/* If available, use the cred to fill in username. */
+	if (cred_arg.pw_name)
+		req->user_name = xstrdup(cred_arg.pw_name);
+	else
 		req->user_name = uid_to_string(req->uid);
 
-	/* lookup gids if they weren't sent by slurmctld */
-	if (!req->ngids)
+	xfree(req->gids); /* Never sent by slurmctld */
+	/* If available, use the cred to fill in groups */
+	if (cred_arg.ngids) {
+		req->ngids = cred_arg.ngids;
+		req->gids = copy_gids(cred_arg.ngids, cred_arg.gids);
+	} else
 		req->ngids = group_cache_lookup(req->uid, req->gid,
 						req->user_name, &req->gids);
+	slurm_cred_free_args(&cred_arg);
 
 	task_g_slurmd_batch_request(req);	/* determine task affinity */
 
@@ -2455,7 +2541,7 @@ static void _rpc_batch_job(slurm_msg_t *msg)
 	if (slurm_cred_revoked(conf->vctx, req->cred)) {
 		info("Job %u already killed, do not launch batch job",
 		     req->job_id);
-		rc = ESLURMD_CREDENTIAL_REVOKED;     /* job already ran */
+		rc = SLURM_SUCCESS;     /* job already ran */
 		goto done;
 	}
 
@@ -2463,8 +2549,9 @@ static void _rpc_batch_job(slurm_msg_t *msg)
 	info("Launching batch job %u for UID %u", req->job_id, req->uid);
 
 	debug3("_rpc_batch_job: call to _forkexec_slurmstepd");
-	rc = _forkexec_slurmstepd(LAUNCH_BATCH_JOB, (void *)req, cli, NULL,
-				  (hostset_t)NULL, SLURM_PROTOCOL_VERSION);
+	rc = _forkexec_slurmstepd(LAUNCH_BATCH_JOB, (void *)req, cli,
+				  msg->auth_uid, NULL, (hostset_t)NULL,
+				  SLURM_PROTOCOL_VERSION);
 	debug3("_rpc_batch_job: return from _forkexec_slurmstepd: %d", rc);
 
 	slurm_mutex_unlock(&launch_mutex);
@@ -4025,6 +4112,43 @@ static void _file_bcast_cleanup(void)
 	_fb_wrunlock();
 }
 
+static int _bcast_find_by_job(void *x, void *y)
+{
+	file_bcast_info_t *f = x;
+	uint32_t *job_id = y;
+
+	if (f->job_id == *job_id) {
+		debug("Removing file_bcast transfer from JobId=%u to file `%s`",
+		       f->job_id, f->fname);
+		return 1;
+	}
+
+	return 0;
+}
+
+static int _libdir_find_by_job(void *x, void *y)
+{
+	libdir_rec_t *l = x;
+	uint32_t *job_id = y;
+
+	if (l->job_id == *job_id) {
+		debug("Removing library directory reference for JobId=%u for `%s`",
+		      l->job_id, l->directory);
+		return 1;
+	}
+
+	return 0;
+
+}
+
+static void _file_bcast_job_cleanup(uint32_t job_id)
+{
+	_fb_wrlock();
+	list_delete_all(file_bcast_list, _bcast_find_by_job, &job_id);
+	list_delete_all(bcast_libdir_list, _libdir_find_by_job, &job_id);
+	_fb_wrunlock();
+}
+
 void file_bcast_init(void)
 {
 	/* skip locks during slurmd init */
@@ -4378,7 +4502,7 @@ _rpc_reattach_tasks(slurm_msg_t *msg)
 
 	/* Following call fills in gtids and local_pids when successful. */
 	rc = stepd_attach(fd, protocol_version, &ioaddr,
-			  &resp_msg.address, job_cred_sig, resp);
+			  &resp_msg.address, job_cred_sig, msg->auth_uid, resp);
 	if (rc != SLURM_SUCCESS) {
 		debug2("stepd_attach call failed");
 		goto done2;
@@ -5060,6 +5184,8 @@ _rpc_abort_job(slurm_msg_t *msg)
 
 	save_cred_state(conf->vctx);
 
+	_file_bcast_job_cleanup(req->step_id.job_id);
+
 #ifndef HAVE_FRONT_END
 	/* It is always 0 for front end systems */
 	node_id = nodelist_find(req->nodes, conf->node_name);
@@ -5308,6 +5434,8 @@ _rpc_terminate_job(slurm_msg_t *msg)
 	}
 
 	save_cred_state(conf->vctx);
+
+	_file_bcast_job_cleanup(req->step_id.job_id);
 
 #ifndef HAVE_FRONT_END
 	/* It is always 0 for front end systems */
@@ -5885,8 +6013,8 @@ static void
 _rpc_forward_data(slurm_msg_t *msg)
 {
 	forward_data_msg_t *req = (forward_data_msg_t *)msg->data;
-	uint32_t req_uid = msg->auth_uid;
-	struct sockaddr_un sa;
+	uid_t req_uid = msg->auth_uid;
+	gid_t req_gid = auth_g_get_gid(msg->auth_cred);
 	int fd = -1, rc = 0;
 
 	/* Make sure we adjust for the spool dir coming in on the address to
@@ -5897,31 +6025,8 @@ _rpc_forward_data(slurm_msg_t *msg)
 	debug3("Entering _rpc_forward_data, address: %s, len: %u",
 	       req->address, req->len);
 
-	/*
-	 * If socket name would be truncated, emit error and exit
-	 */
-	if (strlen(req->address) >= sizeof(sa.sun_path)) {
-		error("%s: Unix socket path '%s' is too long. (%ld > %ld)",
-		      __func__, req->address,
-		      (long int)(strlen(req->address) + 1),
-		      (long int)sizeof(sa.sun_path));
-		slurm_seterrno(EINVAL);
-		rc = errno;
-		goto done;
-	}
+	rc = _connect_as_other(req->address, req_uid, req_gid, &fd);
 
-	/* connect to specified address */
-	fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (fd < 0) {
-		rc = errno;
-		error("failed creating UNIX domain socket: %m");
-		goto done;
-	}
-	memset(&sa, 0, sizeof(sa));
-	sa.sun_family = AF_UNIX;
-	strcpy(sa.sun_path, req->address);
-	while (((rc = connect(fd, (struct sockaddr *)&sa, SUN_LEN(&sa))) < 0) &&
-	       (errno == EINTR));
 	if (rc < 0) {
 		rc = errno;
 		debug2("failed connecting to specified socket '%s': %m",

@@ -317,7 +317,8 @@ static void _setup_job_cond_selected_steps(slurmdb_job_cond_t *job_cond,
 					   "(t1.het_job_offset<>%u && "
 					   "t1.het_job_id in (select "
 					   "t4.het_job_id from \"%s_%s\" as "
-					   "t4 where t4.id_job in (%s)))",
+					   "t4 where t4.id_job in (%s) && "
+					   "t4.het_job_id<>0))",
 					   job_ids, NO_VAL, cluster_name,
 					   job_table, job_ids);
 			else if (job_cond->flags & JOBCOND_FLAG_NO_WHOLE_HETJOB)
@@ -492,8 +493,13 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 	/* This is here to make sure we are looking at only this user
 	 * if this flag is set.  We also include any accounts they may be
 	 * coordinator of.
+	 *
+	 * This clause must be kept in sync with the access check in
+	 * as_mysql_jobacct_process_get_jobs().
 	 */
-	if (!is_admin && (slurm_conf.private_data & PRIVATE_DATA_JOBS)) {
+	if (!is_admin && ((slurm_conf.private_data & PRIVATE_DATA_JOBS) ||
+			  (job_cond->flags & JOBCOND_FLAG_SCRIPT) ||
+			  (job_cond->flags & JOBCOND_FLAG_ENV))) {
 		query = xstrdup_printf("select lft from \"%s_%s\" "
 				       "where user='%s'",
 				       cluster_name, assoc_table, user->name);
@@ -1223,7 +1229,7 @@ extern List setup_cluster_list_with_inx(mysql_conn_t *mysql_conn,
 		if (bit_ffs(local_cluster->asked_bitmap) != -1) {
 			list_append(local_cluster_list, local_cluster);
 			if (local_cluster->end == 0) {
-				local_cluster->end = now;
+				local_cluster->end = now + 1;
 				(*curr_cluster) = local_cluster;
 			} else if (!(*curr_cluster)
 				   || (((local_cluster_t *)(*curr_cluster))->end
@@ -1721,6 +1727,10 @@ extern List as_mysql_jobacct_process_get_jobs(mysql_conn_t *mysql_conn,
 	memset(&user, 0, sizeof(slurmdb_user_rec_t));
 	user.uid = uid;
 
+	/*
+	 * This clause must be kept in sync with the access check in
+	 * _cluster_get_jobs().
+	 */
 	if ((slurm_conf.private_data & PRIVATE_DATA_JOBS) ||
 	    (job_cond->flags & JOBCOND_FLAG_SCRIPT) ||
 	    (job_cond->flags & JOBCOND_FLAG_ENV)) {

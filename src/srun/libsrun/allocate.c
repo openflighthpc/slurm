@@ -286,6 +286,9 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 			tmp_str = alloc->alias_list;
 			alloc->alias_list = resp->alias_list;
 			resp->alias_list = tmp_str;
+			if (resp->node_addr)
+				add_remote_nodes_to_conf_tbls(resp->node_list,
+							      resp->node_addr);
 			slurm_free_resource_allocation_response_msg(resp);
 		}
 	} else if (!destroy_job) {
@@ -469,6 +472,14 @@ relinquish:
 	return NULL;
 }
 
+static int _copy_other_port(void *x, void *arg)
+{
+	job_desc_msg_t *desc = x;
+	desc->other_port = *(uint16_t *)arg;
+
+	return SLURM_SUCCESS;
+}
+
 /*
  * Allocate nodes for heterogeneous job from the slurm controller --
  * retrying the attempt if the controller appears to be down, and optionally
@@ -536,6 +547,7 @@ List allocate_het_job_nodes(bool handle_signals)
 	/* create message thread to handle pings and such from slurmctld */
 	msg_thr = slurm_allocation_msg_thr_create(&first_job->other_port,
 						  &callbacks);
+	list_for_each(job_req_list, _copy_other_port, &first_job->other_port);
 
 	/* NOTE: Do not process signals in separate pthread. The signal will
 	 * cause slurm_allocate_resources_blocking() to exit immediately. */
@@ -726,7 +738,7 @@ int slurmctld_msg_init(void)
 static job_desc_msg_t *_job_desc_msg_create_from_opts(slurm_opt_t *opt_local)
 {
 	srun_opt_t *srun_opt = opt_local->srun_opt;
-	job_desc_msg_t *j = slurm_opt_create_job_desc(opt_local);
+	job_desc_msg_t *j = slurm_opt_create_job_desc(opt_local, true);
 
 	if (!j) {
 		return NULL;

@@ -241,6 +241,8 @@ extern void response_init(slurm_msg_t *resp, slurm_msg_t *msg)
 	resp->conn = msg->conn;
 	resp->flags = msg->flags;
 	resp->protocol_version = msg->protocol_version;
+	if (msg->auth_uid_set)
+		slurm_msg_set_r_uid(resp, msg->auth_uid);
 }
 
 /*
@@ -2029,6 +2031,8 @@ static void  _slurm_rpc_epilog_complete(slurm_msg_t *msg)
 		 */
 		if (!LOTS_OF_AGENTS && !defer_sched)
 			schedule(false);	/* Has own locking */
+		else
+			queue_job_scheduler();
 		schedule_node_save();		/* Has own locking */
 		schedule_job_save();		/* Has own locking */
 	}
@@ -5103,7 +5107,6 @@ static void _slurm_rpc_set_debug_level(slurm_msg_t *msg)
 		{ WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	set_debug_level_msg_t *request_msg =
 		(set_debug_level_msg_t *) msg->data;
-	log_options_t log_opts = LOG_OPTS_INITIALIZER;
 
 	if (!validate_super_user(msg->auth_uid)) {
 		error("set debug level request from non-super user uid=%u",
@@ -5117,32 +5120,14 @@ static void _slurm_rpc_set_debug_level(slurm_msg_t *msg)
 	debug_level = MIN (request_msg->debug_level, (LOG_LEVEL_END - 1));
 	debug_level = MAX (debug_level, LOG_LEVEL_QUIET);
 
-	lock_slurmctld (config_write_lock);
-	if (slurmctld_config.daemonize) {
-		log_opts.stderr_level = LOG_LEVEL_QUIET;
-		if (slurm_conf.slurmctld_logfile) {
-			log_opts.logfile_level = debug_level;
-			log_opts.syslog_level = LOG_LEVEL_QUIET;
-		} else {
-			log_opts.syslog_level = debug_level;
-			log_opts.logfile_level = LOG_LEVEL_QUIET;
-		}
-	} else {
-		log_opts.syslog_level = LOG_LEVEL_QUIET;
-		log_opts.stderr_level = debug_level;
-		if (slurm_conf.slurmctld_logfile)
-			log_opts.logfile_level = debug_level;
-		else
-			log_opts.logfile_level = LOG_LEVEL_QUIET;
-	}
-	log_alter(log_opts, LOG_DAEMON, slurm_conf.slurmctld_logfile);
-	unlock_slurmctld (config_write_lock);
+	lock_slurmctld(config_write_lock);
+	update_log_levels(debug_level, debug_level);
 
-	if (debug_level != slurm_conf.slurmctld_debug)
-		info("Set debug level to '%s'", log_num2string(debug_level));
+	info("Set debug level to '%s'", log_num2string(debug_level));
 
 	slurm_conf.slurmctld_debug = debug_level;
 	slurm_conf.last_update = time(NULL);
+	unlock_slurmctld(config_write_lock);
 
 	slurm_send_rc_msg(msg, SLURM_SUCCESS);
 }
@@ -5179,16 +5164,15 @@ static void _slurm_rpc_set_schedlog_level(slurm_msg_t *msg)
 	schedlog_level = MIN (request_msg->debug_level, (LOG_LEVEL_QUIET + 1));
 	schedlog_level = MAX (schedlog_level, LOG_LEVEL_QUIET);
 
-	lock_slurmctld (config_read_lock);
+	lock_slurmctld(config_read_lock);
 	log_opts.logfile_level = schedlog_level;
 	sched_log_alter(log_opts, LOG_DAEMON, slurm_conf.sched_logfile);
-	unlock_slurmctld (config_read_lock);
 
-	if (schedlog_level != slurm_conf.sched_log_level)
-		sched_info("Set scheduler log level to %d", schedlog_level);
+	sched_info("Set scheduler log level to %d", schedlog_level);
 
 	slurm_conf.sched_log_level = schedlog_level;
 	slurm_conf.last_update = time(NULL);
+	unlock_slurmctld(config_read_lock);
 
 	slurm_send_rc_msg(msg, SLURM_SUCCESS);
 }
@@ -5316,14 +5300,13 @@ static void _slurm_rpc_reboot_nodes(slurm_msg_t *msg)
 		if (IS_NODE_FUTURE(node_ptr) ||
 		    IS_NODE_REBOOT_REQUESTED(node_ptr) ||
 		    IS_NODE_REBOOT_ISSUED(node_ptr) ||
-		    (IS_NODE_CLOUD(node_ptr) &&
-		     (IS_NODE_POWERED_DOWN(node_ptr) ||
-		      IS_NODE_POWERING_DOWN(node_ptr)))) {
+		    IS_NODE_POWER_DOWN(node_ptr) ||
+		    IS_NODE_POWERED_DOWN(node_ptr) ||
+		    IS_NODE_POWERING_DOWN(node_ptr)) {
 			bit_clear(bitmap, i);
 			continue;
 		}
 		node_ptr->node_state |= NODE_STATE_REBOOT_REQUESTED;
-		node_ptr->boot_req_time = (time_t) 0;
 		if (reboot_msg) {
 			node_ptr->next_state = reboot_msg->next_state;
 			if (node_ptr->next_state == NODE_RESUME)

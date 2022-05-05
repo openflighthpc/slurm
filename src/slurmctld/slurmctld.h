@@ -1245,7 +1245,7 @@ extern void excise_node_from_job(job_record_t *job_ptr,
 				 node_record_t *node_ptr);
 
 /* make_node_avail - flag specified node as available */
-extern void make_node_avail(int node_inx);
+extern void make_node_avail(node_record_t *node_ptr);
 
 /*
  * Copy a job's feature list
@@ -2474,6 +2474,14 @@ extern int update_job_wckey(char *module, job_record_t *job_ptr,
 /* Reset nodes_completing field for all jobs */
 extern void update_job_nodes_completing(void);
 
+/*
+ * Update log levels given requested levels
+ * IN req_slurmctld_debug - requested debug level
+ * IN req_syslog_debug - requested syslog level
+ * NOTE: Will not turn on originally configured off (quiet) channels
+ */
+extern void update_log_levels(int req_slurmctld_debug, int req_syslog_debug);
+
 /* Reset slurmctld logging based upon configuration parameters
  * uses common slurm_conf data structure */
 extern void update_logging(void);
@@ -2831,5 +2839,12 @@ extern char **job_common_env_vars(job_record_t *job_ptr, bool is_complete);
  * where that node is represented in that array.
  */
 extern int job_get_node_inx(char *node_name, bitstr_t *node_bitmap);
+
+/*
+ * set_node_reboot_reason - appropriately set node reason with reboot message
+ * IN node_ptr - node_ptr to the node
+ * IN reason - message to be appended
+ */
+extern void set_node_reboot_reason(node_record_t *node_ptr, char *message);
 
 #endif /* !_HAVE_SLURMCTLD_H */

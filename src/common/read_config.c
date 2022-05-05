@@ -3903,6 +3903,9 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 	if (!s_p_get_uint32(&conf->first_job_id, "FirstJobId", hashtbl))
 		conf->first_job_id = DEFAULT_FIRST_JOB_ID;
 
+	if (!conf->first_job_id)
+		fatal("FirstJobId cannot be zero");
+
 	(void) s_p_get_string(&conf->gres_plugins, "GresTypes", hashtbl);
 
 	if (!s_p_get_uint16(&conf->group_force, "GroupUpdateForce", hashtbl))
@@ -4280,7 +4283,8 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 		conf->accounting_storage_user = xstrdup("N/A");
 	}
 
-	(void) s_p_get_uint16(&conf->over_time_limit, "OverTimeLimit", hashtbl);
+	if (!s_p_get_uint16(&conf->over_time_limit, "OverTimeLimit", hashtbl))
+		conf->over_time_limit = 0;
 
 	if (!s_p_get_string(&conf->plugindir, "PluginDir", hashtbl))
 		conf->plugindir = xstrdup(default_plugin_path);
@@ -4664,6 +4668,10 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 
 	(void) s_p_get_string(&conf->sched_params, "SchedulerParameters",
 			      hashtbl);
+	if ((temp_str = xstrcasestr(conf->sched_params, "max_script_size="))) {
+		if (atoi(temp_str + 16) > (512 * 1024 * 1024))
+			fatal("SchedulerParameters option max_script_size cannot exceed 512 MB");
+	}
 
 	if (!s_p_get_uint16(&conf->sched_time_slice, "SchedulerTimeSlice",
 	    hashtbl))

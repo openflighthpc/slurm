@@ -305,6 +305,33 @@
       }
     },
     "/associations/": {
+      "post": {
+        "tags": [
+          "slurm"
+        ],
+        "operationId": "slurmdbd_update_associations",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.37_response_associations"
+                }
+              },
+              "application/x-yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/dbv0.0.37_response_associations"
+                }
+              }
+            },
+            "description": "status of associations update"
+          },
+          "default": {
+            "description": "Unable to update associations"
+          }
+        },
+        "summary": "Set associations info"
+      },
       "get": {
         "tags": [
           "slurm"
@@ -1466,99 +1493,105 @@
               "$ref": "#/components/schemas/dbv0.0.37_error"
             }
           },
-          "time_start": {
-            "type": "integer",
-            "description": "Unix timestamp of start time"
-          },
-          "rollups": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "description": "Rollup statistics",
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "description": "Type of rollup"
-                },
-                "last_run": {
-                  "type": "integer",
-                  "description": "Timestamp of last rollup"
-                },
-                "last_cycle": {
-                  "type": "integer",
-                  "description": "Timestamp of last cycle"
-                },
-                "max_cycle": {
-                  "type": "integer",
-                  "description": "Max time of all cycles"
-                },
-                "total_time": {
-                  "type": "integer",
-                  "description": "Total time (s) spent doing rollup"
-                },
-                "mean_cycles": {
-                  "type": "integer",
-                  "description": "Average time (s) of cycle"
-                }
-              }
-            }
-          },
-          "RPCs": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "description": "Statistics by RPC type",
-              "properties": {
-                "rpc": {
-                  "type": "string",
-                  "description": "RPC type"
-                },
-                "count": {
-                  "type": "integer",
-                  "description": "Number of RPCs"
-                },
-                "time": {
+          "statistics": {
+            "type": "object",
+            "description": "dictionary of Slurmdb statistics",
+            "properties": {
+              "time_start": {
+                "type": "integer",
+                "description": "Unix timestamp of start time"
+              },
+              "rollups": {
+                "type": "array",
+                "items": {
                   "type": "object",
-                  "description": "Time values",
+                  "description": "Rollup statistics",
                   "properties": {
-                    "average": {
-                      "type": "integer",
-                      "description": "Average time spent processing this RPC type"
+                    "type": {
+                      "type": "string",
+                      "description": "Type of rollup"
                     },
-                    "total": {
+                    "last_run": {
                       "type": "integer",
-                      "description": "Total time spent processing this RPC type"
+                      "description": "Timestamp of last rollup"
+                    },
+                    "last_cycle": {
+                      "type": "integer",
+                      "description": "Timestamp of last cycle"
+                    },
+                    "max_cycle": {
+                      "type": "integer",
+                      "description": "Max time of all cycles"
+                    },
+                    "total_time": {
+                      "type": "integer",
+                      "description": "Total time (s) spent doing rollup"
+                    },
+                    "mean_cycles": {
+                      "type": "integer",
+                      "description": "Average time (s) of cycle"
                     }
                   }
                 }
-              }
-            }
-          },
-          "users": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "description": "Statistics by user RPCs",
-              "properties": {
-                "user": {
-                  "type": "string",
-                  "description": "User name"
-                },
-                "count": {
-                  "type": "integer",
-                  "description": "Number of RPCs"
-                },
-                "time": {
+              },
+              "RPCs": {
+                "type": "array",
+                "items": {
                   "type": "object",
-                  "description": "Time values",
+                  "description": "Statistics by RPC type",
                   "properties": {
-                    "average": {
-                      "type": "integer",
-                      "description": "Average time spent processing each user RPC"
+                    "rpc": {
+                      "type": "string",
+                      "description": "RPC type"
                     },
-                    "total": {
+                    "count": {
                       "type": "integer",
-                      "description": "Total time spent processing each user RPC"
+                      "description": "Number of RPCs"
+                    },
+                    "time": {
+                      "type": "object",
+                      "description": "Time values",
+                      "properties": {
+                        "average": {
+                          "type": "integer",
+                          "description": "Average time spent processing this RPC type"
+                        },
+                        "total": {
+                          "type": "integer",
+                          "description": "Total time spent processing this RPC type"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "users": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "Statistics by user RPCs",
+                  "properties": {
+                    "user": {
+                      "type": "string",
+                      "description": "User name"
+                    },
+                    "count": {
+                      "type": "integer",
+                      "description": "Number of RPCs"
+                    },
+                    "time": {
+                      "type": "object",
+                      "description": "Time values",
+                      "properties": {
+                        "average": {
+                          "type": "integer",
+                          "description": "Average time spent processing each user RPC"
+                        },
+                        "total": {
+                          "type": "integer",
+                          "description": "Total time spent processing each user RPC"
+                        }
+                      }
                     }
                   }
                 }
@@ -1938,6 +1971,10 @@
         "type": "object",
         "description": "Association description",
         "properties": {
+          "is_default": {
+            "type": "integer",
+            "description": "is default association"
+          },
           "account": {
             "type": "string",
             "description": "Assigned account"
@@ -1972,6 +2009,18 @@
                 "type": "object",
                 "description": "Max jobs settings",
                 "properties": {
+                  "active": {
+                    "type": "integer",
+                    "description": "Max TRES for active total jobs"
+                  },
+                  "accruing": {
+                    "type": "integer",
+                    "description": "Max TRES for job accruing priority"
+                  },
+                  "total": {
+                    "type": "integer",
+                    "description": "Max TRES for job total submitted"
+                  },
                   "per": {
                     "type": "object",
                     "description": "Max jobs per settings",
@@ -2004,6 +2053,18 @@
                 "type": "object",
                 "description": "Max TRES settings",
                 "properties": {
+                  "group": {
+                    "type": "object",
+                    "description": "Max TRES per group",
+                    "properties": {
+                      "minutes": {
+                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
+                      },
+                      "active": {
+                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
+                      }
+                    }
+                  },
                   "per": {
                     "type": "object",
                     "description": "Max TRES per settings",
@@ -2170,6 +2231,10 @@
             "type": "object",
             "description": "Assigned limits",
             "properties": {
+              "factor": {
+                "type": "number",
+                "description": "factor to apply to TRES count for associations using this QOS"
+              },
               "max": {
                 "type": "object",
                 "description": "Limits on max settings",
@@ -2198,17 +2263,23 @@
                     "type": "object",
                     "description": "Limits on jobs settings",
                     "properties": {
-                      "per": {
+                      "active_jobs": {
                         "type": "object",
-                        "description": "Limits on jobs per settings",
+                        "description": "Limits on active jobs settings",
                         "properties": {
-                          "account": {
-                            "type": "integer",
-                            "description": "Max jobs per account"
-                          },
-                          "user": {
-                            "type": "integer",
-                            "description": "Max jobs per user"
+                          "per": {
+                            "type": "object",
+                            "description": "Limits on active jobs per settings",
+                            "properties": {
+                              "account": {
+                                "type": "integer",
+                                "description": "Max jobs per account"
+                              },
+                              "user": {
+                                "type": "integer",
+                                "description": "Max jobs per user"
+                              }
+                            }
                           }
                         }
                       }
@@ -2368,6 +2439,18 @@
         }
       },
       "dbv0.0.37_response_qos_delete": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "Slurm errors",
+            "items": {
+              "$ref": "#/components/schemas/dbv0.0.37_error"
+            }
+          }
+        }
+      },
+      "dbv0.0.37_response_associations": {
         "type": "object",
         "properties": {
           "errors": {
@@ -2982,61 +3065,61 @@
               "name": {
                 "type": "string",
                 "description": "Step name"
-              },
-              "task": {
+              }
+            }
+          },
+          "task": {
+            "type": "object",
+            "description": "Task properties",
+            "properties": {
+              "distribution": {
+                "type": "string",
+                "description": "Task distribution type"
+              }
+            }
+          },
+          "tres": {
+            "type": "object",
+            "description": "TRES usage",
+            "properties": {
+              "requested": {
                 "type": "object",
-                "description": "Task properties",
+                "description": "TRES requested for job",
                 "properties": {
-                  "distribution": {
-                    "type": "string",
-                    "description": "Task distribution type"
-                  }
-                }
-              },
-              "tres": {
-                "type": "object",
-                "description": "TRES usage",
-                "properties": {
-                  "requested": {
-                    "type": "object",
-                    "description": "TRES requested for job",
-                    "properties": {
-                      "average": {
-                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
-                      },
-                      "max": {
-                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
-                      },
-                      "min": {
-                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
-                      },
-                      "total": {
-                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
-                      }
-                    }
+                  "average": {
+                    "$ref": "#/components/schemas/dbv0.0.37_tres_list"
                   },
-                  "consumed": {
-                    "type": "object",
-                    "description": "TRES requested for job",
-                    "properties": {
-                      "average": {
-                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
-                      },
-                      "max": {
-                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
-                      },
-                      "min": {
-                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
-                      },
-                      "total": {
-                        "$ref": "#/components/schemas/dbv0.0.37_tres_list"
-                      }
-                    }
+                  "max": {
+                    "$ref": "#/components/schemas/dbv0.0.37_tres_list"
                   },
-                  "allocated": {
+                  "min": {
+                    "$ref": "#/components/schemas/dbv0.0.37_tres_list"
+                  },
+                  "total": {
                     "$ref": "#/components/schemas/dbv0.0.37_tres_list"
                   }
                 }
+              },
+              "consumed": {
+                "type": "object",
+                "description": "TRES requested for job",
+                "properties": {
+                  "average": {
+                    "$ref": "#/components/schemas/dbv0.0.37_tres_list"
+                  },
+                  "max": {
+                    "$ref": "#/components/schemas/dbv0.0.37_tres_list"
+                  },
+                  "min": {
+                    "$ref": "#/components/schemas/dbv0.0.37_tres_list"
+                  },
+                  "total": {
+                    "$ref": "#/components/schemas/dbv0.0.37_tres_list"
+                  }
+                }
+              },
+              "allocated": {
+                "$ref": "#/components/schemas/dbv0.0.37_tres_list"
               }
             }
           }

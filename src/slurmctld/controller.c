@@ -303,7 +303,9 @@ int main(int argc, char **argv)
 			conf_file = default_slurm_config_file;
 	slurm_conf_init(conf_file);
 
+	lock_slurmctld(config_write_lock);
 	update_logging();
+	unlock_slurmctld(config_write_lock);
 
 	memset(&slurmctld_diag_stats, 0, sizeof(slurmctld_diag_stats));
 	/*
@@ -946,7 +948,7 @@ static void  _init_config(void)
 {
 	struct rlimit rlim;
 
-	rlimits_adjust_nofile();
+	rlimits_use_max_nofile();
 	if (getrlimit(RLIMIT_CORE, &rlim) == 0) {
 		rlim.rlim_cur = rlim.rlim_max;
 		(void) setrlimit(RLIMIT_CORE, &rlim);
@@ -1038,6 +1040,7 @@ static void *_slurmctld_signal_hand(void *no_data)
 	int i, rc;
 	int sig_array[] = {SIGINT, SIGTERM, SIGHUP, SIGABRT, SIGUSR2, 0};
 	sigset_t set;
+	slurmctld_lock_t conf_write_lock = { .conf = WRITE_LOCK };
 
 #if HAVE_SYS_PRCTL_H
 	if (prctl(PR_SET_NAME, "sigmgr", NULL, NULL, NULL) < 0) {
@@ -1075,7 +1078,9 @@ static void *_slurmctld_signal_hand(void *no_data)
 			return NULL;
 		case SIGUSR2:
 			info("Logrotate signal (SIGUSR2) received");
+			lock_slurmctld(conf_write_lock);
 			update_logging();
+			unlock_slurmctld(conf_write_lock);
 			break;
 		default:
 			error("Invalid signal (%d) received", sig);
@@ -1821,9 +1826,7 @@ static void _queue_reboot_msg(void)
 
 		node_ptr->boot_req_time = now;
 
-		if (node_ptr->reason &&
-		    !xstrstr(node_ptr->reason, "reboot issued"))
-			xstrcat(node_ptr->reason, " : reboot issued");
+		set_node_reboot_reason(node_ptr, "reboot issued");
 
 		clusteracct_storage_g_node_down(acct_db_conn, node_ptr, now,
 		                                NULL, slurm_conf.slurm_user_id);
@@ -1834,6 +1837,7 @@ static void _queue_reboot_msg(void)
 				reboot_agent_args->hostlist);
 		debug("Issuing reboot request for nodes %s", host_str);
 		xfree(host_str);
+		set_agent_arg_r_uid(reboot_agent_args, SLURM_AUTH_UID_ANY);
 		agent_queue_request(reboot_agent_args);
 		last_node_update = now;
 		schedule_node_save();
@@ -2695,6 +2699,7 @@ static void *_shutdown_bu_thread(void *arg)
 	xfree(arg);
 
 	slurm_msg_t_init(&req);
+	slurm_msg_set_r_uid(&req, slurm_conf.slurm_user_id);
 	slurm_set_addr(&req.address, slurm_conf.slurmctld_port,
 	               slurm_conf.control_addr[bu_inx]);
 	if (do_shutdown) {
@@ -2794,14 +2799,84 @@ static void _update_cred_key(void)
 	                          slurm_conf.job_credential_private_key);
 }
 
-/* Reset slurmctld logging based upon configuration parameters
- *   uses common slurm_conf data structure
- * NOTE: READ lock_slurmctld config before entry */
+/*
+ * Update log levels given requested levels
+ * NOTE: Will not turn on originally configured off (quiet) channels
+ */
+void update_log_levels(int req_slurmctld_debug, int req_syslog_debug)
+{
+	static bool conf_init = false;
+	static int conf_slurmctld_debug, conf_syslog_debug;
+	log_options_t log_opts = LOG_OPTS_INITIALIZER;
+	int slurmctld_debug;
+	int syslog_debug;
+
+	/*
+	 * Keep track of the original debug levels from slurm.conf so that
+	 * `scontrol setdebug` does not turn on non-active logging channels.
+	 * NOTE: It is known that `scontrol reconfigure` will cause an issue
+	 *       when reconfigured with a slurm.conf that changes SlurmctldDebug
+	 *       from level QUIET to a non-quiet value.
+	 * NOTE: Planned changes to `reconfigure` behavior should make this a
+	 *       non-issue in a future release.
+	 */
+	if (!conf_init) {
+		conf_slurmctld_debug = slurm_conf.slurmctld_debug;
+		conf_syslog_debug = slurm_conf.slurmctld_syslog_debug;
+		conf_init = true;
+	}
+
+	/*
+	 * NOTE: not offset by LOG_LEVEL_INFO, since it's inconvenient
+	 * to provide negative values for scontrol
+	 */
+	slurmctld_debug = MIN(req_slurmctld_debug, (LOG_LEVEL_END - 1));
+	slurmctld_debug = MAX(slurmctld_debug, LOG_LEVEL_QUIET);
+	syslog_debug = MIN(req_syslog_debug, (LOG_LEVEL_END - 1));
+	syslog_debug = MAX(syslog_debug, LOG_LEVEL_QUIET);
+
+	if (daemonize)
+		log_opts.stderr_level = LOG_LEVEL_QUIET;
+	else
+		log_opts.stderr_level = slurmctld_debug;
+
+	if (slurm_conf.slurmctld_logfile &&
+	    (conf_slurmctld_debug != LOG_LEVEL_QUIET))
+		log_opts.logfile_level = slurmctld_debug;
+	else
+		log_opts.logfile_level = LOG_LEVEL_QUIET;
+
+	if (conf_syslog_debug == LOG_LEVEL_QUIET)
+		log_opts.syslog_level = LOG_LEVEL_QUIET;
+	else if (slurm_conf.slurmctld_syslog_debug != LOG_LEVEL_END)
+		log_opts.syslog_level = syslog_debug;
+	else if (!daemonize)
+		log_opts.syslog_level = LOG_LEVEL_QUIET;
+	else if (!slurm_conf.slurmctld_logfile &&
+		 (conf_slurmctld_debug > LOG_LEVEL_QUIET))
+		log_opts.syslog_level = slurmctld_debug;
+	else
+		log_opts.syslog_level = LOG_LEVEL_FATAL;
+
+	log_alter(log_opts, LOG_DAEMON, slurm_conf.slurmctld_logfile);
+
+	debug("slurmctld log levels: stderr=%s logfile=%s syslog=%s",
+	      log_num2string(log_opts.stderr_level),
+	      log_num2string(log_opts.logfile_level),
+	      log_num2string(log_opts.syslog_level));
+}
+
+/*
+ * Reset slurmctld logging based upon configuration parameters uses common
+ * slurm_conf data structure
+ */
 void update_logging(void)
 {
 	int rc;
 	uid_t slurm_user_id  = slurm_conf.slurm_user_id;
 	gid_t slurm_user_gid = gid_from_uid(slurm_user_id);
+
+	xassert(verify_lock(CONF_LOCK, WRITE_LOCK));
 
 	/* Preserve execute line arguments (if any) */
 	if (debug_level) {
@@ -2821,25 +2896,10 @@ void update_logging(void)
 		slurm_conf.slurmctld_logfile = xstrdup(debug_logfile);
 	}
 
-	if (daemonize)
-		log_opts.stderr_level = LOG_LEVEL_QUIET;
-	else
-		log_opts.stderr_level = slurm_conf.slurmctld_debug;
-
-	if (slurm_conf.slurmctld_syslog_debug != LOG_LEVEL_END) {
-		log_opts.syslog_level = slurm_conf.slurmctld_syslog_debug;
-	} else if (!daemonize) {
-		log_opts.syslog_level = LOG_LEVEL_QUIET;
-	} else if ((slurm_conf.slurmctld_debug > LOG_LEVEL_QUIET)
-	           && !slurm_conf.slurmctld_logfile) {
-		log_opts.syslog_level = slurm_conf.slurmctld_debug;
-	} else
-		log_opts.syslog_level = LOG_LEVEL_FATAL;
-
-	log_alter(log_opts, SYSLOG_FACILITY_DAEMON,
-	          slurm_conf.slurmctld_logfile);
-
 	log_set_timefmt(slurm_conf.log_fmt);
+
+	update_log_levels(slurm_conf.slurmctld_debug,
+			  slurm_conf.slurmctld_syslog_debug);
 
 	debug("Log file re-opened");
 
