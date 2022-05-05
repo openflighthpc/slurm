@@ -21832,10 +21832,7 @@ else
    cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 /* end confdefs.h.  */
 
-              #include<pmix_server.h>
-              #if (PMIX_VERSION_MAJOR != 1L)
-                #error "not version 1"
-              #endif
+              #include<pmix/pmix_common.h>
 
 int
 main ()
