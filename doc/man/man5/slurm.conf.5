@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "Slurm Configuration File" "May 2021" "Slurm Configuration File"
+.TH "slurm.conf" "5" "Slurm Configuration File" "June 2021" "Slurm Configuration File"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -739,7 +739,8 @@ Work Queue details
 
 .TP
 \fBDefCpuPerGPU\fR
-Default count of CPUs allocated per allocated GPU.
+Default count of CPUs allocated per allocated GPU. This value is used only if
+the job didn't specify --cpus-per-task and --cpus-per-gpu.
 
 .TP
 \fBDefMemPerCPU\fR
@@ -826,7 +827,7 @@ Multiple options may be comma separated.
 .RS
 .TP
 \fBdisable_remote_singleton\fR
-By default, when a federated job has a singleton dependeny, each cluster in the
+By default, when a federated job has a singleton dependency, each cluster in the
 federation must clear the singleton dependency before the job's singleton
 dependency is considered satisfied. Enabling this option means that only the
 origin cluster must clear the singleton dependency. This option must be set
@@ -980,8 +981,8 @@ additional functionality.
 No generic resources are managed by default.
 Ensure this parameter is consistent across all nodes in the cluster for
 proper operation.
-The slurmctld daemon must be restarted for changes to this parameter to become
-effective.
+The \fBslurmctld\fR and \fBslurmd\fR daemons must be restarted for changes to
+this parameter to take effect.
 
 .TP
 \fBGroupUpdateForce\fR
@@ -1254,28 +1255,44 @@ Also see \fBDefaultStoragePort\fR.
 .TP
 \fBJobCompType\fR
 The job completion logging mechanism type.
-Acceptable values at present include "jobcomp/none", "jobcomp/elasticsearch",
-"jobcomp/filetxt", "jobcomp/lua", "jobcomp/mysql" and "jobcomp/script".
-The default value is "jobcomp/none", which means that upon job completion
-the record of the job is purged from the system.  If using the accounting
-infrastructure this plugin may not be of interest since the information
-here is redundant.
-The value "jobcomp/elasticsearch" indicates that a record of the job
-should be written to an Elasticsearch server specified by the
-\fBJobCompLoc\fR parameter.
-NOTE: More information is available at the Slurm web site
+Acceptable values at present include:
+.RS
+.TP
+\fBjobcomp/none\fR
+Upon job completion, a record of the job is purged from the system.
+If using the accounting infrastructure this plugin may not be of interest
+since some of the information is redundant.
+
+.TP
+\fBjobcomp/elasticsearch\fR
+Upon job completion, a record of the job should be written to an
+Elasticsearch server, specified by the \fBJobCompLoc\fR parameter.
+.br
+\fBNOTE\fR: More information is available at the Slurm web site
 ( https://slurm.schedmd.com/elasticsearch.html ).
-The value "jobcomp/filetxt" indicates that a record of the job should be
-written to a text file specified by the \fBJobCompLoc\fR parameter.
-The value "jobcomp/lua" indicates that a record of the job should processed by
-the "jobcomp.lua" script located in the default script directory
-(typically the subdirectory "etc" of the installation directory).
-The value "jobcomp/mysql" indicates that a record of the job should be
-written to a MySQL or MariaDB database specified by the \fBJobCompLoc\fR
-parameter.
-The value "jobcomp/script" indicates that a script specified by the
-\fBJobCompLoc\fR parameter is to be executed with environment variables
-indicating the job information.
+
+.TP
+\fBjobcomp/filetxt\fR
+Upon job completion, a record of the job should be written to a text file,
+specified by the \fBJobCompLoc\fR parameter.
+
+.TP
+\fBjobcomp/lua\fR
+Upon job completion, a record of the job should be processed by the
+\fIjobcomp.lua\fR script, located in the default script directory
+(typically the subdirectory \fIetc\fR of the installation directory.
+
+.TP
+\fBjobcomp/mysql\fR
+Upon job completion, a record of the job should be written to a MySQL
+or MariaDB database, specified by the \fBJobCompLoc\fR parameter.
+
+.TP
+\fBjobcomp/script\fR
+Upon job completion, a script specified by the \fBJobCompLoc\fR parameter is
+to be executed with environment variables providing the job information.
+.RE
+
 .TP
 \fBJobCompUser\fR
 The user account for accessing the job completion database.
@@ -1543,7 +1560,7 @@ It only takes effect upon restart of the slurmctld daemon.
 The maximum job id to be used for jobs submitted to Slurm without a specific
 requested value. Job ids are unsigned 32bit integers with the first 26 bits
 reserved for local job ids and the remaining 6 bits reserved for a cluster id
-to identify a federated job's origin. The maximun allowed local job id is
+to identify a federated job's origin. The maximum allowed local job id is
 67,108,863 (0x3FFFFFF). The default value is 67,043,328 (0x03ff0000).
 \fBMaxJobId\fR only applies to the local job id and not the federated job id.
 Job id values generated will be incremented by 1 for each subsequent job. Once
@@ -2059,12 +2076,18 @@ The default value is "site_factor/none".
 .TP
 \fBPriorityType\fR
 This specifies the plugin to be used in establishing a job's scheduling
-priority. Supported values are "priority/basic" (jobs are prioritized
-by order of arrival), "priority/multifactor" (jobs are prioritized based
-upon size, age, fair\-share of allocation, etc).
+priority.
 Also see \fBPriorityFlags\fR for configuration options.
 The default value is "priority/basic".
-
+.RS
+.TP
+\fBpriority/basic\fR
+Jobs are evaluated in a First In, First Out (FIFO) manner.
+.TP
+\fBpriority/multifactor\fR
+Jobs are assigned a priority based upon a variety of factors
+that include size, age, Fairshare, etc.
+.RE
 .RS
 .nr step 1 1
 When not FIFO scheduling, jobs are prioritized in the following order:
@@ -2074,12 +2097,13 @@ When not FIFO scheduling, jobs are prioritized in the following order:
 .br
 2. Jobs with an advanced reservation
 .br
-3. Partition Priority Tier
+3. Partition PriorityTier
 .br
-4. Job Priority
+4. Job priority
 .br
-5. Job Id
+5. Job submit time
 .br
+6. Job ID
 .RE
 
 .TP
@@ -3132,7 +3156,7 @@ Allow running jobs to request additional nodes be merged in with the current
 job allocation.
 .TP
 \fBpreempt_reorder_count=#\fR
-Specify how many attempts should be made in reording preemptable jobs to
+Specify how many attempts should be made in reordering preemptable jobs to
 minimize the count of jobs preempted.
 The default value is 1. High values may adversely impact performance.
 The logic to support this option is only available in the select/cons_res and
@@ -3417,7 +3441,7 @@ boards and minimizes the number of sockets (within minimum boards)
 used for the allocation.
 This default behavior can be overridden specifying a particular
 "\-m" parameter with srun/salloc/sbatch.
-Without this option, cores will be allocated cyclicly across the sockets.
+Without this option, cores will be allocated cyclically across the sockets.
 .TP
 \fBCR_LLN\fR
 Schedule resources to jobs on the least loaded nodes (based upon the number
@@ -3525,7 +3549,7 @@ Log errors and verbose informational messages and even more debugging messages
 The short, or long, hostname of the machine where Slurm control daemon is
 executed (i.e. the name returned by the command "hostname \-s").
 This hostname is optionally followed by the address, either the IP address or
-a name by which the address can be identifed, enclosed in parentheses (e.g.
+a name by which the address can be identified, enclosed in parentheses (e.g.
 SlurmctldHost=slurmctl-primary(12.34.56.78)). This value must be specified at
 least once. If specified more than once, the first hostname named will be
 where the daemon runs.
@@ -3585,7 +3609,7 @@ power_save thread will do work sooner if there are node state changes. Default
 is 10 seconds.
 .TP
 \fBpower_save_min_interval\fR
-How often the power_save thread, at a minimun, looks to resume and suspend
+How often the power_save thread, at a minimum, looks to resume and suspend
 nodes. Default is 0.
 .TP
 \fBmax_dbd_msg_action\fR
@@ -3660,7 +3684,7 @@ becomes the primary server. By default no program is executed.
 When using virtual IP addresses to manage High Available Slurm services,
 this program can be used to add the IP address to an interface (and optionally
 try to kill the unresponsive  slurmctld daemon and flush the ARP caches on
-nodes on the local ethernet fabric).
+nodes on the local Ethernet fabric).
 See also the related "SlurmctldPrimaryOffProg" parameter.
 .TP
 \fBSlurmctldSyslogDebug\fR
@@ -5074,7 +5098,8 @@ The default value is "NO".
 
 .TP
 \fBDefCpuPerGPU\fR
-Default count of CPUs allocated per allocated GPU.
+Default count of CPUs allocated per allocated GPU. This value is used only if
+the job didn't specify --cpus-per-task and --cpus-per-gpu.
 
 .TP
 \fBDefMemPerCPU\fR
@@ -5357,11 +5382,11 @@ Also see PriorityTier.
 
 .TP
 \fBPriorityTier\fR
-Jobs submitted to a partition with a higher priority tier value will be
-dispatched before pending jobs in partition with lower priority tier value and,
-if possible, they will preempt running jobs from partitions with lower priority
-tier values.
-Note that a partition's priority tier takes precedence over a job's priority.
+Jobs submitted to a partition with a higher \fBPriorityTier\fR value will be
+evaluated by the scheduler before pending jobs in a partition with a lower
+\fBPriorityTier\fR value. They will also be considered for preemption of running
+jobs in partition(s) with lower \fBPriorityTier\fR values if
+\fIPreemptType=preempt/partition_prio\fR.
 The value may not exceed 65533.
 Also see PriorityJobFactor.
 
@@ -5566,7 +5591,7 @@ Location of the slurm.conf file. Available in \fBProlog\fR and \fBEpilog\fR.
 \fBSLURMD_NODENAME\fR
 Name of the node running the task. In the case of a parallel job executing
 on multiple compute nodes, the various tasks will have this environment
-variable set to different values on each compute node. Availble in
+variable set to different values on each compute node. Available in
 \fBProlog\fR and \fBEpilog\fR.
 .TP
 \fBSLURM_JOB_ACCOUNT\fR

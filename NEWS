@@ -1,6 +1,84 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 20.11.9
+==========================
+ -- burst_buffer - add missing common directory to the Makefile SUBDIRS.
+ -- sacct - fix truncation when printing jobidraw field.
+ -- GRES - Fix loading state of jobs using --gpus to request gpus.
+ -- Fix minor logic error in health check node state output
+ -- Fix GCC 11.1 compiler warnings.
+ -- Delay steps when memory already used instead of rejecting step request.
+ -- Fix memory leak in the slurmdbd when requesting wckeys from all clusters.
+ -- Fix determining if a reservation is used or not.
+ -- openapi/v0.0.35 - Honor kill_on_invalid_dependency as job parameter.
+ -- openapi/v0.0.36 - Honor kill_on_invalid_dependency as job parameter.
+ -- Fix various issues dealing with updates on magnetic reservations that could
+    lead to abort slurmctld.
+ -- openapi/v0.0.36 - Avoid setting default values of min_cpus, job name, cwd,
+    mail_type, and contiguous on job update.
+ -- openapi/v0.0.36 - Clear user hold on job update if hold=false.
+ -- Fix slurmctld segfault due to a bit_test() call with a MAINT+ANY_NODES
+    reservation NULL node_bitmap.
+ -- Fix slurmctld segfault due to a bit_copy() call with a REPLACE+ANY_NODES
+    reservation NULL node_bitmap.
+ -- Fix error in GPU frequency validation logic.
+ -- Fix error in pmix logic dealing with the incorrect size of buffer.
+ -- PMIx v1.1.4 and below are no longer supported.
+ -- Fix shutdown of slurmdbd plugin to correctly notice when the agent thread
+    finishes.
+ -- Fix slurmctld segfault due to job array --batch features double free.
+ -- CVE-2022-29500 - Prevent credential abuse.
+ -- CVE-2022-29501 - Prevent abuse of REQUEST_FORWARD_DATA.
+
+* Changes in Slurm 20.11.8
+==========================
+ -- slurmctld - fix erroneous "StepId=CORRUPT" messages in error logs.
+ -- Correct the error given when auth plugin fails to pack a credential.
+ -- Fix unused-variable compiler warning on FreeBSD in fd_resolve_path().
+ -- acct_gather_filesystem/lustre - only emit collection error once per step.
+ -- srun - leave SLURM_DIST_UNKNOWN as default for --interactive.
+ -- Add GRES environment variables (e.g., CUDA_VISIBLE_DEVICES) into the
+    interactive step, the same as is done for the batch step.
+ -- Fix various potential deadlocks when altering objects in the database
+    dealing with every cluster in the database.
+ -- slurmrestd - handle slurmdbd connection failures without segfaulting.
+ -- slurmrestd - fix segfault for searches in slurmdb/v0.0.36/jobs.
+ -- slurmrestd - remove (non-functioning) users query parameter for
+    slurmdb/v0.0.36/jobs from openapi.json
+ -- slurmrestd - fix segfault in slurmrestd db/jobs with numeric queries
+ -- slurmrestd - add argv handling for job/submit endpoint.
+ -- srun - fix broken node step allocation in a heterogeneous allocation.
+ -- Fail step creation if -n is not multiple of --ntasks-per-gpu.
+ -- job_container/tmpfs - Fix slowdown on teardown.
+ -- Fix problem with SlurmctldProlog where requeued jobs would never launch.
+ -- job_container/tmpfs - Fix issue when restarting slurmd where the namespace
+    mount points could disappear.
+ -- sacct - avoid truncating JobId at 34 characters.
+ -- scancel - fix segfault when --wckey filtering option is used.
+ -- select/cons_tres - Fix memory leak.
+ -- Prevent file descriptor leak in job_container/tmpfs on slurmd restart.
+ -- slurmrestd/dbv0.0.36 - Fix values dumped in job state/current and
+    job step state.
+ -- slurmrestd/dbv0.0.36 - Correct description for previous state property.
+ -- perlapi/libslurmdb - expose tres_req_str to job hash.
+ -- scrontab - close and reopen temporary crontab file to deal with editors
+    that do not change the original file, but instead write out then rename
+    a new file.
+ -- sstat - fix linking so that it will work when --without-shared-libslurm
+    was used to build Slurm.
+ -- Clear allocated cpus for running steps in a job before handling requested
+    nodes on new step.
+ -- Don't reject a step if not enough nodes are available. Instead, defer the
+    step until enough nodes are available to satisfy the request.
+ -- Don't reject a step if it requests at least one specific node that is
+    already allocated to another step. Instead, defer the step until the
+    requested node(s) become available.
+ -- slurmrestd - add description for slurmdb/job endpoint.
+ -- Better handling of --mem=0.
+ -- Ignore DefCpuPerGpu when --cpus-per-task given.
+ -- sacct - fix segfault when printing StepId (or when using --long).
+
 * Changes in Slurm 20.11.7
 ==========================
  -- slurmd - handle configless failures gracefully instead of hanging

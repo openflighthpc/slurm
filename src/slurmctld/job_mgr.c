@@ -4595,6 +4595,7 @@ extern job_record_t *job_array_split(job_record_t *job_ptr)
 	}
 	job_ptr_pend->array_task_id = NO_VAL;
 
+	job_ptr_pend->batch_features = xstrdup(job_ptr->batch_features);
 	job_ptr_pend->batch_host = NULL;
 	job_ptr_pend->burst_buffer = xstrdup(job_ptr->burst_buffer);
 	job_ptr_pend->burst_buffer_state = xstrdup(job_ptr->burst_buffer_state);
@@ -6083,6 +6084,7 @@ static void _signal_batch_job(job_record_t *job_ptr, uint16_t signal,
 	signal_tasks_msg->signal = signal;
 
 	agent_args->msg_args = signal_tasks_msg;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -7228,7 +7230,7 @@ static int _job_create(job_desc_msg_t *job_desc, int allocate, int will_run,
 	job_desc->tres_req_cnt[TRES_ARRAY_MEM]  = job_get_tres_mem(NULL,
 					job_desc->pn_min_memory,
 					job_desc->tres_req_cnt[TRES_ARRAY_CPU],
-					job_desc->min_nodes);
+					job_desc->min_nodes, part_ptr);
 
 	license_list = license_validate(job_desc->licenses,
 					validate_cfgd_licenses, true,
@@ -8517,6 +8519,22 @@ static uint16_t _cpus_per_node_part(part_record_t *part_ptr)
 	return 0;
 }
 
+/* Return memory on the first node in the identified partition */
+static uint64_t _mem_per_node_part(part_record_t *part_ptr)
+{
+	int node_inx = -1;
+	node_record_t *node_ptr;
+
+	if (part_ptr->node_bitmap)
+		node_inx = bit_ffs(part_ptr->node_bitmap);
+	if (node_inx >= 0) {
+		node_ptr = node_record_table_ptr + node_inx;
+		return (node_ptr->config_ptr->real_memory -
+			node_ptr->mem_spec_limit);
+	}
+	return 0;
+}
+
 /*
  * Test if this job exceeds any of MaxMemPer[CPU|Node] limits and potentially
  * adjust mem / cpu ratios.
@@ -8573,6 +8591,9 @@ static bool _valid_pn_min_mem(job_desc_msg_t *job_desc_msg,
 		}
 		return true;
 	}
+
+	if (job_mem_limit == 0)
+		job_mem_limit = _mem_per_node_part(part_ptr);
 
 	if (((job_mem_limit & MEM_PER_CPU) == 0) &&
 	    ((sys_mem_limit & MEM_PER_CPU) == 0)) {
@@ -9142,7 +9163,8 @@ extern void job_set_req_tres(job_record_t *job_ptr, bool assoc_mgr_locked)
 	job_ptr->tres_req_cnt[TRES_ARRAY_MEM] = job_get_tres_mem(
 							job_ptr->job_resrcs,
 							mem_cnt, cpu_cnt,
-							node_cnt);
+							node_cnt,
+							job_ptr->part_ptr);
 
 	license_set_job_tres_cnt(job_ptr->license_list,
 				 job_ptr->tres_req_cnt,
@@ -9210,7 +9232,8 @@ extern void job_set_alloc_tres(job_record_t *job_ptr, bool assoc_mgr_locked)
 			job_ptr->job_resrcs,
 			job_ptr->details->pn_min_memory,
 			job_ptr->tres_alloc_cnt[TRES_ARRAY_CPU],
-			job_ptr->tres_alloc_cnt[TRES_ARRAY_NODE]);
+			job_ptr->tres_alloc_cnt[TRES_ARRAY_NODE],
+			job_ptr->part_ptr);
 
 	job_ptr->tres_alloc_cnt[TRES_ARRAY_ENERGY] = NO_VAL64;
 
@@ -12476,7 +12499,8 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_specs,
 		job_ptr->tres_req_cnt[TRES_ARRAY_CPU],
 		job_specs->min_nodes != NO_VAL ?
 		job_specs->min_nodes :
-		detail_ptr ? detail_ptr->min_nodes : 1);
+		detail_ptr ? detail_ptr->min_nodes : 1,
+		use_part_ptr);
 
 	if (job_specs->licenses && !xstrcmp(job_specs->licenses,
 					    job_ptr->licenses)) {
@@ -14478,8 +14502,7 @@ extern int update_job_str(slurm_msg_t *msg, uid_t uid)
 
 reply:
 	if ((rc != ESLURM_JOB_SETTING_DB_INX) && (msg->conn_fd >= 0)) {
-		slurm_msg_t_init(&resp_msg);
-		resp_msg.protocol_version = msg->protocol_version;
+		response_init(&resp_msg, msg);
 		if (resp_array) {
 			resp_array_msg = _resp_array_xlate(resp_array, job_id);
 			resp_msg.msg_type  = RESPONSE_JOB_ARRAY_ERRORS;
@@ -14489,7 +14512,6 @@ reply:
 			rc_msg.return_code = rc;
 			resp_msg.data      = &rc_msg;
 		}
-		resp_msg.conn = msg->conn;
 		slurm_send_node_msg(msg->conn_fd, &resp_msg);
 
 		if (resp_array_msg) {
@@ -14577,6 +14599,7 @@ static void _send_job_kill(job_record_t *job_ptr)
 	}
 
 	agent_args->msg_args = kill_job;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -14972,6 +14995,7 @@ extern void abort_job_on_node(uint32_t job_id, job_record_t *job_ptr,
 	agent_info->msg_type	= REQUEST_ABORT_JOB;
 	agent_info->msg_args	= kill_req;
 
+	set_agent_arg_r_uid(agent_info, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_info);
 }
 
@@ -15040,6 +15064,7 @@ extern void abort_job_on_nodes(job_record_t *job_ptr,
 		agent_info->msg_type	= REQUEST_ABORT_JOB;
 		agent_info->msg_args	= kill_req;
 		agent_info->protocol_version = protocol_version;
+		set_agent_arg_r_uid(agent_info, SLURM_AUTH_UID_ANY);
 		agent_queue_request(agent_info);
 		bit_free(tmp_node_bitmap);
 	}
@@ -15093,6 +15118,7 @@ extern void kill_job_on_node(job_record_t *job_ptr,
 	agent_info->msg_type	= REQUEST_TERMINATE_JOB;
 	agent_info->msg_args	= kill_req;
 
+	set_agent_arg_r_uid(agent_info, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_info);
 }
 
@@ -15340,7 +15366,7 @@ static void _remove_defunct_batch_dirs(List batch_dirs)
  */
 extern uint64_t job_get_tres_mem(struct job_resources *job_res,
 				 uint64_t pn_min_memory, uint32_t cpu_cnt,
-				 uint32_t node_cnt)
+				 uint32_t node_cnt, part_record_t *part_ptr)
 {
 	uint64_t mem_total = 0;
 	int i;
@@ -15354,6 +15380,9 @@ extern uint64_t job_get_tres_mem(struct job_resources *job_res,
 
 	if (pn_min_memory == NO_VAL64)
 		return mem_total;
+
+	if (pn_min_memory == 0)
+		pn_min_memory = _mem_per_node_part(part_ptr);
 
 	if (pn_min_memory & MEM_PER_CPU) {
 		if (cpu_cnt != NO_VAL) {
@@ -16036,6 +16065,7 @@ static void _signal_job(job_record_t *job_ptr, int signal, uint16_t flags)
 	}
 
 	agent_args->msg_args = signal_job_msg;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -16115,6 +16145,7 @@ static void _suspend_job(job_record_t *job_ptr, uint16_t op, bool indf_susp)
 	}
 
 	agent_args->msg_args = sus_ptr;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -16480,6 +16511,7 @@ extern int job_suspend(suspend_msg_t *sus_ptr, uid_t uid,
 		memset(&rc_msg, 0, sizeof(rc_msg));
 		rc_msg.return_code = rc;
 		resp_msg.data      = &rc_msg;
+		slurm_msg_set_r_uid(&resp_msg, uid);
 		slurm_send_node_msg(conn_fd, &resp_msg);
 	}
 	return rc;
@@ -16630,6 +16662,7 @@ extern int job_suspend2(suspend_msg_t *sus_ptr, uid_t uid,
 			rc_msg.return_code = rc;
 			resp_msg.data      = &rc_msg;
 		}
+		slurm_msg_set_r_uid(&resp_msg, uid);
 		slurm_send_node_msg(conn_fd, &resp_msg);
 
 		if (resp_array_msg) {
@@ -17363,6 +17396,7 @@ reply:	FREE_NULL_LIST(top_job_list);
 		memset(&rc_msg, 0, sizeof(rc_msg));
 		rc_msg.return_code = rc;
 		resp_msg.data      = &rc_msg;
+		slurm_msg_set_r_uid(&resp_msg, uid);
 		slurm_send_node_msg(conn_fd, &resp_msg);
 	}
 

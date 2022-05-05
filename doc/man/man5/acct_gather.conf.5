@@ -1,4 +1,4 @@
-.TH "acct_gather.conf" "5" "Slurm Configuration File" "April 2021" "Slurm Configuration File"
+.TH "acct_gather.conf" "5" "Slurm Configuration File" "June 2021" "Slurm Configuration File"
 
 .SH "NAME"
 \fBacct_gather.conf\fR \- Slurm configuration file for the acct_gather plugins
@@ -12,7 +12,7 @@ DEFAULT_SLURM_CONF parameter or at execution time by setting the SLURM_CONF
 environment variable. The file will always be located in the
 same directory as the \fBslurm.conf\fP file.
 .LP
-Parameter names are case insensitive but parameter values are case sensistive.
+Parameter names are case insensitive but parameter values are case sensitive.
 Any text following a "#" in the configuration file is treated
 as a comment through the end of that line.
 The size of each line in the file is limited to 1024 characters.
@@ -43,6 +43,13 @@ appear to be unknown by Slurm and silently ignored. If you decide to change
 plugin types you may also have to change the related options.
 
 .SH acct_gather_energy/IPMI
+Required entry in slurm.conf:
+.RS
+.nf
+AcctGatherEnergyType=acct_gather_energy/ipmi
+.fi
+.RE
+
 Options used for acct_gather_energy/ipmi are as follows:
 
 .RS
@@ -97,6 +104,13 @@ Specify BMC Password.
 .RE
 
 .SH acct_gather_energy/XCC
+Required entry in slurm.conf:
+.RS
+.nf
+AcctGatherEnergyType=acct_gather_energy/xcc
+.fi
+.RE
+
 Options used for acct_gather_energy/xcc include only in-band communications
 with XClarity Controller, thus a reduced set of configurations is supported:
 
@@ -113,6 +127,13 @@ thread. Default is 10 seconds.
 .RE
 
 .SH acct_gather_profile/HDF5
+Required entry in slurm.conf:
+.RS
+.nf
+AcctGatherProfileType=acct_gather_profile/hdf5
+.fi
+.RE
+
 Options used for acct_gather_profile/hdf5 are as follows:
 
 .RS
@@ -155,11 +176,18 @@ Network (InfiniBand) data is collected.
 Task (I/O, Memory, ...) data is collected.
 
 .SH acct_gather_profile/InfluxDB
+Required entry in slurm.conf:
+.RS
+.nf
+AcctGatherProfileType=acct_gather_profile/influxdb
+.fi
+.RE
+
 The InfluxDB plugin provides the same information as the HDF5 plugin but will
 instead send information to the configured InfluxDB server.
 .P
 The InfluxDB plugin is designed against 1.x protocol of InfluxDB. Any site
-running a v2.x InfluxDB server will need to configure a v1.x compatiblity
+running a v2.x InfluxDB server will need to configure a v1.x compatibility
 endpoint along with the correct user and password authorization. Token
 authentication is not currently supported.
 .SS
@@ -203,7 +231,7 @@ Task (I/O, Memory, ...) data is collected.
 
 .TP
 \fBProfileInfluxDBHost\fR=<hostname>:<port>
-The hostname of the machine where the \fIinfluxd\fR instance is executed and
+The hostname of the machine where the \fIInfluxDB\fR instance is executed and
 the port used by the HTTP API. The port used by the HTTP API is the one
 configured through the bind-address influxdb.conf option in the [http] section.
 .BR
@@ -240,8 +268,8 @@ Information on how to install and configure InfluxDB and manage databases,
 retention policies and such is available on the official webpage.
 .LP
 Collected information is written from every compute node where a job runs to
-the \fIinfluxd\fR instance listening on the ProfileInfluxDBHost. In order to
-avoid overloading the \fIinfluxd\fR instance with incoming connection requests,
+the \fIInfluxDB\fR instance listening on the ProfileInfluxDBHost. In order to
+avoid overloading the \fIInfluxDB\fR instance with incoming connection requests,
 the plugin uses an internal buffer which is filled with samples. Once the buffer
 is full, a HTTP API write request is performed and the buffer is emptied to hold
 subsequent samples. A final request is also performed when a task ends even if
@@ -249,7 +277,7 @@ the buffer isn't full.
 .LP
 Failed HTTP API write requests are silently discarded. This means that collected
 profile information in the plugin buffer is lost if it can't be written to the
-\fIinfluxd\fR database for any reason.
+\fIInfluxDB\fR database for any reason.
 .LP
 Plugin messages are logged along with the slurmstepd logs to SlurmdLogFile. In
 order to troubleshoot any issues, it is recommended to temporarily increase
@@ -263,6 +291,13 @@ using the stored time series.
 
 .RS
 .SH acct_gather_interconnect/OFED
+Required entry in slurm.conf:
+.RS
+.nf
+AcctGatherInterconnectType=acct_gather_interconnect/ofed
+.fi
+.RE
+
 Options used for acct_gather_interconnect/ofed are as follows:
 
 .RS

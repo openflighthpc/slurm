@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "April 2021" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "June 2021" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -753,14 +753,19 @@ applies to job and step allocations.
 \fB\-E\fR, \fB\-\-preserve-env\fR
 Pass the current values of environment variables SLURM_JOB_NUM_NODES and
 SLURM_NTASKS through to the \fIexecutable\fR, rather than computing them
-from commandline parameters. This option applies to job allocations.
+from command line parameters. This option applies to job allocations.
 
 .TP
 \fB\-\-exact\fR
 Allow a step access to only the resources requested for the step.
 By default, all non-GRES resources on each node in the step allocation will be
-used. Note that no other parallel step will have access to those CPUs
-unless \-\-overlap is specified. This option applies to step allocations.
+used. This option only applies to step allocations.
+.br
+\fBNOTE\fR: Parallel steps will either be blocked or rejected until requested
+step resources are available unless \-\-overlap is specified. Job resources
+can be held after the completion of an srun command while Slurm does job
+cleanup. Step epilogs and/or SPANK plugins can further delay the release of
+step resources.
 
 .TP
 \fB\-\-epilog\fR=<\fIexecutable\fR>
@@ -871,9 +876,10 @@ See also the \fB\-\-gpus\-per\-node\fR, \fB\-\-gpus\-per\-socket\fR and
 .TP
 \fB\-\-gpu\-bind\fR=[verbose,]<\fItype\fR>
 Bind tasks to specific GPUs.
-By default every spawned task can access every GPU allocated to the job.
+By default every spawned task can access every GPU allocated to the step.
 If "verbose," is specified before <\fItype\fR>, then print out GPU binding
-information.
+debug information to the stderr of the tasks. GPU binding is ignored if there is
+only one task.
 
 Supported \fItype\fR options:
 .RS
@@ -2971,11 +2977,11 @@ See the description of the \fB\-\-cpu\-freq\fR option or the
 \fBSLURM_CPU_FREQ_REQ\fR input environment variable.
 .TP
 \fBSLURM_CPUS_ON_NODE\fR
-Count of processors available to the job on this node.
-Note the select/linear plugin allocates entire nodes to
+Number of CPUs available to the step on this node.
+\fBNOTE\fR: The \fBselect/linear\fR plugin allocates entire nodes to
 jobs, so the value indicates the total count of CPUs on the node.
-For the select/cons_res plugin, this number indicates the number of cores
-on this node allocated to the job.
+For the \fBselect/cons_res\fR and \fBcons/tres\fR plugins, this number
+indicates the number of CPUs on this node allocated to the step.
 .TP
 \fBSLURM_CPUS_PER_TASK\fR
 Number of cpus requested per task.
@@ -2988,6 +2994,10 @@ with \-m, \-\-distribution.
 \fBSLURM_GTIDS\fR
 Global task IDs running on this node.
 Zero origin and comma separated.
+It is read internally by pmi if Slurm was built with pmi support. Leaving
+the variable set may cause problems when using external packages from
+within the job (Abaqus and Ansys have been known to have problems when
+it is set - consult the appropriate documentation for 3rd party software).
 .TP
 \fBSLURM_HET_SIZE\fR
 Set to count of components in heterogeneous job.
@@ -2996,7 +3006,16 @@ Set to count of components in heterogeneous job.
 Account name associated of the job allocation.
 .TP
 \fBSLURM_JOB_CPUS_PER_NODE\fR
-Number of CPUS per node.
+Count of CPUs available to the job on the nodes in the allocation, using the
+format \fICPU_count\fR[(x\fInumber_of_nodes\fR)][,\fICPU_count\fR
+[(x\fInumber_of_nodes\fR)] ...].
+For example: SLURM_JOB_CPUS_PER_NODE='72(x2),36' indicates that on the
+first and second nodes (as listed by SLURM_JOB_NODELIST) the allocation
+has 72 CPUs, while the third node has 36 CPUs.
+\fBNOTE\fR: The \fBselect/linear\fR plugin allocates entire nodes to jobs, so
+the value indicates the total count of CPUs on allocated nodes. The
+\fBselect/cons_res\fR and \fBselect/cons_tres\fR plugins allocate individual
+CPUs to jobs, so this number indicates the number of CPUs allocated to the job.
 .TP
 \fBSLURM_JOB_DEPENDENCY\fR
 Set to value of the \-\-dependency option.
@@ -3336,7 +3355,7 @@ This simple example demonstrates the execution of different jobs on different
 nodes in the same srun.  You can do this for any number of nodes or any
 number of jobs.  The executables are placed on the nodes sited by the
 SLURM_NODEID env var.  Starting at 0 and going to the number specified on
-the srun commandline.
+the srun command line.
 
 .nf
 $ cat test.sh
