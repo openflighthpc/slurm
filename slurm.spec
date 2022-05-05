@@ -370,8 +370,8 @@ install -D -m644 etc/slurmd.service    %{buildroot}/%{_unitdir}/flight-slurmd.se
 install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/flight-slurmdbd.service
 
 # Install Flight Starter Profile Scripts
-install -D -m755 etc/profile.d/90-slurm.sh %{buildroot}/opt/flight/etc/profile.d/90-slurm.sh
-install -D -m755 etc/profile.d/90-slurm.csh %{buildroot}/opt/flight/etc/profile.d/90-slurm.csh
+install -D -m755 etc/profile.d/25-slurm.sh %{buildroot}/opt/flight/etc/profile.d/25-slurm.sh
+install -D -m755 etc/profile.d/25-slurm.csh %{buildroot}/opt/flight/etc/profile.d/25-slurm.csh
 
 %if %{with slurmrestd}
 install -D -m644 etc/slurmrestd.service  %{buildroot}/%{_unitdir}/flight-slurmrestd.service
