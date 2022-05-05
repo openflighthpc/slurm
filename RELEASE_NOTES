@@ -25,6 +25,8 @@ NOTE: If upgrading from < 20.11.
       be lost and set up AccountingStorageTRES with your GRES to be able to
       get equivalent information out of AllocTRES and ReqTRES after upgrade.
 
+NOTE: PMIx v1.1.4 and below are no longer supported.
+
 HIGHLIGHTS
 ==========
  -- Removed gres/mic plugin used to support Xeon Phi coprocessors.
@@ -121,6 +123,7 @@ HIGHLIGHTS
     distinguish IPv6 addresses. e.g. <node_name>:[<node_addr>]:<node_hostname>
  -- The job_container/tmpfs plugin now requires PrologFlags=contain to be set in
     slurm.conf.
+ -- Limit max_script_size to 512 MB.
 
 CONFIGURATION FILE CHANGES (see man appropriate man page for details)
 =====================================================================
@@ -142,6 +145,9 @@ CONFIGURATION FILE CHANGES (see man appropriate man page for details)
     files are placed in an accessible location, rather than /.)
  -- Added BcastParameters=send_libs and BcastExclude options.
  -- Remove the (incomplete) burst_buffer/generic plugin.
+ -- Make SelectTypeParameters=CR_Core_Memory default for cons_tres and cons_res.
+ -- Remove support for TaskAffinity=yes in cgroup.conf. Adding task/affinity to
+    TaskPlugins in slurm.conf is strongly recommended instead.
 
 COMMAND CHANGES (see man pages for details)
 ===========================================
@@ -149,8 +155,6 @@ COMMAND CHANGES (see man pages for details)
     to apply to the column headers as well as the printed fields.
  -- Invalidate multiple partition requests when using partition based
     associations.
- -- --cpus-per-task and --threads-per-core now imply --exact.
-    This fixes issues where steps would be allocated the wrong number of CPUs.
  -- scrontab - create the temporary file under the TMPDIR environment variable
     (if set), otherwise continue to use TmpFS as configured in slurm.conf.
  -- sbcast / srun --bcast - removed support for zlib compression. lz4 is vastly

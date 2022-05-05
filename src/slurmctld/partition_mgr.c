@@ -214,8 +214,10 @@ extern int build_part_bitmap(part_record_t *part_ptr)
 		part_ptr->total_cpus += node_ptr->config_ptr->cpus;
 		part_ptr->max_cpu_cnt = MAX(part_ptr->max_cpu_cnt,
 					    node_ptr->config_ptr->cpus);
-		part_ptr->max_core_cnt = MAX(part_ptr->max_core_cnt,
-					     node_ptr->config_ptr->cores);
+		part_ptr->max_core_cnt =
+				MAX(part_ptr->max_core_cnt,
+				    (node_ptr->config_ptr->cores *
+				     node_ptr->config_ptr->tot_sockets));
 
 		for (i = 0; i < node_ptr->part_cnt; i++) {
 			if (node_ptr->part_pptr[i] == part_ptr)
@@ -305,7 +307,10 @@ part_record_t *create_part_record(const char *name)
 	part_ptr->preempt_mode      = default_part.preempt_mode;
 	part_ptr->priority_job_factor = default_part.priority_job_factor;
 	part_ptr->priority_tier     = default_part.priority_tier;
+	part_ptr->resume_timeout    = default_part.resume_timeout;
 	part_ptr->state_up          = default_part.state_up;
+	part_ptr->suspend_time      = default_part.suspend_time;
+	part_ptr->suspend_timeout   = default_part.suspend_timeout;
 
 	if (part_max_priority) {
 		part_ptr->norm_priority =
@@ -901,6 +906,9 @@ void init_part_conf(void)
 	FREE_NULL_BITMAP(default_part.deny_qos_bitstr);
 	FREE_NULL_LIST(default_part.job_defaults_list);
 	FREE_NULL_BITMAP(default_part.node_bitmap);
+	default_part.resume_timeout = NO_VAL16;
+	default_part.suspend_time = NO_VAL;
+	default_part.suspend_timeout = NO_VAL16;
 
 	if (part_list)		/* delete defunct partitions */
 		list_flush(part_list);

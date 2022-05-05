@@ -900,10 +900,10 @@ int dump_all_job_state(void)
 		      new_file);
 		error_code = errno;
 	} else {
-		int pos = 0, nwrite, amount, rc;
+		int pos = 0, amount, rc;
 		char *data;
+		uint32_t nwrite = get_buf_offset(buffer);
 
-		nwrite = get_buf_offset(buffer);
 		data = (char *)get_buf_data(buffer);
 		high_buffer_size = MAX(nwrite, high_buffer_size);
 		while (nwrite > 0) {
@@ -1788,7 +1788,6 @@ static int _load_job_state(buf_t *buffer, uint16_t protocol_version)
 		safe_unpack64(&job_ptr->bit_flags, buffer);
 		job_ptr->bit_flags &= ~BACKFILL_TEST;
 		job_ptr->bit_flags &= ~BF_WHOLE_NODE_TEST;
-		job_ptr->bit_flags &= ~CRON_JOB;
 		safe_unpackstr_xmalloc(&tres_alloc_str,
 				       &name_len, buffer);
 		safe_unpackstr_xmalloc(&tres_fmt_alloc_str,
@@ -2017,7 +2016,6 @@ static int _load_job_state(buf_t *buffer, uint16_t protocol_version)
 		job_ptr->bit_flags = tmp32;
 		job_ptr->bit_flags &= ~BACKFILL_TEST;
 		job_ptr->bit_flags &= ~BF_WHOLE_NODE_TEST;
-		job_ptr->bit_flags &= ~CRON_JOB;
 		safe_unpackstr_xmalloc(&tres_alloc_str,
 				       &name_len, buffer);
 		safe_unpackstr_xmalloc(&tres_fmt_alloc_str,
@@ -3581,6 +3579,21 @@ static void _rebuild_part_name_list(job_record_t *job_ptr)
 }
 
 /*
+ * Set a requeued job to PENDING and COMPLETING if all the nodes are completed
+ * and the EpilogSlurmctld is not running
+ */
+static void _set_requeued_job_pending_completing(job_record_t *job_ptr)
+{
+	/* do this after the epilog complete, setting it here is too early */
+	//job_ptr->db_index = 0;
+	//job_ptr->details->submit_time = now;
+
+	job_ptr->job_state = JOB_PENDING;
+	if (job_ptr->node_cnt || job_ptr->epilog_running)
+		job_ptr->job_state |= JOB_COMPLETING;
+}
+
+/*
  * Kill job or job step
  *
  * IN job_step_kill_msg - msg with specs on which job/step to cancel.
@@ -3926,14 +3939,7 @@ extern int kill_job_by_front_end_name(char *node_name)
 				deallocate_nodes(job_ptr, false, suspended,
 						 false);
 
-				/* do this after the epilog complete,
-				 * setting it here is too early */
-				//job_ptr->db_index = 0;
-				//job_ptr->details->submit_time = now;
-
-				job_ptr->job_state = JOB_PENDING;
-				if (job_ptr->node_cnt)
-					job_ptr->job_state |= JOB_COMPLETING;
+				_set_requeued_job_pending_completing(job_ptr);
 
 				job_ptr->restart_cnt++;
 
@@ -4194,14 +4200,7 @@ extern int kill_running_job_by_node_name(char *node_name)
 				deallocate_nodes(job_ptr, false, suspended,
 						 false);
 
-				/* do this after the epilog complete,
-				 * setting it here is too early */
-				//job_ptr->db_index = 0;
-				//job_ptr->details->submit_time = now;
-
-				job_ptr->job_state = JOB_PENDING;
-				if (job_ptr->node_cnt)
-					job_ptr->job_state |= JOB_COMPLETING;
+				_set_requeued_job_pending_completing(job_ptr);
 
 				job_ptr->restart_cnt++;
 
@@ -4646,12 +4645,35 @@ extern job_record_t *job_array_split(job_record_t *job_ptr)
 	xfree(job_ptr_pend->array_recs->task_id_str);
 	if (job_ptr_pend->array_recs->task_cnt) {
 		job_ptr_pend->array_recs->task_cnt--;
+		if (job_ptr_pend->array_recs->task_cnt <= 1) {
+			/*
+			 * This is the last task of the job array, so we need to
+			 * set array_task_id to a specific task id. We also
+			 * need to call job_array_post_sched() to do cleanup
+			 * on the array, specifically how job_array_post_sched()
+			 * handles adding the job to the array_hash, otherwise
+			 * we'll get errors.
+			 */
+			i = bit_ffs(job_ptr_pend->array_recs->task_id_bitmap);
+			if (i < 0) {
+				error("%s: No tasks in task_id_bitmap for %pJ",
+				      __func__, job_ptr_pend);
+				job_ptr_pend->array_task_id = NO_VAL;
+			} else {
+				job_ptr_pend->array_task_id = i;
+				job_array_post_sched(job_ptr_pend);
+			}
+		} else {
+			/* Still have tasks left to split off in the array */
+			job_ptr_pend->array_task_id = NO_VAL;
+		}
 	} else {
 		error("%pJ array_recs->task_cnt underflow",
 		      job_ptr);
+		job_ptr_pend->array_task_id = NO_VAL;
 	}
-	job_ptr_pend->array_task_id = NO_VAL;
 
+	job_ptr_pend->batch_features = xstrdup(job_ptr->batch_features);
 	job_ptr_pend->batch_host = NULL;
 	job_ptr_pend->burst_buffer = xstrdup(job_ptr->burst_buffer);
 	job_ptr_pend->burst_buffer_state = xstrdup(job_ptr->burst_buffer_state);
@@ -4663,17 +4685,6 @@ extern job_record_t *job_array_split(job_record_t *job_ptr)
 
 	job_ptr_pend->front_end_ptr = NULL;
 	/* struct job_details *details;		*** NOTE: Copied below */
-	if (job_ptr->gres_list_req) {
-		job_ptr_pend->gres_list_req =
-			gres_job_state_dup(job_ptr->gres_list_req);
-	}
-	if (job_ptr->gres_list_alloc) {
-		job_ptr_pend->gres_list_alloc =
-			gres_job_state_dup(job_ptr->gres_list_alloc);
-	}
-	job_ptr_pend->gres_detail_cnt = 0;
-	job_ptr_pend->gres_detail_str = NULL;
-	job_ptr_pend->gres_used = NULL;
 
 	job_ptr_pend->limit_set.tres = xcalloc(slurmctld_tres_cnt,
 					       sizeof(uint16_t));
@@ -4708,6 +4719,8 @@ extern job_record_t *job_array_split(job_record_t *job_ptr)
 		       job_ptr->priority_array, i);
 	}
 	job_ptr_pend->resv_name = xstrdup(job_ptr->resv_name);
+	if (job_ptr->resv_list)
+		job_ptr_pend->resv_list = list_shallow_copy(job_ptr->resv_list);
 	job_ptr_pend->resp_host = xstrdup(job_ptr->resp_host);
 	if (job_ptr->select_jobinfo) {
 		job_ptr_pend->select_jobinfo =
@@ -4812,6 +4825,39 @@ extern job_record_t *job_array_split(job_record_t *job_ptr)
 	details_new->submit_line = xstrdup(job_details->submit_line);
 	details_new->work_dir = xstrdup(job_details->work_dir);
 	details_new->x11_magic_cookie = xstrdup(job_details->x11_magic_cookie);
+
+	if (job_ptr->gres_list_req) {
+		if (details_new->whole_node == 1) {
+			/*
+			 * We need to reset the gres_list to what was requested
+			 * instead of what was given exclusively.
+			 */
+			job_ptr_pend->gres_list_req = NULL;
+			(void)gres_job_state_validate(
+				job_ptr_pend->cpus_per_tres,
+				job_ptr_pend->tres_freq,
+				job_ptr_pend->tres_per_job,
+				job_ptr_pend->tres_per_node,
+				job_ptr_pend->tres_per_socket,
+				job_ptr_pend->tres_per_task,
+				job_ptr_pend->mem_per_tres,
+				&details_new->num_tasks,
+				&details_new->min_nodes,
+				&details_new->max_nodes,
+				&details_new->ntasks_per_node,
+				&details_new->mc_ptr->ntasks_per_socket,
+				&details_new->mc_ptr->sockets_per_node,
+				&details_new->orig_cpus_per_task,
+				&details_new->ntasks_per_tres,
+				&job_ptr_pend->gres_list_req);
+		} else
+			job_ptr_pend->gres_list_req =
+				gres_job_state_dup(job_ptr->gres_list_req);
+	}
+	job_ptr_pend->gres_list_alloc = NULL;
+	job_ptr_pend->gres_detail_cnt = 0;
+	job_ptr_pend->gres_detail_str = NULL;
+	job_ptr_pend->gres_used = NULL;
 
 	if (job_ptr->fed_details) {
 		add_fed_job_info(job_ptr);
@@ -5336,6 +5382,9 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 		(job_specs->het_job_offset != NO_VAL) || defer_sched;
 
 	no_alloc = no_alloc || (bb_g_job_test_stage_in(job_ptr, no_alloc) != 1);
+
+	no_alloc = no_alloc || (!job_ptr->resv_name &&
+				get_magnetic_resv_count());
 
 	error_code = _select_nodes_parts(job_ptr, no_alloc, NULL, err_msg);
 	if (!test_only) {
@@ -6101,6 +6150,7 @@ static void _signal_batch_job(job_record_t *job_ptr, uint16_t signal,
 	signal_tasks_msg->signal = signal;
 
 	agent_args->msg_args = signal_tasks_msg;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -8758,7 +8808,7 @@ extern bool valid_tres_cnt(char *tres)
 		}
 
 		/* gres doesn't have to be a TRES to be valid */
-		if (!xstrcmp(tok, "gres")) {
+		if (sep && !xstrcmp(tok, "gres")) {
 			/* We only want the first part of a gres for this */
 			if ((tok = strchr(sep, ':')))
 				tok[0] = '\0';
@@ -8873,6 +8923,9 @@ extern void job_config_fini(job_record_t *job_ptr)
 	} else {
 		_het_job_time_limit_incr(job_ptr, 0);
 	}
+
+	if (job_ptr->alias_list && !xstrcmp(job_ptr->alias_list, "TBD"))
+		set_job_alias_list(job_ptr);
 
 	/*
 	 * Request asynchronous launch of a prolog for a non-batch job.
@@ -10011,6 +10064,8 @@ extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
 	_foreach_pack_job_info_t pack_info = {0};
 	buf_t *buffer;
 	assoc_mgr_lock_t locks = { .user = READ_LOCK, .qos = READ_LOCK };
+	ListIterator itr;
+	job_record_t *job_ptr = NULL;
 
 	buffer_ptr[0] = NULL;
 	*buffer_size = 0;
@@ -10033,7 +10088,11 @@ extern void pack_all_jobs(char **buffer_ptr, int *buffer_size,
 	assoc_mgr_fill_in_user(acct_db_conn, &pack_info.user_rec,
 			       accounting_enforce, NULL, true);
 	pack_info.privileged = validate_operator_user_rec(&pack_info.user_rec);
-	list_for_each(job_list, _pack_job, &pack_info);
+	itr = list_iterator_create(job_list);
+	while ((job_ptr = list_next(itr))) {
+		_pack_job(job_ptr, &pack_info);
+	}
+	list_iterator_destroy(itr);
 	assoc_mgr_unlock(&locks);
 
 	/* put the real record count in the message body header */
@@ -10150,6 +10209,7 @@ extern int pack_one_job(char **buffer_ptr, int *buffer_size,
 	assoc_mgr_lock_t locks = { .qos = READ_LOCK, .user = READ_LOCK };
 	slurmdb_user_rec_t user_rec = { 0 };
 	bool hide_job = false;
+	bool valid_operator;
 
 	buffer_ptr[0] = NULL;
 	*buffer_size = 0;
@@ -10163,7 +10223,7 @@ extern int pack_one_job(char **buffer_ptr, int *buffer_size,
 
 	job_ptr = find_job_record(job_id);
 
-	if (!validate_operator_user_rec(&user_rec))
+	if (!(valid_operator = validate_operator_user_rec(&user_rec)))
 		hide_job = _hide_job_user_rec(job_ptr, &user_rec, show_flags);
 
 	if (job_ptr && job_ptr->het_job_list) {
@@ -10199,12 +10259,13 @@ extern int pack_one_job(char **buffer_ptr, int *buffer_size,
 			if ((job_ptr->job_id == job_id) && packed_head) {
 				;	/* Already packed */
 			} else if (job_ptr->array_job_id == job_id) {
-				if (_hide_job_user_rec(
-					    job_ptr, &user_rec, show_flags))
-					break;
-				pack_job(job_ptr, show_flags, buffer,
-					 protocol_version, uid, true);
-				jobs_packed++;
+				if (valid_operator ||
+				    !_hide_job_user_rec(job_ptr, &user_rec,
+							show_flags)) {
+					pack_job(job_ptr, show_flags, buffer,
+						 protocol_version, uid, true);
+					jobs_packed++;
+				}
 			}
 			job_ptr = job_ptr->job_array_next_j;
 		}
@@ -12489,8 +12550,25 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_specs,
 		if (!IS_JOB_PENDING(job_ptr) || !detail_ptr) {
 			error_code = ESLURM_JOB_NOT_PENDING;
 			goto fini;
-		} else
+		} else if (detail_ptr->accrue_time) {
+			uint64_t bit_flags = job_ptr->bit_flags;
 			acct_policy_remove_accrue_time(job_ptr, false);
+			/*
+			 * Set the accrue_time to 'now' since we are not
+			 * removing this job, but resetting the time
+			 * instead. Since acct_policy_remove_accrue_time()
+			 * will set this to 0 which will cause the next time
+			 * through acct_policy_handle_accrue_time() to set
+			 * things back to the original time thus making it as if
+			 * nothing happened here.
+			 *
+			 * We also reset the bit_flags to be the same as it was
+			 * before so we don't loose JOB_ACCRUE_OVER if set
+			 * beforehand.
+			 */
+			job_ptr->bit_flags = bit_flags;
+			detail_ptr->accrue_time = now;
+		}
 	}
 
 	/*
@@ -12733,13 +12811,14 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_specs,
 			job_specs->min_nodes;
 		uint32_t num_cpus = job_specs->min_cpus != NO_VAL ?
 			job_specs->min_cpus :
-			job_ptr->tres_req_cnt[TRES_ARRAY_CPU];
+			IS_JOB_PENDING(job_ptr) ?
+			job_ptr->tres_req_cnt[TRES_ARRAY_CPU] :
+			job_ptr->tres_alloc_cnt[TRES_ARRAY_CPU];
 		uint32_t num_tasks = job_specs->num_tasks != NO_VAL ?
 			job_specs->num_tasks : detail_ptr->num_tasks;
 
 		if (!num_tasks) {
-			num_tasks = detail_ptr->min_nodes;
-
+			num_tasks = job_specs->min_nodes;
 		} else if (num_tasks < job_specs->min_nodes) {
 			info("%s: adjusting num_tasks (prev: %u) to be at least min_nodes: %u",
 			     __func__, num_tasks, job_specs->min_nodes);
@@ -14806,8 +14885,7 @@ extern int update_job_str(slurm_msg_t *msg, uid_t uid)
 
 reply:
 	if ((rc != ESLURM_JOB_SETTING_DB_INX) && (msg->conn_fd >= 0)) {
-		slurm_msg_t_init(&resp_msg);
-		resp_msg.protocol_version = msg->protocol_version;
+		response_init(&resp_msg, msg);
 		if (resp_array) {
 			resp_array_msg = _resp_array_xlate(resp_array, job_id);
 			resp_msg.msg_type  = RESPONSE_JOB_ARRAY_ERRORS;
@@ -14817,7 +14895,6 @@ reply:
 			rc_msg.return_code = rc;
 			resp_msg.data      = &rc_msg;
 		}
-		resp_msg.conn = msg->conn;
 		slurm_send_node_msg(msg->conn_fd, &resp_msg);
 
 		if (resp_array_msg) {
@@ -14897,14 +14974,14 @@ static void _send_job_kill(job_record_t *job_ptr)
 			error("%s: %pJ allocated no nodes to be killed on",
 			      __func__, job_ptr);
 		}
-		xfree(kill_job->nodes);
-		xfree(kill_job);
+		slurm_free_kill_job_msg(kill_job);
 		hostlist_destroy(agent_args->hostlist);
 		xfree(agent_args);
 		return;
 	}
 
 	agent_args->msg_args = kill_job;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -14921,6 +14998,7 @@ extern void job_pre_resize_acctg(job_record_t *job_ptr)
 		jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 
 	job_ptr->job_state |= JOB_RESIZING;
+	job_ptr->resize_time = time(NULL);
 	/* NOTE: job_completion_logger() calls
 	 *	 acct_policy_remove_job_submit() */
 	job_completion_logger(job_ptr, false);
@@ -14936,8 +15014,6 @@ extern void job_pre_resize_acctg(job_record_t *job_ptr)
 /* Record accounting information for a job immediately after changing size */
 extern void job_post_resize_acctg(job_record_t *job_ptr)
 {
-	time_t org_submit = job_ptr->details->submit_time;
-
 	/*
 	 * NOTE: The RESIZING FLAG needed to be set with job_pre_resize_acctg()
 	 * the assert is here to make sure we code it that way.
@@ -14949,15 +15025,16 @@ extern void job_post_resize_acctg(job_record_t *job_ptr)
 	acct_policy_job_begin(job_ptr);
 	job_claim_resv(job_ptr);
 
-	if (job_ptr->resize_time)
-		job_ptr->details->submit_time = job_ptr->resize_time;
+	/*
+	 * Set db_index to NO_VAL64 not 0 so the dbd plugin won't also
+	 * trying setting this.  See _set_db_inx_thread().
+	 * This should also be protected by resize_time being set already in
+	 * job_pre_resize_acctg(), but why not?
+	 */
+	job_ptr->db_index = NO_VAL64;
 
-	job_ptr->resize_time = time(NULL);
-
-	/* FIXME: see if this can be changed to job_start_direct() */
 	jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 
-	job_ptr->details->submit_time = org_submit;
 	job_ptr->job_state &= (~JOB_RESIZING);
 
 	/*
@@ -15309,6 +15386,7 @@ extern void abort_job_on_node(uint32_t job_id, job_record_t *job_ptr,
 	agent_info->msg_type	= REQUEST_ABORT_JOB;
 	agent_info->msg_args	= kill_req;
 
+	set_agent_arg_r_uid(agent_info, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_info);
 }
 
@@ -15379,6 +15457,7 @@ extern void abort_job_on_nodes(job_record_t *job_ptr,
 		agent_info->msg_type	= REQUEST_ABORT_JOB;
 		agent_info->msg_args	= kill_req;
 		agent_info->protocol_version = protocol_version;
+		set_agent_arg_r_uid(agent_info, SLURM_AUTH_UID_ANY);
 		agent_queue_request(agent_info);
 		bit_free(tmp_node_bitmap);
 	}
@@ -15434,6 +15513,7 @@ extern void kill_job_on_node(job_record_t *job_ptr,
 	agent_info->msg_type	= REQUEST_TERMINATE_JOB;
 	agent_info->msg_args	= kill_req;
 
+	set_agent_arg_r_uid(agent_info, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_info);
 }
 
@@ -15938,6 +16018,23 @@ void batch_requeue_fini(job_record_t *job_ptr)
 	if (IS_JOB_COMPLETING(job_ptr) ||
 	    !IS_JOB_PENDING(job_ptr) || !job_ptr->batch_flag)
 		return;
+	/*
+	 * If this job doesn't have db_index yet then we need to send accounting
+	 * information now before setting up the requeued job; otherwise, we'll
+	 * lose information about the original job.
+	 */
+	if (!job_ptr->db_index || (job_ptr->db_index == NO_VAL64)) {
+		/*
+		 * At this point we know the job isn't in a completing state,
+		 * but there is a block in jobacct_storage_g_job_start() that
+		 * will zero out the start time if this state exists.
+		 * So we can just add COMPLETING to the state and then remove it
+		 * afterwards so we don't have that happen.
+		 */
+		job_ptr->job_state |= JOB_COMPLETING;
+		jobacct_storage_g_job_start(acct_db_conn, job_ptr);
+		job_ptr->job_state &= ~JOB_COMPLETING;
+	}
 
 	info("Requeuing %pJ", job_ptr);
 
@@ -16160,7 +16257,7 @@ extern void job_completion_logger(job_record_t *job_ptr, bool requeue)
 	_job_array_comp(job_ptr, was_running, requeue);
 
 	if (!IS_JOB_RESIZING(job_ptr) &&
-	    !IS_JOB_PENDING(job_ptr)  &&
+	    (!IS_JOB_PENDING(job_ptr) || requeue) &&
 	    !IS_JOB_REVOKED(job_ptr)  &&
 	    ((job_ptr->array_task_id == NO_VAL) ||
 	     (job_ptr->mail_type & MAIL_ARRAY_TASKS) ||
@@ -16217,30 +16314,24 @@ extern void job_completion_logger(job_record_t *job_ptr, bool requeue)
 			}
 		} else {
 			base_state = job_ptr->job_state & JOB_STATE_BASE;
-			if ((base_state == JOB_COMPLETE) ||
-			    (base_state == JOB_CANCELLED)) {
-				if (requeue &&
-				    (job_ptr->mail_type & MAIL_JOB_REQUEUE)) {
-					mail_job_info(job_ptr,
-						      MAIL_JOB_REQUEUE);
-				} else if (job_ptr->mail_type & MAIL_JOB_END) {
-					mail_job_info(job_ptr, MAIL_JOB_END);
-				}
-			} else {	/* JOB_FAILED, JOB_TIMEOUT, etc. */
-				if (job_ptr->mail_type & MAIL_JOB_FAIL)
-					mail_job_info(job_ptr, MAIL_JOB_FAIL);
-				else if (job_ptr->mail_type & MAIL_JOB_END)
-					mail_job_info(job_ptr, MAIL_JOB_END);
-			}
+			if ((job_ptr->mail_type & MAIL_JOB_FAIL) &&
+			    (base_state >= JOB_FAILED) &&
+			    ((base_state != JOB_PREEMPTED) || !requeue))
+				mail_job_info(job_ptr, MAIL_JOB_FAIL);
+
+			if (requeue &&
+			    (job_ptr->mail_type & MAIL_JOB_REQUEUE))
+				mail_job_info(job_ptr,
+					      MAIL_JOB_REQUEUE);
+
+			if ((job_ptr->mail_type & MAIL_JOB_END) &&
+			    ((base_state == JOB_COMPLETE) ||
+			     (base_state == JOB_CANCELLED)))
+				mail_job_info(job_ptr, MAIL_JOB_END);
 		}
 	}
 
 	jobcomp_g_write(job_ptr);
-
-	/* When starting the resized job everything is taken care of
-	 * elsewhere, so don't call it here. */
-	if (IS_JOB_RESIZING(job_ptr))
-		return;
 
 	if (!with_slurmdbd && !job_ptr->db_index)
 		jobacct_storage_g_job_start(acct_db_conn, job_ptr);
@@ -16477,6 +16568,7 @@ static void _signal_job(job_record_t *job_ptr, int signal, uint16_t flags)
 	}
 
 	agent_args->msg_args = signal_job_msg;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -16556,6 +16648,7 @@ static void _suspend_job(job_record_t *job_ptr, uint16_t op, bool indf_susp)
 	}
 
 	agent_args->msg_args = sus_ptr;
+	set_agent_arg_r_uid(agent_args, SLURM_AUTH_UID_ANY);
 	agent_queue_request(agent_args);
 	return;
 }
@@ -16921,6 +17014,7 @@ reply:
 		memset(&rc_msg, 0, sizeof(rc_msg));
 		rc_msg.return_code = rc;
 		resp_msg.data      = &rc_msg;
+		slurm_msg_set_r_uid(&resp_msg, uid);
 		slurm_send_node_msg(conn_fd, &resp_msg);
 	}
 	return rc;
@@ -17071,6 +17165,7 @@ reply:
 			rc_msg.return_code = rc;
 			resp_msg.data      = &rc_msg;
 		}
+		slurm_msg_set_r_uid(&resp_msg, uid);
 		slurm_send_node_msg(conn_fd, &resp_msg);
 
 		if (resp_array_msg) {
@@ -17214,7 +17309,7 @@ static int _job_requeue_op(uid_t uid, job_record_t *job_ptr, bool preempt,
 		if (preempt) {
 			job_ptr->job_state = JOB_PREEMPTED;
 			build_cg_bitmap(job_ptr);
-			job_completion_logger(job_ptr, false);
+			job_completion_logger(job_ptr, true);
 			job_ptr->job_state = JOB_REQUEUE;
 		} else {
 			job_ptr->job_state = JOB_REQUEUE;
@@ -17245,13 +17340,7 @@ static int _job_requeue_op(uid_t uid, job_record_t *job_ptr, bool preempt,
 		job_ptr->job_state &= (~JOB_COMPLETING);
 	}
 
-	/* do this after the epilog complete, setting it here is too early */
-	//job_ptr->db_index = 0;
-	//job_ptr->details->submit_time = now;
-
-	job_ptr->job_state = JOB_PENDING;
-	if (job_ptr->node_cnt)
-		job_ptr->job_state |= JOB_COMPLETING;
+	_set_requeued_job_pending_completing(job_ptr);
 
 	/*
 	 * Mark the origin job as requeuing. Will finish requeuing fed job
@@ -17804,6 +17893,7 @@ reply:	FREE_NULL_LIST(top_job_list);
 		memset(&rc_msg, 0, sizeof(rc_msg));
 		rc_msg.return_code = rc;
 		resp_msg.data      = &rc_msg;
+		slurm_msg_set_r_uid(&resp_msg, uid);
 		slurm_send_node_msg(conn_fd, &resp_msg);
 	}
 
@@ -18696,6 +18786,8 @@ extern void set_remote_working_response(
 
 	if (job_ptr->node_cnt && req_cluster &&
 	    xstrcmp(slurm_conf.cluster_name, req_cluster)) {
+		int i, i_first, i_last, addr_index = 0;
+
 		if (job_ptr->fed_details &&
 		    fed_mgr_cluster_rec) {
 			resp->working_cluster_rec = fed_mgr_cluster_rec;
@@ -18705,8 +18797,18 @@ extern void set_remote_working_response(
 
 		resp->node_addr = xcalloc(job_ptr->node_cnt,
 					  sizeof(slurm_addr_t));
-		memcpy(resp->node_addr, job_ptr->node_addr,
-		       (sizeof(slurm_addr_t) * job_ptr->node_cnt));
+		i_first = bit_ffs(job_ptr->node_bitmap);
+		if (i_first >= 0)
+			i_last = bit_fls(job_ptr->node_bitmap);
+		else
+			i_last = -2;
+		for (i = i_first; i <= i_last; i++) {
+			if (!bit_test(job_ptr->node_bitmap, i))
+				continue;
+			slurm_conf_get_addr(
+				node_record_table_ptr[i].name,
+				&resp->node_addr[addr_index++], 0);
+		}
 	}
 }
 

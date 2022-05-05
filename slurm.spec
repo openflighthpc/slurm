@@ -1,5 +1,5 @@
 Name:		slurm
-Version:	21.08.0
+Version:	21.08.8
 %define rel	1
 Release:	%{rel}.flight1%{?dist}
 Summary:	Slurm Workload Manager
@@ -136,12 +136,12 @@ BuildRequires: numactl-devel
 
 %if %{with pmix} && "%{_with_pmix}" == "--with-pmix"
 BuildRequires: pmix
-%global pmix_version %(rpm -q pmix --qf "%%{VERSION}")
+%global pmix_version %(rpm -q pmix --qf "%{RPMTAG_VERSION}")
 %endif
 
 %if %{with ucx} && "%{_with_ucx}" == "--with-ucx"
 BuildRequires: ucx-devel
-%global ucx_version %(rpm -q ucx-devel --qf "%%{VERSION}")
+%global ucx_version %(rpm -q ucx-devel --qf "%{RPMTAG_VERSION}")
 %endif
 
 #  Allow override of sysconfdir via _slurm_sysconfdir.

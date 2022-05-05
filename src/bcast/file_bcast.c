@@ -174,6 +174,7 @@ static int _file_bcast(struct bcast_parameters *params,
 	slurm_msg_t msg;
 
 	slurm_msg_t_init(&msg);
+	slurm_msg_set_r_uid(&msg, SLURM_AUTH_UID_ANY);
 	msg.data = bcast_msg;
 	msg.flags = USE_BCAST_NETWORK;
 	msg.forward.tree_width = params->fanout;
@@ -565,7 +566,7 @@ static List _fill_in_excluded_paths(struct bcast_parameters *params)
 	tok = strtok_r(tmp_str, ",", &saveptr);
 	while (tok) {
 		if (tok[0] != '/')
-			error("Ignorning non-absolute excluded path: '%s'",
+			error("Ignoring non-absolute excluded path: '%s'",
 			      tok);
 		else
 			list_append(excl_paths, xstrdup(tok));

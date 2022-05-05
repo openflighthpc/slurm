@@ -149,13 +149,12 @@
           {
             "name": "job_id",
             "in": "path",
-            "description": "Slurm Job ID",
+            "description": "Slurm JobID",
             "required": true,
             "style": "simple",
             "explode": false,
             "schema": {
-              "type": "integer",
-              "format": "int64"
+              "type": "string"
             }
           }
         ],
@@ -176,7 +175,7 @@
             }
           },
           "default": {
-            "description": "job not found"
+            "description": "job matching JobId not found"
           }
         }
       },
@@ -195,8 +194,7 @@
             "style": "simple",
             "explode": false,
             "schema": {
-              "type": "integer",
-              "format": "int64"
+              "type": "string"
             }
           }
         ],
@@ -240,8 +238,7 @@
             "style": "simple",
             "explode": false,
             "schema": {
-              "type": "integer",
-              "format": "int64"
+              "type": "string"
             }
           },
           {
@@ -1761,7 +1758,7 @@
             "type": "string",
             "description": "Charge resources used by this job to specified account."
           },
-          "account_gather_freqency": {
+          "account_gather_frequency": {
             "type": "string",
             "description": "Define the job accounting and profiling sampling intervals."
           },
@@ -1789,7 +1786,7 @@
             "type": "string",
             "description": "Burst buffer specification."
           },
-          "cluster_constraints": {
+          "cluster_constraint": {
             "type": "string",
             "description": "Specifies features that a federated cluster must have to have a sibling job submitted to it."
           },

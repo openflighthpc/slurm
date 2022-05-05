@@ -518,13 +518,15 @@ static void _build_bitmaps(void)
 		      NODE_RESUME))) {
 			if ((drain_flag == 0) &&
 			    (!IS_NODE_NO_RESPOND(node_ptr)))
-				make_node_avail(i);
+				make_node_avail(node_ptr);
 			bit_set(up_node_bitmap, i);
 		}
 		if (IS_NODE_POWERED_DOWN(node_ptr))
 			bit_set(power_node_bitmap, i);
-		if (IS_NODE_POWERING_DOWN(node_ptr))
+		if (IS_NODE_POWERING_DOWN(node_ptr)) {
+			bit_set(power_node_bitmap, i);
 			bit_clear(avail_node_bitmap, i);
+		}
 		if (IS_NODE_FUTURE(node_ptr))
 			bit_set(future_node_bitmap, i);
 
@@ -1883,7 +1885,7 @@ static int _restore_node_state(int recover,
 
 	for (i=0, old_node_ptr=old_node_table_ptr; i<old_node_record_count;
 	     i++, old_node_ptr++) {
-		bool drain_flag = false, down_flag = false;
+		bool cloud_flag = false, drain_flag = false, down_flag = false;
 		dynamic_plugin_data_t *tmp_select_nodeinfo;
 
 		node_ptr  = find_node_record(old_node_ptr->name);
@@ -1891,6 +1893,8 @@ static int _restore_node_state(int recover,
 			continue;
 
 		node_ptr->not_responding = false;
+		if (IS_NODE_CLOUD(node_ptr))
+			cloud_flag = true;
 		if (IS_NODE_DOWN(node_ptr))
 			down_flag = true;
 		if (IS_NODE_DRAIN(node_ptr))
@@ -1902,10 +1906,18 @@ static int _restore_node_state(int recover,
 			node_ptr->node_state =
 				(node_ptr->node_state     & NODE_STATE_BASE) |
 				(old_node_ptr->node_state & NODE_STATE_FLAGS);
+			/*
+			 * If node was FUTURE, then it wasn't up so mark it as
+			 * powered_down.
+			 */
+			if (cloud_flag)
+				node_ptr->node_state |= NODE_STATE_POWERED_DOWN;
 		} else {
 			node_ptr->node_state = old_node_ptr->node_state;
 		}
 
+		if (cloud_flag)
+			node_ptr->node_state |= NODE_STATE_CLOUD;
 		if (down_flag) {
 			node_ptr->node_state &= NODE_STATE_FLAGS;
 			node_ptr->node_state |= NODE_STATE_DOWN;
@@ -2455,7 +2467,7 @@ static int _update_preempt(uint16_t old_preempt_mode)
 		return SLURM_SUCCESS;
 	}
 
-	if (old_preempt_mode == PREEMPT_MODE_GANG) {
+	if (old_preempt_mode & PREEMPT_MODE_GANG) {
 		info("Disabling gang scheduling");
 		gs_wake_jobs();
 		gs_fini();
@@ -2710,11 +2722,27 @@ static void _restore_job_accounting(void)
 	list_iterator_destroy(job_iterator);
 }
 
+static int _init_dep_job_ptr(void *object, void *arg)
+{
+	depend_spec_t *dep_ptr = (depend_spec_t *)object;
+	dep_ptr->job_ptr = find_job_array_rec(dep_ptr->job_id,
+					      dep_ptr->array_task_id);
+	return SLURM_SUCCESS;
+}
+
 /*
- * NOTE: Can be removed in/after 21.08 because the controller won't need to
+ * NOTE:
+ * Most of this can be removed in/after 21.08 because slurmctld won't need to
  * build details->depend_list from the dependency string anymore because in
  * 20.02 the depend_list is state saved and doesn't rely on the dependency
  * string anymore.
+ * However, we will still need to keep the call to _init_dep_job_ptr.
+ * test_job_dependency() initializes dep_ptr->job_ptr but in
+ * case a job's dependency is updated before test_job_dependency() is called,
+ * dep_ptr->job_ptr needs to be initialized for all jobs so that we can test
+ * for circular dependencies properly. Otherwise, if slurmctld is restarted,
+ * then immediately a job dependency is updated before test_job_dependency()
+ * is called, it is possible to create a circular dependency.
  */
 extern int restore_job_dependencies(void)
 {
@@ -2729,9 +2757,13 @@ extern int restore_job_dependencies(void)
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = list_next(job_iterator))) {
 		if ((job_ptr->details == NULL) ||
-		    (job_ptr->details->dependency == NULL) ||
-		    job_ptr->details->depend_list)
+		    (job_ptr->details->dependency == NULL))
 			continue;
+		if (job_ptr->details->depend_list) {
+			list_for_each(job_ptr->details->depend_list,
+				      _init_dep_job_ptr, NULL);
+			continue;
+		}
 		new_depend = job_ptr->details->dependency;
 		job_ptr->details->dependency = NULL;
 		rc = update_job_dependency(job_ptr, new_depend);

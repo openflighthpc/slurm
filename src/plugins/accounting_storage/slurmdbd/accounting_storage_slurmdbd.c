@@ -127,6 +127,7 @@ static void _partial_free_dbd_job_start(void *object)
 		xfree(req->account);
 		xfree(req->array_task_str);
 		xfree(req->constraints);
+		xfree(req->container);
 		xfree(req->env);
 		xfree(req->mcs_label);
 		xfree(req->name);
@@ -152,6 +153,7 @@ static void _partial_destroy_dbd_job_start(void *object)
 	}
 }
 
+/* Anything allocated here must be freed in _partial_free_dbd_job_start() */
 static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 				job_record_t *job_ptr)
 {
@@ -251,8 +253,10 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 			uint32_t env_size = 0;
 			char **env = get_job_env(job_ptr, &env_size);
 			if (env) {
+				char *pos = NULL;
 				for (int i = 0; i < env_size; i++)
-					xstrfmtcat(req->env, "%s\n", env[i]);
+					xstrfmtcatat(req->env, &pos,
+						     "%s\n", env[i]);
 				xfree(env[0]);
 				xfree(env);
 			}
@@ -278,6 +282,12 @@ static void *_set_db_inx_thread(void *no_data)
 		{ NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	/* DEF_TIMERS; */
 
+	/*
+	 * We only want to destory the pointer here not the contents so call
+	 * special function _partial_destroy_dbd_job_start.
+	 */
+	List local_job_list = list_create(_partial_destroy_dbd_job_start);
+
 #if HAVE_SYS_PRCTL_H
 	if (prctl(PR_SET_NAME, "dbinx", NULL, NULL, NULL) < 0) {
 		error("cannot set my name to dbinx: %m");
@@ -287,7 +297,6 @@ static void *_set_db_inx_thread(void *no_data)
 	(void) pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
 	while (!plugin_shutdown) {
-		List local_job_list = NULL;
 		/* START_TIMER; */
 		/* info("starting db_thread"); */
 		slurm_mutex_lock(&db_inx_lock);
@@ -347,14 +356,6 @@ static void *_set_db_inx_thread(void *no_data)
 				continue;
 			}
 
-			/*
-			 * We only want to destory the pointer
-			 * here not the contents so call special function
-			 * _partial_destroy_dbd_job_start.
-			 */
-			if (!local_job_list)
-				local_job_list = list_create(
-					_partial_destroy_dbd_job_start);
 			list_append(local_job_list, req);
 			/* Just so we don't have a crazy
 			   amount of messages at once.
@@ -365,7 +366,7 @@ static void *_set_db_inx_thread(void *no_data)
 		list_iterator_destroy(itr);
 		unlock_slurmctld(job_read_lock);
 
-		if (local_job_list) {
+		while (list_count(local_job_list)) {
 			persist_msg_t req = {0}, resp = {0};
 			dbd_list_msg_t send_msg, *got_msg;
 			int rc = SLURM_SUCCESS;
@@ -376,9 +377,9 @@ static void *_set_db_inx_thread(void *no_data)
 
 			req.msg_type = DBD_SEND_MULT_JOB_START;
 			req.data = &send_msg;
+
 			rc = dbd_conn_send_recv(
 				SLURM_PROTOCOL_VERSION, &req, &resp);
-			FREE_NULL_LIST(local_job_list);
 			if (rc != SLURM_SUCCESS) {
 				error("DBD_SEND_MULT_JOB_START "
 				      "failure: %m");
@@ -427,10 +428,25 @@ static void *_set_db_inx_thread(void *no_data)
 				list_iterator_destroy(itr);
 				unlock_slurmctld(job_write_lock);
 
+				/*
+				 * Assume the returned number of elements is
+				 * equivalent to the number that was sent out,
+				 * and thus those have completed processing
+				 * and need to be dropped.
+				 *
+				 * This is due to slurm_pack_list_until()
+				 * potentially sending only a part of the List
+				 * to avoid creating an overly-large RPC that
+				 * cannot be processed the SlurmDBD.
+				 */
+				list_flush_max(local_job_list,
+					       list_count(got_msg->my_list));
+
 				slurmdbd_free_list_msg(got_msg);
 			}
 
 			if (reset) {
+				list_flush(local_job_list);
 				lock_slurmctld(job_read_lock);
 				/* USE READ LOCK, SEE ABOVE on first
 				 * read lock */
@@ -469,6 +485,8 @@ static void *_set_db_inx_thread(void *no_data)
 
 		slurm_mutex_unlock(&db_inx_lock);
 	}
+
+	FREE_NULL_LIST(local_job_list);
 
 	return NULL;
 }
@@ -2795,7 +2813,7 @@ extern int jobacct_storage_p_step_start(void *db_conn, step_record_t *step_ptr)
 	memset(&req, 0, sizeof(dbd_step_start_msg_t));
 
 	req.assoc_id    = step_ptr->job_ptr->assoc_id;
-	req.container   = xstrdup(step_ptr->container);
+	req.container   = step_ptr->container;
 	req.db_index    = step_ptr->job_ptr->db_index;
 	req.name        = step_ptr->name;
 	req.nodes       = node_list;

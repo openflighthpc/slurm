@@ -108,7 +108,7 @@ static bitstr_t	*saved_gpus = NULL;
  * plugin_version - an unsigned 32-bit integer containing the Slurm version
  * (major.minor.micro combined into a single number).
  */
-const char	*plugin_name		= "GPU NVML plugin";
+const char plugin_name[] = "GPU NVML plugin";
 const char	plugin_type[]		= "gpu/nvml";
 const uint32_t	plugin_version		= SLURM_VERSION_NUMBER;
 
@@ -603,10 +603,11 @@ static void _get_nearest_freq(unsigned int *freq, unsigned int freqs_size,
 
 	/* check for frequency, and round up if no exact match */
 	for (i = 0; i < freqs_size - 1;) {
-		if (*freq == freqs[i])
+		if (*freq == freqs[i]) {
 			// No change necessary
 			debug2("No change necessary. Freq: %u MHz", *freq);
 			return;
+		}
 		i++;
 		/*
 		 * Step down to next element to round up.
@@ -1674,6 +1675,8 @@ static List _get_system_gpu_list_nvml(node_config_load_t *node_config)
 					break;
 			}
 			debug2("    MIG count: %u", mig_count);
+			if (mig_count == 0)
+				fatal("MIG mode is enabled, but no MIG devices were found. Please either create MIG instances, disable MIG mode, remove AutoDetect=nvml, or remove GPUs from the configuration completely.");
 
 			for (unsigned int j = 0; j < mig_count; j++) {
 				nvml_mig_t nvml_mig = { 0 };

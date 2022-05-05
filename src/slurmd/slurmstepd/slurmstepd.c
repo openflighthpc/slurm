@@ -78,19 +78,23 @@
 #include "src/slurmd/slurmstepd/slurmstepd.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
-static int _init_from_slurmd(int sock, char **argv, slurm_addr_t **_cli,
+static int _init_from_slurmd(int sock, char **argv,
+			     slurm_addr_t **_cli, uid_t *_cli_uid,
 			     slurm_addr_t **_self, slurm_msg_t **_msg);
 
 static void _dump_user_env(void);
 static void _send_ok_to_slurmd(int sock);
 static void _send_fail_to_slurmd(int sock);
 static void _got_ack_from_slurmd(int);
-static stepd_step_rec_t *_step_setup(slurm_addr_t *cli, slurm_addr_t *self,
-				     slurm_msg_t *msg);
+static stepd_step_rec_t *_step_setup(slurm_addr_t *cli, uid_t cli_uid,
+				     slurm_addr_t *self, slurm_msg_t *msg);
 #ifdef MEMORY_LEAK_DEBUG
 static void _step_cleanup(stepd_step_rec_t *job, slurm_msg_t *msg, int rc);
 #endif
 static int _process_cmdline (int argc, char **argv);
+
+static pthread_mutex_t cleanup_mutex = PTHREAD_MUTEX_INITIALIZER;
+static bool cleanup = false;
 
 /*
  *  List of signals to block in this process
@@ -110,6 +114,7 @@ main (int argc, char **argv)
 {
 	log_options_t lopts = LOG_OPTS_INITIALIZER;
 	slurm_addr_t *cli;
+	uid_t cli_uid;
 	slurm_addr_t *self;
 	slurm_msg_t *msg;
 	stepd_step_rec_t *job;
@@ -135,11 +140,11 @@ main (int argc, char **argv)
 		fatal( "failed to initialize authentication plugin" );
 
 	/* Receive job parameters from the slurmd */
-	_init_from_slurmd(STDIN_FILENO, argv, &cli, &self, &msg);
+	_init_from_slurmd(STDIN_FILENO, argv, &cli, &cli_uid, &self, &msg);
 
 	/* Create the stepd_step_rec_t, mostly from info in a
 	 * launch_tasks_request_msg_t or a batch_job_launch_msg_t */
-	if (!(job = _step_setup(cli, self, msg))) {
+	if (!(job = _step_setup(cli, cli_uid, self, msg))) {
 		_send_fail_to_slurmd(STDOUT_FILENO);
 		rc = SLURM_ERROR;
 		goto ending;
@@ -192,6 +197,11 @@ extern int stepd_cleanup(slurm_msg_t *msg, stepd_step_rec_t *job,
 			 slurm_addr_t *cli, slurm_addr_t *self,
 			 int rc, bool only_mem)
 {
+	slurm_mutex_lock(&cleanup_mutex);
+
+	if (cleanup)
+		goto done;
+
 	if (!only_mem) {
 		if (job->batch)
 			batch_finish(job, rc); /* sends batch complete message */
@@ -248,6 +258,9 @@ extern int stepd_cleanup(slurm_msg_t *msg, stepd_step_rec_t *job,
 	xfree(conf->cpu_spec_list);
 	xfree(conf);
 #endif
+	cleanup = true;
+done:
+	slurm_mutex_unlock(&cleanup_mutex);
 	info("done with job");
 	return rc;
 }
@@ -307,28 +320,27 @@ static slurmd_conf_t *read_slurmd_conf_lite(int fd)
 	free_buf(buffer);
 
 	confl->log_opts.prefix_level = 1;
-	confl->log_opts.stderr_level = confl->debug_level;
 	confl->log_opts.logfile_level = confl->debug_level;
-	confl->log_opts.syslog_level = confl->debug_level;
-	/*
-	 * If daemonizing, turn off stderr logging -- also, if
-	 * logging to a file, turn off syslog.
-	 *
-	 * Otherwise, if remaining in foreground, turn off logging
-	 * to syslog (but keep logfile level)
-	 */
-	if (confl->daemonize) {
+
+	if (confl->daemonize)
 		confl->log_opts.stderr_level = LOG_LEVEL_QUIET;
-		if (confl->logfile)
-			confl->log_opts.syslog_level = LOG_LEVEL_QUIET;
+	else
+		confl->log_opts.stderr_level = confl->debug_level;
+
+	if (confl->syslog_debug != LOG_LEVEL_END) {
+		confl->log_opts.syslog_level = confl->syslog_debug;
+	} else if (!confl->daemonize) {
+		confl->log_opts.syslog_level = LOG_LEVEL_QUIET;
+	} else if ((confl->debug_level > LOG_LEVEL_QUIET) && !confl->logfile) {
+		confl->log_opts.syslog_level = confl->debug_level;
 	} else
-		confl->log_opts.syslog_level  = LOG_LEVEL_QUIET;
+		confl->log_opts.syslog_level = LOG_LEVEL_FATAL;
 
 	/*
 	 * LOGGING BEFORE THIS WILL NOT WORK!  Only afterwards will it show
 	 * up in the log.
 	 */
-	log_alter(confl->log_opts, 0, confl->logfile);
+	log_alter(confl->log_opts, SYSLOG_FACILITY_DAEMON, confl->logfile);
 	log_set_timefmt(slurm_conf.log_fmt);
 	debug2("debug level read from slurmd is '%s'.",
 		log_num2string(confl->debug_level));
@@ -406,6 +418,7 @@ static int _handle_spank_mode (int argc, char **argv)
 	log_init(prefix, lopts, LOG_DAEMON, NULL);
 	xfree(prefix);
 
+	slurm_conf_init(NULL);
 	/*
 	 *  When we are started from slurmd, a lightweight config is
 	 *   sent over the stdin fd. If we are able to read this conf
@@ -416,8 +429,6 @@ static int _handle_spank_mode (int argc, char **argv)
 	 */
 	conf = read_slurmd_conf_lite (STDIN_FILENO);
 	close (STDIN_FILENO);
-
-	slurm_conf_init(NULL);
 
 	if (_get_jobid_uid_gid_from_env(&jobid, &uid, &gid))
 		return error("spank environment invalid");
@@ -526,7 +537,8 @@ static void _set_job_log_prefix(slurm_step_id_t *step_id)
  */
 static int
 _init_from_slurmd(int sock, char **argv,
-		  slurm_addr_t **_cli, slurm_addr_t **_self, slurm_msg_t **_msg)
+		  slurm_addr_t **_cli, uid_t *_cli_uid, slurm_addr_t **_self,
+		  slurm_msg_t **_msg)
 {
 	char *incoming_buffer = NULL;
 	buf_t *buffer;
@@ -534,6 +546,7 @@ _init_from_slurmd(int sock, char **argv,
 	int len;
 	uint16_t proto;
 	slurm_addr_t *cli = NULL;
+	uid_t cli_uid;
 	slurm_addr_t *self = NULL;
 	slurm_msg_t *msg = NULL;
 	slurm_step_id_t step_id = {
@@ -550,6 +563,7 @@ _init_from_slurmd(int sock, char **argv,
 	if (cgroup_read_conf(sock) != SLURM_SUCCESS)
 		fatal("Failed to read cgroup conf from slurmd");
 
+	slurm_conf.slurmd_port = conf->port;
 	/* receive acct_gather conf from slurmd */
 	if (acct_gather_read_conf(sock) != SLURM_SUCCESS)
 		fatal("Failed to read acct_gather conf from slurmd");
@@ -583,6 +597,7 @@ _init_from_slurmd(int sock, char **argv,
 	if (slurm_unpack_addr_no_alloc(cli, buffer) == SLURM_ERROR)
 		fatal("slurmstepd: problem with unpack of slurmd_conf");
 	free_buf(buffer);
+	safe_read(sock, &cli_uid, sizeof(uid_t));
 
 	/* receive self from slurmd */
 	safe_read(sock, &len, sizeof(int));
@@ -683,6 +698,7 @@ _init_from_slurmd(int sock, char **argv,
 	msg->protocol_version = proto;
 
 	*_cli = cli;
+	*_cli_uid = cli_uid;
 	*_self = self;
 	*_msg = msg;
 
@@ -694,7 +710,8 @@ rwfail:
 }
 
 static stepd_step_rec_t *
-_step_setup(slurm_addr_t *cli, slurm_addr_t *self, slurm_msg_t *msg)
+_step_setup(slurm_addr_t *cli, uid_t cli_uid, slurm_addr_t *self,
+	    slurm_msg_t *msg)
 {
 	stepd_step_rec_t *job = NULL;
 
@@ -705,7 +722,7 @@ _step_setup(slurm_addr_t *cli, slurm_addr_t *self, slurm_msg_t *msg)
 		break;
 	case REQUEST_LAUNCH_TASKS:
 		debug2("setup for a launch_task");
-		job = mgr_launch_tasks_setup(msg->data, cli, self,
+		job = mgr_launch_tasks_setup(msg->data, cli, cli_uid, self,
 					     msg->protocol_version);
 		break;
 	default:

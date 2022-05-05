@@ -169,21 +169,26 @@ void batch_bind(batch_job_launch_msg_t *req)
 {
 	bitstr_t *req_map, *hw_map;
 	slurm_cred_arg_t arg;
-	uint16_t sockets=0, cores=0, num_cpus;
-	int start, task_cnt=0;
+	uint16_t sockets = 0, cores = 0, num_cpus;
+	int task_cnt = 0;
+	int job_node_id;
+	int start;
 
 	if (slurm_cred_get_args(req->cred, &arg) != SLURM_SUCCESS) {
 		error("job lacks a credential");
 		return;
 	}
-	start = _get_local_node_info(&arg, 0, &sockets, &cores);
-	if (start != 0) {
-		error("missing node 0 in job credential");
+	job_node_id = nodelist_find(arg.job_hostlist, conf->node_name);
+	if ((job_node_id < 0) || (job_node_id > arg.job_nhosts)) {
+		error("%s: missing node %s in job credential (%s)",
+		      __func__, conf->node_name, arg.job_hostlist);
 		slurm_cred_free_args(&arg);
 		return;
 	}
+
+	start = _get_local_node_info(&arg, job_node_id, &sockets, &cores);
 	if ((sockets * cores) == 0) {
-		error("socket and core count both zero");
+		error("%s: socket and core count both zero", __func__);
 		slurm_cred_free_args(&arg);
 		return;
 	}
@@ -200,6 +205,12 @@ void batch_bind(batch_job_launch_msg_t *req)
 	static int last_id = 0;
 	bit_set(hw_map, ((last_id++) % conf->block_map_size));
 	task_cnt = 1;
+
+	/*
+	 * This is here to make sure we use the 'start' variable to avoid
+	 * compiling issues.
+	 */
+	debug5("Start is %d", start);
 }
 #else
 {
@@ -211,7 +222,7 @@ void batch_bind(batch_job_launch_msg_t *req)
 	 * physically exist than are configured (slurmd is out of
 	 * sync with the slurmctld daemon). */
 	for (p = 0; p < (sockets * cores); p++) {
-		if (bit_test(arg.job_core_bitmap, p))
+		if (bit_test(arg.job_core_bitmap, start + p))
 			bit_set(req_map, (p % num_cpus));
 	}
 
@@ -749,13 +760,13 @@ static bitstr_t *_get_avail_map(launch_tasks_request_msg_t *req,
 	/* we need this node's ID in relation to the whole
 	 * job allocation, not just this jobstep */
 	job_node_id = nodelist_find(arg.job_hostlist, conf->node_name);
-	start = _get_local_node_info(&arg, job_node_id, &sockets, &cores);
-	if (start < 0) {
-		error("missing node %d in job credential",
-		      job_node_id);
+	if ((job_node_id < 0) || (job_node_id > arg.job_nhosts)) {
+		error("%s: missing node %s in job credential (%s)",
+		      __func__, conf->node_name, arg.job_hostlist);
 		slurm_cred_free_args(&arg);
 		return NULL;
 	}
+	start = _get_local_node_info(&arg, job_node_id, &sockets, &cores);
 	debug3("slurmctld s %u c %u; hw s %u c %u t %u",
 	       sockets, cores, *hw_sockets, *hw_cores, *hw_threads);
 

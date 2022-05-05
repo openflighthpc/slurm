@@ -431,7 +431,7 @@ static void  _init_config(void)
 {
 	struct rlimit rlim;
 
-	rlimits_adjust_nofile();
+	rlimits_use_max_nofile();
 	if (getrlimit(RLIMIT_CORE, &rlim) == 0) {
 		rlim.rlim_cur = rlim.rlim_max;
 		(void) setrlimit(RLIMIT_CORE, &rlim);
@@ -855,12 +855,13 @@ static int _send_slurmctld_register_req(slurmdb_cluster_rec_t *cluster_rec)
 	} else {
 		slurm_msg_t out_msg;
 		slurm_msg_t_init(&out_msg);
+		slurm_msg_set_r_uid(&out_msg, SLURM_AUTH_UID_ANY);
 		out_msg.msg_type = ACCOUNTING_REGISTER_CTLD;
 		out_msg.flags = SLURM_GLOBAL_AUTH_KEY;
 		out_msg.protocol_version = cluster_rec->rpc_version;
 		slurm_send_node_msg(fd, &out_msg);
 		/* We probably need to add matching recv_msg function
-		 * for an arbitray fd or should these be fire
+		 * for an arbitrary fd or should these be fire
 		 * and forget?  For this, that we can probably
 		 * forget about it */
 		close(fd);

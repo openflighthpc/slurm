@@ -1799,8 +1799,6 @@ _unpack_node_info_members(node_info_t * node, buf_t *buffer,
 		safe_unpackstr_xmalloc(&node->arch, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->features, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->features_act, &uint32_tmp, buffer);
-		if (!node->features_act)
-			node->features_act = xstrdup(node->features);
 		safe_unpackstr_xmalloc(&node->gres, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->gres_drain, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->gres_used, &uint32_tmp, buffer);
@@ -1868,8 +1866,6 @@ _unpack_node_info_members(node_info_t * node, buf_t *buffer,
 		safe_unpackstr_xmalloc(&node->arch, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->features, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->features_act, &uint32_tmp, buffer);
-		if (!node->features_act)
-			node->features_act = xstrdup(node->features);
 		safe_unpackstr_xmalloc(&node->gres, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->gres_drain, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->gres_used, &uint32_tmp, buffer);
@@ -1936,8 +1932,6 @@ _unpack_node_info_members(node_info_t * node, buf_t *buffer,
 		safe_unpackstr_xmalloc(&node->arch, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->features, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->features_act, &uint32_tmp, buffer);
-		if (!node->features_act)
-			node->features_act = xstrdup(node->features);
 		safe_unpackstr_xmalloc(&node->gres, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->gres_drain, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&node->gres_used, &uint32_tmp, buffer);
@@ -2396,6 +2390,52 @@ extern int slurm_pack_list(List send_list,
 				rc = ESLURM_RESULT_TOO_LARGE;
 				break;
 			}
+		}
+		list_iterator_destroy(itr);
+	}
+
+	return rc;
+}
+
+extern int slurm_pack_list_until(List send_list, pack_function_t pack_function,
+				 buf_t *buffer, uint32_t max_buf_size,
+				 uint16_t protocol_version)
+{
+	uint32_t count = 0;
+	uint32_t header_position, last_good_position;
+	int rc = SLURM_SUCCESS;
+
+	if (!send_list) {
+		/* let user know there wasn't a list (error) */
+		pack32(NO_VAL, buffer);
+		return rc;
+	}
+
+	header_position = get_buf_offset(buffer);
+
+	count = list_count(send_list);
+	pack32(count, buffer);
+
+	if (count) {
+		ListIterator itr = list_iterator_create(send_list);
+		void *object = NULL;
+		last_good_position = get_buf_offset(buffer);
+		count = 0;
+		while ((object = list_next(itr))) {
+			(*(pack_function))(object, protocol_version, buffer);
+			if (size_buf(buffer) > max_buf_size) {
+				/*
+				 * rewind by one element to stay smaller than
+				 * max_buf_size
+				 */
+				set_buf_offset(buffer, header_position);
+				pack32(count, buffer);
+				set_buf_offset(buffer, last_good_position);
+				rc = ESLURM_RESULT_TOO_LARGE;
+				break;
+			}
+			last_good_position = get_buf_offset(buffer);
+			count += 1;
 		}
 		list_iterator_destroy(itr);
 	}

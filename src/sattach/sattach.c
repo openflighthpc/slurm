@@ -125,6 +125,7 @@ int sattach(int argc, char **argv)
 	char *hosts;
 	slurm_step_id_t step_id;
 
+	slurm_conf_init(NULL);
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 	_set_exit_code();
 	if (initialize_and_process_args(argc, argv) < 0) {
@@ -139,7 +140,6 @@ int sattach(int argc, char **argv)
 		log_alter(logopt, 0, NULL);
 	}
 
-	slurm_conf_init(NULL);
 
 	if (xstrcmp(slurm_conf.launch_type, "launch/slurm")) {
 		error("sattach does not support LaunchType=%s",
@@ -412,6 +412,7 @@ static int _attach_to_tasks(uint32_t jobid,
 	reattach_msg.io_port = io_ports;
 	reattach_msg.cred = fake_cred;
 
+	slurm_msg_set_r_uid(&msg, SLURM_AUTH_UID_ANY);
 	msg.msg_type = REQUEST_REATTACH_TASKS;
 	msg.data = &reattach_msg;
 	msg.protocol_version = layout->start_protocol_ver;
