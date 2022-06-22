@@ -59,6 +59,7 @@
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/fd.h"
+#include "src/common/xstring.h"
 #include "src/slurmd/common/proctrack.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
@@ -802,8 +803,8 @@ static int _get_joules_task(uint16_t delta)
 
 	xassert(context_id != -1);
 
-	if (slurm_get_node_energy(
-		    NULL, context_id, delta, &sensor_cnt, &energies)) {
+	if (slurm_get_node_energy(conf->node_name, context_id, delta,
+				  &sensor_cnt, &energies)) {
 		error("_get_joules_task: can't get info from slurmd");
 		return SLURM_ERROR;
 	}

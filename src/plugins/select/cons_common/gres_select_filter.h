@@ -64,7 +64,7 @@ extern void gres_select_filter_cons_res(List job_gres_list, List node_gres_list,
  *	Filter out unusable GRES.
  * IN sock_gres_list - list of sock_gres_t entries built by
  *                     gres_job_test2()
- * IN avail_mem - memory available for the job
+ * IN avail_mem - memory available for the job or NO_VAL64 (when no CR_MEMORY)
  * IN max_cpus - maximum CPUs available on this node (limited by specialized
  *               cores and partition CPUs-per-node)
  * IN enforce_binding - GRES must be co-allocated with cores
@@ -134,13 +134,11 @@ extern void gres_select_filter_sock_core(gres_mc_data_t *mc_ptr,
  * job_res IN - job resource allocation
  * overcommit IN - job's ability to overcommit resources
  * tres_mc_ptr IN - job's multi-core options
- * node_table_ptr IN - slurmctld's node records
  * RET SLURM_SUCCESS or error code
  */
 extern int gres_select_filter_select_and_set(List *sock_gres_list, uint32_t job_id,
 					     struct job_resources *job_res,
 					     uint8_t overcommit,
-					     gres_mc_data_t *tres_mc_ptr,
-					     node_record_t *node_table_ptr);
+					     gres_mc_data_t *tres_mc_ptr);
 
 #endif /* _GRES_SELECT_FILTER_H */

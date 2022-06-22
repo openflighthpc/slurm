@@ -34,6 +34,10 @@ The <i>srun</i> option <i>--mpi=</i> (or the equivalent environment
 variable <i>SLURM_MPI_TYPE</i>) can be used to specify when a
 different MPI implementation is to be supported for an individual job.</p>
 
+<p>There are parameters that can be set in the
+<a href="mpi.conf.html">mpi.conf</a> file that allow you to modify
+the behavior of the MPI plugins.</p>
+
 <p><b>NOTE</b>: Use of an MPI implementation without the appropriate Slurm
 plugin may result in application failure. If multiple MPI implementations
 are used on a system then some users may be required to explicitly specify
@@ -94,6 +98,11 @@ versions may have some compatibility issues with support of pmi and pmi2 APIs.
 Note also that Intel MPI doesn't officially support PMIx. It may work, but there
 is no guarantee that it will.
 </p>
+
+<p><b>NOTE</b>: If you build PMIx with hwloc, note that versions 2.5.0 through
+2.7.0 (inclusive) of hwloc have a bug that pushes an untouchable value into the
+environ array, causing a segfault when accessing it. It is advisable to avoid
+these versions.</p>
 
 <p>Although it is recommended to build PMIx from the
 <a href="https://github.com/openpmix/openpmix/releases">packaged releases</a>,
@@ -176,12 +185,12 @@ highest version of the library:</p>
 
 <pre>
 user@testbox:~/t$ srun --mpi=list
-srun: MPI types are...
-srun: pmix_v1
-srun: pmi2
-srun: none
-srun: pmix
-srun: pmix_v2
+MPI plugin types are...
+	cray_shasta
+	none
+	pmi2
+	pmix
+specific pmix plugin versions available: pmix_v3
 </pre>
 
 <p>Continuing with the configuration, if Slurm is unable to locate the PMIx
@@ -266,11 +275,12 @@ both components work properly:</p>
 
 <pre>
 user@testbox:~/t$ srun --mpi=list
-srun: MPI types are...
-srun: pmi2
-srun: none
-srun: pmix
-srun: pmix_v2
+MPI plugin types are...
+	cray_shasta
+	none
+	pmi2
+	pmix
+specific pmix plugin versions available: pmix_v3
 user@testbox:~/t$ srun --mpi=pmix -n2 -N2 \
 &gt; ~/git/pmix/build/2.1/test/pmix_client -n 2 --job-fence -c
 OK
@@ -291,8 +301,8 @@ user@testbox:~/t$
 It relies upon Slurm managing reservations of communication ports for use by
 the Open MPI version 1.5.</p>
 
-<p>If OpenMPI is configured with <i>--with-pmi</i> either pmi or pmi2,
-the OMPI jobs can be launched directly using the srun command. This is
+<p>If OpenMPI is configured with <i>--with-pmi</i> set to either pmi or pmi2,
+then OMPI jobs can be launched directly using the srun command. This is
 the preferred mode of operation. If the pmi2 support is enabled, the option
 '--mpi=pmi2' or '--mpi=pmi2_v2' must be specified on the srun command line.
 Alternately configure 'MpiDefault=pmi' or 'MpiDefault=pmi_v2' in slurm.conf.</p>
@@ -622,7 +632,7 @@ $ srun -n16 --mpi=pmi2 a.out
 
 <p>Berkeley UPC (and likely other UPC implementations) rely upon Slurm to
 allocate resources and launch the application's tasks. The UPC library then
-read. Slurm environment variables in order to determine how the job's task
+reads Slurm environment variables in order to determine the job's task
 count and location. One would build the UPC program in the normal manner
 then initiate it using a command line of this sort:</p>
 <pre>
@@ -631,6 +641,6 @@ $ srun -N4 -n16 a.out
 
 <hr size=4 width="100%">
 
-<p style="text-align:center;">Last modified 29 June 2021</p>
+<p style="text-align:center;">Last modified 15 June 2022</p>
 
 <!--#include virtual="footer.txt"-->

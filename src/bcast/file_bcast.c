@@ -113,8 +113,8 @@ static int _file_state(struct bcast_parameters *params)
 	}
 
 	verbose("modes    = %o", (unsigned int) f_stat.st_mode);
-	verbose("uid      = %d", (int) f_stat.st_uid);
-	verbose("gid      = %d", (int) f_stat.st_gid);
+	verbose("uid      = %u", f_stat.st_uid);
+	verbose("gid      = %u", f_stat.st_gid);
 	verbose("atime    = %s", slurm_ctime2(&f_stat.st_atime));
 	verbose("mtime    = %s", slurm_ctime2(&f_stat.st_mtime));
 	verbose("ctime    = %s", slurm_ctime2(&f_stat.st_ctime));
@@ -430,6 +430,12 @@ static int _get_lib_paths(char *filename, List lib_paths)
 	char *lpath = NULL, *lpath_end = NULL;
 	char *tok = NULL, *save_ptr = NULL;
 	int status = SLURM_ERROR, rc = SLURM_SUCCESS;
+	run_command_args_t run_command_args = {
+		.max_wait = 5000,
+		.script_path = LDD_PATH,
+		.script_type = "ldd",
+		.status = &status,
+	};
 
 	if (!filename || !lib_paths) {
 		rc = SLURM_ERROR;
@@ -449,8 +455,9 @@ static int _get_lib_paths(char *filename, List lib_paths)
 	 * search for non-direct dependencies and knowing where to find them by
 	 * doing something similar to the search order of the dynamic linker.
 	 */
-	result = run_command("ldd", LDD_PATH, ldd_argv, NULL, 5000, 0, &status);
-	free_command_argv(ldd_argv);
+	run_command_args.script_argv = ldd_argv;
+	result = run_command(&run_command_args);
+	xfree_array(ldd_argv);
 
 	if (status) {
 		error("Cannot autodetect libraries for '%s' with ldd command",

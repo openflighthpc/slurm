@@ -1,4 +1,4 @@
-.TH sbatch "1" "Slurm Commands" "April 2022" "Slurm Commands"
+.TH sbatch "1" "Slurm Commands" "June 2022" "Slurm Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to Slurm.
@@ -268,7 +268,8 @@ special characters.
 \fB\-C\fR, \fB\-\-constraint\fR=<\fIlist\fR>
 Nodes can have \fBfeatures\fR assigned to them by the Slurm administrator.
 Users can specify which of these \fBfeatures\fR are required by their job
-using the constraint option.
+using the constraint option. If you are looking for 'soft' constraints please
+see see \fB\-\-prefer\fR for more information.
 Only nodes having features matching the job constraints will be used to
 satisfy the request.
 Multiple constraints may be specified with AND, OR, matching OR,
@@ -533,6 +534,11 @@ cluster is comprised of quad\-processors nodes and we simply ask for
 the \-\-cpus\-per\-task=3 options, the controller knows that each task requires
 3 processors on the same node, and the controller will grant an allocation
 of 4 nodes, one for each of the 4 tasks.
+
+\fBNOTE\fR: Beginning with 22.05, srun will not inherit the
+\-\-cpus\-per\-task value requested by salloc or sbatch. It must be requested
+again with the call to srun or set with the SRUN_CPUS_PER_TASK environment
+variable if desired for the task(s).
 .IP
 
 .TP
@@ -1348,9 +1354,6 @@ take precedence over the environment.
 
 NOTE: A memory size specification of zero is treated as a special case and
 grants the job access to all of the memory on each node.
-If the job is allocated multiple nodes in a heterogeneous cluster, the memory
-limit on each node will be that of the node in the allocation with the smallest
-memory size (same limit will apply to every node in the job's allocation).
 
 NOTE: Enforcement of memory limits currently relies upon the task/cgroup plugin
 or enabling of accounting, which samples memory use on a periodic basis (data
@@ -1562,149 +1565,6 @@ In all cases the job allocation request \fBmust specify the
 Also with any of these options steps are not allowed to share blades,
 so resources would remain idle inside an allocation if the step
 running on a blade does not take up all the nodes on the blade.
-
-The \fBnetwork\fR option is also supported on systems with IBM's Parallel Environment (PE).
-See IBM's LoadLeveler job command keyword documentation about the keyword
-"network" for more information.
-Multiple values may be specified in a comma separated list.
-All options are case in\-sensitive.
-Supported values include:
-.IP
-.RS
-.TP 12
-\fBBULK_XFER\fR[=<\fIresources\fR>]
-Enable bulk transfer of data using Remote Direct\-Memory Access (RDMA).
-The optional \fIresources\fR specification is a numeric value which can have
-a suffix of "k", "K", "m", "M", "g" or "G" for kilobytes, megabytes or
-gigabytes.
-NOTE: The \fIresources\fR specification is not supported by the underlying
-IBM infrastructure as of Parallel Environment version 2.2 and no value should
-be specified at this time.
-.IP
-
-.TP
-\fBCAU\fR=<\fIcount\fR>
-Number of Collective Acceleration Units (CAU) required.
-Applies only to IBM Power7\-IH processors.
-Default value is zero.
-Independent CAU will be allocated for each programming interface (MPI, LAPI, etc.)
-.IP
-
-.TP
-\fBDEVNAME\fR=<\fIname\fR>
-Specify the device name to use for communications (e.g. "eth0" or "mlx4_0").
-.IP
-
-.TP
-\fBDEVTYPE\fR=<\fItype\fR>
-Specify the device type to use for communications.
-The supported values of \fItype\fR are:
-"IB" (InfiniBand), "HFI" (P7 Host Fabric Interface),
-"IPONLY" (IP\-Only interfaces), "HPCE" (HPC Ethernet), and
-
-"KMUX" (Kernel Emulation of HPCE).
-The devices allocated to a job must all be of the same type.
-The default value depends upon depends upon what hardware is available and in
-order of preferences is IPONLY (which is not considered in User Space mode),
-HFI, IB, HPCE, and KMUX.
-.IP
-
-.TP
-\fBIMMED\fR =<\fIcount\fR>
-Number of immediate send slots per window required.
-Applies only to IBM Power7\-IH processors.
-Default value is zero.
-.IP
-
-.TP
-\fBINSTANCES\fR =<\fIcount\fR>
-Specify number of network connections for each task on each network connection.
-The default instance count is 1.
-.IP
-
-.TP
-\fBIPV4\fR
-Use Internet Protocol (IP) version 4 communications (default).
-.IP
-
-.TP
-\fBIPV6\fR
-Use Internet Protocol (IP) version 6 communications.
-.IP
-
-.TP
-\fBLAPI\fR
-Use the LAPI programming interface.
-.IP
-
-.TP
-\fBMPI\fR
-Use the MPI programming interface.
-MPI is the default interface.
-.IP
-
-.TP
-\fBPAMI\fR
-Use the PAMI programming interface.
-.IP
-
-.TP
-\fBSHMEM\fR
-Use the OpenSHMEM programming interface.
-.IP
-
-.TP
-\fBSN_ALL\fR
-Use all available switch networks (default).
-.IP
-
-.TP
-\fBSN_SINGLE\fR
-Use one available switch network.
-.IP
-
-.TP
-\fBUPC\fR
-Use the UPC programming interface.
-.IP
-
-.TP
-\fBUS\fR
-Use User Space communications.
-.IP
-.RE
-
-Some examples of network specifications:
-.IP
-.RS
-.TP
-\fBInstances=2,US,MPI,SN_ALL\fR
-Create two user space connections for MPI communications on every switch
-network for each task.
-.IP
-
-.TP
-\fBUS,MPI,Instances=3,Devtype=IB\fR
-Create three user space connections for MPI communications on every InfiniBand
-network for each task.
-.IP
-
-.TP
-\fBIPV4,LAPI,SN_Single\fR
-Create a IP version 4 connection for LAPI communications on one switch network
-for each task.
-.IP
-
-.TP
-\fBInstances=2,US,LAPI,MPI\fR
-Create two user space connections each for LAPI and MPI communications on every
-switch network for each task. Note that SN_ALL is the default option so every
-switch network is used. Also note that Instances=2 specifies that two
-connections are established for each protocol (LAPI and MPI) and each task.
-If there are two networks and four tasks on the node then a total
-of 32 connections are established (2 instances x 2 protocols x 2 networks x
-4 tasks).
-.RE
 .IP
 
 .TP
@@ -1943,6 +1803,18 @@ Currently available flags include:
 level (all nodes allocated to the job should have identical power caps,
 may be disabled by the Slurm configuration option PowerParameters=job_no_level).
 .IP
+
+.TP
+\fB\-\-prefer\fR=<\fIlist\fR>
+Nodes can have \fBfeatures\fR assigned to them by the Slurm administrator.
+Users can specify which of these \fBfeatures\fR are desired but not required by
+their job using the prefer option.
+This option operates independently from \fB\-\-constraint\fR and will override
+whatever is set there if possible.
+When scheduling the features in \fB\-\-prefer\fR are tried first if a node set
+isn't available with those features then \fB\-\-constraint\fR is attempted.
+See \fB\-\-constraint\fR for more information, this option behaves the same
+way.
 
 .TP
 \fB\-\-priority\fR=<\fIvalue\fR>
@@ -2489,6 +2361,11 @@ Same as \fB\-m, \-\-distribution\fR
 .IP
 
 .TP
+\fBSBATCH_ERROR\fR
+Same as \fB-e, \-\-error\fR
+.IP
+
+.TP
 \fBSBATCH_EXCLUSIVE\fR
 Same as \fB\-\-exclusive\fR
 .IP
@@ -2549,6 +2426,11 @@ Same as \fB\-\-ignore\-pbs\fR
 .IP
 
 .TP
+\fBSBATCH_INPUT\fR
+Same as \fB\-i, \-\-input\fR
+.IP
+
+.TP
 \fBSBATCH_JOB_NAME\fR
 Same as \fB\-J, \-\-job\-name\fR
 .IP
@@ -2591,6 +2473,11 @@ Same as \fB\-\-no\-requeue\fR
 .TP
 \fBSBATCH_OPEN_MODE\fR
 Same as \fB\-\-open\-mode\fR
+.IP
+
+.TP
+\fBSBATCH_OUTPUT\fR
+Same as \fB-o, \-\-output\fR
 .IP
 
 .TP
@@ -2879,6 +2766,13 @@ Set to count of components in heterogeneous job.
 .TP
 \fBSLURM_JOB_ACCOUNT\fR
 Account name associated of the job allocation.
+.IP
+
+.TP
+\fBSLURM_JOB_GPUS\fR
+The global GPU IDs of the GPUs allocated to this job. The GPU IDs are not
+relative to any device cgroup, even if devices are constrained with task/cgroup.
+Only set in batch and interactive jobs.
 .IP
 
 .TP

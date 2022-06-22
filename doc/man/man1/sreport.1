@@ -1,4 +1,4 @@
-.TH sreport "1" "Slurm Commands" "July 2021" "Slurm Commands"
+.TH sreport "1" "Slurm Commands" "June 2022" "Slurm Commands"
 
 .SH "NAME"
 sreport \- Generate reports from the slurm accounting data.
@@ -317,7 +317,8 @@ system is overloaded and by how much.
 .IP PlannedDown
 
 Time that nodes were in use by a reservation created with the MAINT flag
-but not the IGNORE_JOBS flag.
+but not the IGNORE_JOBS flag. Also, time that nodes were in the FUTURE state or
+CLOUD nodes that were POWERED_DOWN.
 .IP Planned
 
 Time that a node spent idle with eligible jobs in the queue that were
@@ -335,6 +336,9 @@ Note: Reservations created with the IGNORE_JOBS flag are not tracked
 in the Cluster Utilization report due to the fact that allowing any
 current/active jobs to continue to run in the reservation introduces the
 possibility for them to be accounted for incorrectly.
+The jobs in these reservations will be tracked as normal rather than
+being bundled in the reservation time, as they are with reservations that
+do not have the IGNORE_JOBS flag.
 .RE
 .RS
 

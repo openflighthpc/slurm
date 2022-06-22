@@ -24,6 +24,12 @@ contains a database password.
 The overall configuration parameters available include:
 
 .TP
+\fBAllowNoDefAcct\fR
+Remove requirement for users to have a default account.  Boolean, yes to turn
+on, no (default) to enforce default accounts.
+.IP
+
+.TP
 \fBArchiveDir\fR
 If ArchiveScript is not set the slurmdbd will generate a file that can be
 read in anytime with sacctmgr load filename.  This directory is where the
@@ -224,6 +230,27 @@ Disable IPv4 only operation for the slurmdbd. This should also be set in your
 Enable using IPv6 addresses for the slurmdbd. When using both IPv4 and IPv6,
 address family preferences will be based on your /etc/gai.conf file. This
 should also be set in your \fBslurm.conf\fR file.
+.IP
+
+.TP
+\fBkeepaliveinterval=#\fR
+Specifies the interval between keepalive probes on the socket communications
+between the backup and primary slurmdbd.
+The default value is 30 seconds.
+.IP
+
+.TP
+\fBkeepaliveprobes=#\fR
+Specifies the number of keepalive probes sent on the socket communications
+between the backup and primary slurmdbd.
+The default value is 3.
+.IP
+
+.TP
+\fBkeepalivetime=#\fR
+Specifies how long to wait before sending keepalive probes between the primary
+and backup slurmdbd processes.
+The default value is 30 seconds.
 .RE
 .IP
 

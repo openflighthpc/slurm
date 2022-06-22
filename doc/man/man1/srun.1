@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "April 2022" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "June 2022" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -280,7 +280,8 @@ allocations.
 \fB\-C\fR, \fB\-\-constraint\fR=<\fIlist\fR>
 Nodes can have \fBfeatures\fR assigned to them by the Slurm administrator.
 Users can specify which of these \fBfeatures\fR are required by their job
-using the constraint option.
+using the constraint option. If you are looking for 'soft' constraints please
+see see \fB\-\-prefer\fR for more information.
 Only nodes having features matching the job constraints will be used to
 satisfy the request.
 Multiple constraints may be specified with AND, OR, matching OR,
@@ -732,8 +733,9 @@ Not compatible with the \fB\-\-cpus\-per\-task\fR option.
 \fB\-c\fR, \fB\-\-cpus\-per\-task\fR=<\fIncpus\fR>
 Request that \fIncpus\fR be allocated \fBper process\fR. This may be
 useful if the job is multithreaded and requires more than one CPU
-per task for optimal performance. The default is one CPU per process and does
-not imply \fB\-\-exact\fR.
+per task for optimal performance. Explicitly requesting this option implies
+\fB\-\-exact\fR. The default is one CPU per process and does not imply
+\fB\-\-exact\fR.
 If \fB\-c\fR is specified without \fB\-n\fR, as many
 tasks will be allocated per node as possible while satisfying
 the \fB\-c\fR restriction. For instance on a cluster with 8 CPUs
@@ -752,6 +754,10 @@ threads per CPU for a total of two tasks.
 \fBWARNING\fR: When srun is executed from within salloc or sbatch,
 there are configurations and options which can result in inconsistent
 allocations when \-c has a value greater than \-c on salloc or sbatch.
+The number of cpus per task specified for salloc or sbatch is not
+automatically inherited by srun and, if desired, must be requested again,
+either by specifying \-\-cpus\-per\-task when calling srun, or by setting the
+SRUN_CPUS_PER_TASK environment variable.
 
 This option applies to job and step allocations.
 .IP
@@ -1432,7 +1438,6 @@ to "none".
 .TP
 \fB\-\-gres\-flags\fR=<\fItype\fR>
 Specify generic resource task binding options.
-This option applies to job allocations.
 .IP
 .RS
 .TP
@@ -1443,13 +1448,14 @@ This option is currently required to use more CPUs than are bound to a GRES
 one socket are required to run the job).
 This option may permit a job to be allocated resources sooner than otherwise
 possible, but may result in lower job performance.
+This option applies to job allocations.
 .br
 \fBNOTE\fR: This option is specific to \fBSelectType=cons_res\fR.
 .IP
 
 .TP
 .B enforce\-binding
-The only CPUs available to the job will be those bound to the selected
+The only CPUs available to the job/step will be those bound to the selected
 GRES (i.e. the CPUs identified in the gres.conf file will be strictly
 enforced). This option may result in delayed initiation of a job.
 For example a job requiring two GPUs and one CPU will be delayed until both
@@ -1458,8 +1464,10 @@ sockets, however, the application performance may be improved due to improved
 communication speed.
 Requires the node to be configured with more than one socket and resource
 filtering will be performed on a per\-socket basis.
+\fBNOTE\fR: Job steps that don't use \fB--exact\fR will not be affected.
 .br
-\fBNOTE\fR: This option is specific to \fBSelectType=cons_tres\fR.
+\fBNOTE\fR: This option is specific to \fBSelectType=cons_tres\fR for job
+allocations.
 .RE
 .IP
 
@@ -1545,7 +1553,7 @@ to job and step allocations.
 
 .TP
 \fB\-i\fR, \fB\-\-input\fR=<\fImode\fR>
-Specify how stdin is to redirected. By default,
+Specify how stdin is to be redirected. By default,
 .B srun
 redirects stdin from the terminal to all tasks. See \fBIO Redirection\fR
 below for more options.
@@ -1661,12 +1669,6 @@ or \fBsbatch\fR).
 NOTE: A memory size specification of zero is treated as a special case and
 grants the job access to all of the memory on each node for newly submitted jobs
 and all available job memory to new job steps.
-
-Specifying new memory limits for job steps are only advisory.
-
-If the job is allocated multiple nodes in a heterogeneous cluster, the memory
-limit on each node will be that of the node in the allocation with the smallest
-memory size (same limit will apply to every node in the job's allocation).
 
 NOTE: Enforcement of memory limits currently relies upon the task/cgroup plugin
 or enabling of accounting, which samples memory use on a periodic basis (data
@@ -1937,7 +1939,7 @@ used to request using Network Performance Counters.
 Only one value per request is valid.
 All options are case in\-sensitive.
 In this configuration supported values include:
-.IP
+
 .RS
 .TP 6
 \fBsystem\fR
@@ -1956,8 +1958,8 @@ fill up the entire blade(s) allocated to the job those blade(s) are not
 able to be used by other jobs using NPC, if idle their state will appear as
 PerfCnts.  These nodes are still available for other jobs not using NPC.
 .IP
-.RE
 
+.LP
 In all cases the job allocation request \fBmust specify the
 \-\-exclusive option\fR and the step cannot specify the \fB\-\-overlap\fR
 option. Otherwise the request will be denied.
@@ -1966,155 +1968,84 @@ Also with any of these options steps are not allowed to share blades,
 so resources would remain idle inside an allocation if the step
 running on a blade does not take up all the nodes on the blade.
 
-The \fBnetwork\fR option is also supported on systems with IBM's Parallel Environment (PE).
-See IBM's LoadLeveler job command keyword documentation about the keyword
-"network" for more information.
-Multiple values may be specified in a comma separated list.
-All options are case in\-sensitive.
-Supported values include:
+The \fBnetwork\fR option is also available on systems with HPE Slingshot
+networks. It can be used to override the default network resources allocated
+for the job step. Multiple values may be specified in a comma-separated list.
 .IP
-.RS
-.TP 12
-\fBBULK_XFER\fR[=<\fIresources\fR>]
-Enable bulk transfer of data using Remote Direct\-Memory Access (RDMA).
-The optional \fIresources\fR specification is a numeric value which can have
-a suffix of "k", "K", "m", "M", "g" or "G" for kilobytes, megabytes or
-gigabytes.
-NOTE: The \fIresources\fR specification is not supported by the underlying
-IBM infrastructure as of Parallel Environment version 2.2 and no value should
-be specified at this time.
-The devices allocated to a job must all be of the same type.
-The default value depends upon depends upon what hardware is available and in
-order of preferences is IPONLY (which is not considered in User Space mode),
-HFI, IB, HPCE, and KMUX.
+
+.RS 4
+.TP
+\fBdef_<rsrc>\fR=<\fIval\fR>
+Per-CPU reserved allocation for this resource.
 .IP
 
 .TP
-\fBCAU\fR=<\fIcount\fR>
-Number of Collective Acceleration Units (CAU) required.
-Applies only to IBM Power7\-IH processors.
-Default value is zero.
-Independent CAU will be allocated for each programming interface (MPI, LAPI, etc.)
+\fBres_<rsrc>\fR=<\fIval\fR>
+Per-node reserved allocation for this resource.
+If set, overrides the per-CPU allocation.
 .IP
 
 .TP
-\fBDEVNAME\fR=<\fIname\fR>
-Specify the device name to use for communications (e.g. "eth0" or "mlx4_0").
+\fBmax_<rsrc>\fR=<\fIval\fR>
+Maximum per-node limit for this resource.
 .IP
 
 .TP
-\fBDEVTYPE\fR=<\fItype\fR>
-Specify the device type to use for communications.
-The supported values of \fItype\fR are:
-"IB" (InfiniBand), "HFI" (P7 Host Fabric Interface),
-"IPONLY" (IP\-Only interfaces), "HPCE" (HPC Ethernet), and
-
-"KMUX" (Kernel Emulation of HPCE).
-The devices allocated to a job must all be of the same type.
-The default value depends upon depends upon what hardware is available and in
-order of preferences is IPONLY (which is not considered in User Space mode),
-HFI, IB, HPCE, and KMUX.
-.IP
-
-.TP
-\fBIMMED\fR =<\fIcount\fR>
-Number of immediate send slots per window required.
-Applies only to IBM Power7\-IH processors.
-Default value is zero.
-.IP
-
-.TP
-\fBINSTANCES\fR =<\fIcount\fR>
-Specify number of network connections for each task on each network connection.
-The default instance count is 1.
-.IP
-
-.TP
-\fBIPV4\fR
-Use Internet Protocol (IP) version 4 communications (default).
-.IP
-
-.TP
-\fBIPV6\fR
-Use Internet Protocol (IP) version 6 communications.
-.IP
-
-.TP
-\fBLAPI\fR
-Use the LAPI programming interface.
-.IP
-
-.TP
-\fBMPI\fR
-Use the MPI programming interface.
-MPI is the default interface.
-.IP
-
-.TP
-\fBPAMI\fR
-Use the PAMI programming interface.
-.IP
-
-.TP
-\fBSHMEM\fR
-Use the OpenSHMEM programming interface.
-.IP
-
-.TP
-\fBSN_ALL\fR
-Use all available switch networks (default).
-.IP
-
-.TP
-\fBSN_SINGLE\fR
-Use one available switch network.
-.IP
-
-.TP
-\fBUPC\fR
-Use the UPC programming interface.
-.IP
-
-.TP
-\fBUS\fR
-Use User Space communications.
+\fBdepth\fR=<\fIdepth\fR>
+Multiplier for per-CPU resource allocation.
+Default is the number of reserved CPUs on the node.
 .IP
 .RE
 
-Some examples of network specifications:
+.LP
+The resources that may be requested are:
 .IP
-.RS
+
+.RS 4
 .TP
-\fBInstances=2,US,MPI,SN_ALL\fR
-Create two user space connections for MPI communications on every switch
-network for each task.
+\fBtxqs\fR
+Transmit command queues. The default is 3 per-CPU, maximum 1024 per-node.
 .IP
 
 .TP
-\fBUS,MPI,Instances=3,Devtype=IB\fR
-Create three user space connections for MPI communications on every InfiniBand
-network for each task.
+\fBtgqs\fR
+Target command queues. The default is 2 per-CPU, maximum 512 per-node.
 .IP
 
 .TP
-\fBIPV4,LAPI,SN_Single\fR
-Create a IP version 4 connection for LAPI communications on one switch network
-for each task.
+\fBeqs\fR
+Event queues. The default is 8 per-CPU, maximum 2048 per-node.
 .IP
 
 .TP
-\fBInstances=2,US,LAPI,MPI\fR
-Create two user space connections each for LAPI and MPI communications on every
-switch network for each task. Note that SN_ALL is the default option so every
-switch network is used. Also note that Instances=2 specifies that two
-connections are established for each protocol (LAPI and MPI) and each task.
-If there are two networks and four tasks on the node then a total
-of 32 connections are established (2 instances x 2 protocols x 2 networks x
-4 tasks).
+\fBcts\fR
+Counters. The default is 2 per-CPU, maximum 2048 per-node.
+.IP
+
+.TP
+\fBtles\fR
+Trigger list entries. The default is 1 per-CPU, maximum 2048 per-node.
+.IP
+
+.TP
+\fBptes\fR
+Portable table entries. The default is 8 per-CPU, maximum 2048 per-node.
+.IP
+
+.TP
+\fBles\fR
+List entries. The default is 134 per-CPU, maximum 65535 per-node.
+.IP
+
+.TP
+\fBacs\fR
+Addressing contexts. The default is 4 per-CPU, maximum 1024 per-node.
 .RE
 .IP
 
+.LP
 This option applies to job and step allocations.
+.RE
 .IP
 
 .TP
@@ -2337,8 +2268,11 @@ Slurm build time.
 
 .TP
 \fB\-\-overlap\fR
-Allow steps to overlap each other on the CPUs.
-By default steps do not share CPUs with other parallel steps.
+Specifying \-\-overlap allows steps to share all resources (CPUs, memory, and
+GRES) with all other steps. A step using this option will overlap all other
+steps, even those that did not specify \-\-overlap.
+
+By default steps do not share resources with other parallel steps.
 .IP
 
 .TP
@@ -2374,6 +2308,18 @@ level (all nodes allocated to the job should have identical power caps,
 may be disabled by the Slurm configuration option PowerParameters=job_no_level).
 This option applies to job allocations.
 .IP
+
+.TP
+\fB\-\-prefer\fR=<\fIlist\fR>
+Nodes can have \fBfeatures\fR assigned to them by the Slurm administrator.
+Users can specify which of these \fBfeatures\fR are desired but not required by
+their job using the prefer option.
+This option operates independently from \fB\-\-constraint\fR and will override
+whatever is set there if possible.
+When scheduling the features in \fB\-\-prefer\fR are tried first if a node set
+isn't available with those features then \fB\-\-constraint\fR is attempted.
+See \fB\-\-constraint\fR for more information, this option behaves the same
+way.
 
 .TP
 \fB\-E\fR, \fB\-\-preserve\-env\fR
@@ -3217,7 +3163,7 @@ Same as \fB\-\-cpus\-per\-gpu\fR
 .IP
 
 .TP
-\fBSLURM_CPUS_PER_TASK\fR
+\fBSRUN_CPUS_PER_TASK\fR
 Same as \fB\-c, \-\-cpus\-per\-task\fR
 .IP
 
@@ -3751,6 +3697,13 @@ Set to value of the \fB\-\-dependency\fR option.
 .IP
 
 .TP
+\fBSLURM_JOB_GPUS\fR
+The global GPU IDs of the GPUs allocated to this job. The GPU IDs are not
+relative to any device cgroup, even if devices are constrained with task/cgroup.
+Only set in batch and interactive jobs.
+.IP
+
+.TP
 \fBSLURM_JOB_ID\fR
 Job id of the executing job.
 .IP
@@ -3885,6 +3838,13 @@ srun communication port.
 \fBSLURM_CONTAINER\fR
 OCI Bundle for job.
 Only set if \fB\-\-container\fR is specified.
+.IP
+
+.TP
+\fBSLURM_STEP_GPUS\fR
+The global GPU IDs of the GPUs allocated to this step (excluding batch and
+interactive steps). The GPU IDs are not relative to any device cgroup, even
+if devices are constrained with task/cgroup.
 .IP
 
 .TP

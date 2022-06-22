@@ -56,10 +56,10 @@
 #include "src/common/log.h"
 #include "src/common/env.h"
 #include "src/common/fd.h"
-#include "src/common/node_select.h"
 #include "src/common/macros.h"
 #include "src/common/proc_args.h"
 #include "src/common/read_config.h"
+#include "src/common/select.h"
 #include "src/common/slurm_opt.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
@@ -407,8 +407,6 @@ int setup_env(env_t *env, bool preserve_env)
 			str_bind1 = "sockets";
 		} else if (env->cpu_bind_type & CPU_BIND_TO_LDOMS) {
 			str_bind1 = "ldoms";
-		} else if (env->cpu_bind_type & CPU_BIND_TO_BOARDS) {
-			str_bind1 = "boards";
 		}
 
 		if (env->cpu_bind_type & CPU_BIND_NONE) {
@@ -2028,7 +2026,7 @@ char **env_array_user_default(const char *username, int timeout, int mode,
 	else if (stat("/usr/bin/env", &buf) == 0)
 		env_loc = "/usr/bin/env";
 	else
-		fatal("Could not location command: env");
+		fatal("Could not locate command: env");
 	snprintf(cmdstr, sizeof(cmdstr),
 		 "/bin/echo; /bin/echo; /bin/echo; "
 		 "/bin/echo %s; %s; /bin/echo %s",

@@ -50,6 +50,7 @@
 #include "src/common/tres_bind.h"
 #include "src/common/tres_frequency.h"
 #include "src/common/xsignal.h"
+#include "src/common/gres.h"
 
 typedef struct {
 	int (*setup_srun_opt)      (char **rest, slurm_opt_t *opt_local);
@@ -162,6 +163,8 @@ static job_step_create_request_msg_t *_create_job_step_create_request(
 	char *add_tres = NULL;
 	srun_opt_t *srun_opt = opt_local->srun_opt;
 	job_step_create_request_msg_t *step_req = xmalloc(sizeof(*step_req));
+	List tmp_gres_list = NULL;
+	int rc;
 
 	xassert(srun_opt);
 
@@ -180,10 +183,10 @@ static job_step_create_request_msg_t *_create_job_step_create_request(
 
 	if (srun_opt->exclusive)
 		step_req->flags |= SSF_EXCLUSIVE;
+	if (srun_opt->overlap_force)
+		step_req->flags |= SSF_OVERLAP_FORCE;
 	if (opt_local->overcommit)
 		step_req->flags |= SSF_OVERCOMMIT;
-	if (!srun_opt->exact)
-		step_req->flags |= SSF_WHOLE;
 	if (opt_local->no_kill)
 		step_req->flags |= SSF_NO_KILL;
 	if (srun_opt->interactive) {
@@ -233,14 +236,14 @@ static job_step_create_request_msg_t *_create_job_step_create_request(
 
 		tok = strtok_r(tmp_str, ",", &save_ptr);
 		while (tok) {
-			int tmp;
+			int tmp = 0;
 			sep = xstrchr(tok, ':');
 			if (sep)
-				tmp =+ atoi(sep + 1);
+				tmp += atoi(sep + 1);
 			else
-				tmp =+ atoi(tok);
+				tmp += atoi(tok);
 			if (tmp > 0)
-				gpus_per_task =+ tmp;
+				gpus_per_task += tmp;
 			tok = strtok_r(NULL, ",", &save_ptr);
 		}
 		xfree(tmp_str);
@@ -401,6 +404,31 @@ static job_step_create_request_msg_t *_create_job_step_create_request(
 	step_req->user_id = opt_local->uid;
 
 	step_req->container = xstrdup(opt_local->container);
+
+	rc = gres_step_state_validate(step_req->cpus_per_tres,
+				     step_req->tres_per_step,
+				     step_req->tres_per_node,
+				     step_req->tres_per_socket,
+				     step_req->tres_per_task,
+				     step_req->mem_per_tres,
+				     step_req->ntasks_per_tres,
+				     step_req->min_nodes,
+				     &tmp_gres_list,
+				     NULL, job->step_id.job_id,
+				     NO_VAL, &step_req->num_tasks,
+				     &step_req->cpu_count, NULL);
+	FREE_NULL_LIST(tmp_gres_list);
+	if (rc) {
+		error("%s", slurm_strerror(rc));
+		return NULL;
+	}
+
+	/*
+	 * This must be handled *after* we potentially set srun_opt->exact
+	 * above.
+	 */
+	if (!srun_opt->exact)
+		step_req->flags |= SSF_WHOLE;
 
 	return step_req;
 }

@@ -47,6 +47,7 @@
 #include "src/common/macros.h"
 #include "src/common/parse_time.h"
 #include "src/common/slurm_protocol_api.h"
+#include "src/common/slurm_protocol_pack.h"
 #include "src/common/slurmdbd_defs.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -2777,7 +2778,7 @@ extern int fed_mgr_init(void *db_conn)
 		return SLURM_SUCCESS;
 	}
 
-	if (!association_based_accounting)
+	if (!slurm_with_slurmdbd())
 		goto end_it;
 
 	slurm_mutex_lock(&fed_job_list_mutex);
