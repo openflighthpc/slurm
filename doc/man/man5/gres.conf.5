@@ -34,9 +34,11 @@ Slurm daemons, daemon receipt of the SIGHUP signal, or execution
 of the command "scontrol reconfigure" unless otherwise noted.
 
 .LP
-\fBNOTE:\fP Slurm support for gres/mps requires the use of the select/cons_tres
+\fBNOTE:\fP Slurm support for gres/[mps|shard] requires the use of the select/cons_tres
 plugin. For more information on how to configure MPS, see
 \fIhttps://slurm.schedmd.com/gres.html#MPS_Management\fR.
+For more information on how to configure Sharding, see
+\fIhttps://slurm.schedmd.com/gres.html#Sharding\fR.
 
 .LP
 For more information on GRES scheduling in general, see
@@ -76,6 +78,7 @@ times for the same nodes, they must all be the same value. To unset
 \fIAutoDetect\fR for a node when a global \fIAutoDetect\fR is set, simply set it
 to "off" in a node\-specific GRES line.
 E.g.: \fINodeName=tux3 AutoDetect=off Name=gpu File=/dev/nvidia[0\-3]\fR.
+\fIAutoDetect\fR cannot be used with cloud nodes.
 
 .TP
 \fBCount\fR
@@ -94,10 +97,12 @@ For example, it may be strongly preferable to use specific cores with specific
 GRES devices (e.g. on a NUMA architecture).
 While Slurm can track and assign resources at the CPU or thread level, its
 scheduling algorithms used to co\-allocate GRES devices with CPUs operates at a
-socket or NUMA level.
+socket or NUMA level for job allocations.
 Therefore it is not possible to preferentially assign GRES with different
-specific CPUs on the same NUMA or socket and this option should be used to
-identify all cores on some socket.
+specific CPUs on the same NUMA or socket and this option should generally be
+used to identify all cores on some socket. Though, job step allocation with
+--exact will look at cores directly for which more specific core identification
+may be useful.
 
 
 Multiple cores may be specified using a comma\-delimited list or a range may be
@@ -149,9 +154,9 @@ information: \fIhttps://slurm.schedmd.com/cgroups.html\fR.
 If \fBFile\fR is specified then \fBCount\fR must be either set to the number
 of file names specified or not set (the default value is the number of files
 specified).
-The exception to this is MPS. For MPS, each GPU would be identified by device
+The exception to this is MPS/Sharding. For either of these GRES, each GPU would be identified by device
 file using the \fBFile\fR parameter and \fBCount\fR would specify the number of
-MPS entries that would correspond to that GPU (typically 100 or some multiple of
+entries that would correspond to that GPU (typically 100 or some multiple of
 100).
 
 If using a card with Multi-Instance GPU functionality, use \fBMultipleFiles\fR
@@ -180,6 +185,27 @@ Allowed values at present are:
 Do not attempt to load plugin as this GRES will only be used to track counts of
 GRES used. This avoids attempting to load non\-existent plugin which can
 affect filesystems with high latency metadata operations for non\-existent files.
+.IP
+
+.TP
+\fBone_sharing\fR
+To be used on a shared gres. If using a shared gres (mps) on top of a sharing
+gres (gpu) only allow one of the sharing gres to be used by the shared gres.
+This is the default for MPS.
+
+NOTE: If a gres has this flag configured it is global, so all other nodes with
+that gres will have this flag implied.  This flag is not combatible with
+all_sharing for a specific gres.
+.IP
+
+.TP
+\fBall_sharing\fR
+To be used on a shared gres. This is the opposite of one_sharing and can be
+used to allow all sharing gres (gpu) on a node to be used for shared gres (mps).
+
+NOTE: If a gres has this flag configured it is global, so all other nodes with
+that gres will have this flag implied.  This flag is not combatible with
+one_sharing for a specific gres.
 .IP
 
 .TP
@@ -285,8 +311,13 @@ CUDA Multi\-Process Service (MPS)
 .TP
 \fBnic\fR
 Network Interface Card
-.RE
 .IP
+
+.TP
+\fBshard\fR
+Shards of a gpu
+.IP
+.RE
 
 .TP
 \fBNodeName\fR

@@ -39,7 +39,7 @@
 #include "gres_select_filter.h"
 #include "gres_select_util.h"
 
-#include "src/common/node_select.h"
+#include "src/common/select.h"
 #include "src/common/xstring.h"
 
 #include "src/slurmctld/gres_ctld.h"
@@ -96,7 +96,7 @@ static void _block_whole_nodes(bitstr_t *node_bitmap,
 			continue;
 		if (is_cons_tres) {
 			first_core = 0;
-			last_core = select_node_record[i_node].tot_cores;
+			last_core = node_record_table_ptr[i_node]->tot_cores;
 			cr_orig_core_bitmap = orig_core_bitmap[i_node];
 			cr_new_core_bitmap = new_core_bitmap[i_node];
 		} else {
@@ -196,7 +196,7 @@ extern void _free_avail_res_array(avail_res_t **avail_res_array)
 	if (!avail_res_array)
 		return;
 
-	for (n = 0; n < select_node_cnt; n++)
+	for (n = 0; n < node_record_count; n++)
 		common_free_avail_res(avail_res_array[n]);
 	xfree(avail_res_array);
 }
@@ -335,7 +335,7 @@ static avail_res_t **_get_res_avail(job_record_t *job_ptr,
 
 	xassert(*cons_common_callbacks.can_job_run_on_node);
 
-	avail_res_array = xcalloc(select_node_cnt, sizeof(avail_res_t *));
+	avail_res_array = xcalloc(node_record_count, sizeof(avail_res_t *));
 	i_first = bit_ffs(node_map);
 	if (i_first != -1)
 		i_last = bit_fls(node_map);
@@ -509,7 +509,7 @@ static avail_res_t **_select_nodes(job_record_t *job_ptr, uint32_t min_nodes,
 		return avail_res_array;
 
 	/* Eliminate nodes that don't have sufficient resources for this job */
-	for (n = 0; n < select_node_cnt; n++) {
+	for (n = 0; n < node_record_count; n++) {
 		if (bit_test(node_bitmap, n) &&
 		    (!avail_res_array[n] ||
 		     !avail_res_array[n]->avail_cpus)) {
@@ -662,11 +662,11 @@ static int _verify_node_state(part_res_record_t *cr_part_ptr,
 	for (i = i_first; i <= i_last; i++) {
 		if (!bit_test(node_bitmap, i))
 			continue;
-		node_ptr = select_node_record[i].node_ptr;
+		node_ptr = node_record_table_ptr[i];
 		/* node-level memory check */
 		if (min_mem && (cr_type & CR_MEMORY)) {
-			avail_mem = select_node_record[i].real_memory -
-				select_node_record[i].mem_spec_limit;
+			avail_mem = node_ptr->real_memory -
+				    node_ptr->mem_spec_limit;
 			if (avail_mem > node_usage[i].alloc_memory) {
 				free_mem = avail_mem -
 					node_usage[i].alloc_memory;
@@ -729,7 +729,7 @@ static int _verify_node_state(part_res_record_t *cr_part_ptr,
 					   disable_binding);
 		gres_cpus = gres_cores;
 		if (gres_cpus != NO_VAL)
-			gres_cpus *= select_node_record[i].vpus;
+			gres_cpus *= node_ptr->tpc;
 		if (gres_cpus == 0) {
 			debug3("node %s lacks GRES",
 			       node_ptr->name);
@@ -889,15 +889,19 @@ static int _job_test(job_record_t *job_ptr, bitstr_t *node_bitmap,
 			sockets_per_node =
 				details_ptr->mc_ptr->sockets_per_node;
 		_set_gpu_defaults(job_ptr);
+		if (!job_ptr->gres_list_req_accum)
+			job_ptr->gres_list_req_accum =
+				gres_select_util_create_list_req_accum(
+					job_ptr->gres_list_req);
 		details_ptr->min_gres_cpu = gres_select_util_job_min_cpu_node(
 			sockets_per_node,
 			details_ptr->ntasks_per_node,
-			job_ptr->gres_list_req);
+			job_ptr->gres_list_req_accum);
 		details_ptr->min_job_gres_cpu = gres_select_util_job_min_cpus(
 			details_ptr->min_nodes,
 			sockets_per_node,
 			ntasks_per_node * details_ptr->min_nodes,
-			job_ptr->gres_list_req);
+			job_ptr->gres_list_req_accum);
 	} else if (exc_cores && *exc_cores)
 		exc_core_bitmap = *exc_cores;
 
@@ -1410,9 +1414,13 @@ alloc_job:
 					 details_ptr->pn_min_cpus));
 	if (job_ptr->details->mc_ptr)
 		sockets_per_node = job_ptr->details->mc_ptr->sockets_per_node;
+	if (!job_ptr->gres_list_req_accum)
+		job_ptr->gres_list_req_accum =
+			gres_select_util_create_list_req_accum(
+				job_ptr->gres_list_req);
 	i = gres_select_util_job_min_cpus(job_res->nhosts, sockets_per_node,
 					  job_ptr->details->num_tasks,
-					  job_ptr->gres_list_req);
+					  job_ptr->gres_list_req_accum);
 	job_res->ncpus            = MAX(job_res->ncpus, i);
 	job_res->node_req         = job_node_req;
 	job_res->cpus             = cpu_count;	/* Per node CPU counts */
@@ -1425,7 +1433,7 @@ alloc_job:
 	job_res->whole_node       = job_ptr->details->whole_node;
 
 	/* store the hardware data for the selected nodes */
-	error_code = build_job_resources(job_res, node_record_table_ptr);
+	error_code = build_job_resources(job_res);
 	if (error_code != SLURM_SUCCESS) {
 		xfree(tres_mc_ptr);
 		_free_avail_res_array(avail_res_array);
@@ -1443,7 +1451,7 @@ alloc_job:
 	else
 		c_size = 0;
 	i_first = bit_ffs(node_bitmap);
-	for (i = 0, n = i_first; n < select_node_cnt; n++) {
+	for (i = 0, n = i_first; n < node_record_count; n++) {
 		int first_core, last_core;
 		bitstr_t *use_free_cores = NULL;
 
@@ -1452,7 +1460,7 @@ alloc_job:
 
 		if (is_cons_tres) {
 			first_core = 0;
-			last_core = select_node_record[n].tot_cores;
+			last_core = node_record_table_ptr[n]->tot_cores;
 			use_free_cores = free_cores[n];
 		} else {
 			first_core = cr_get_coremap_offset(n);
@@ -1464,9 +1472,9 @@ alloc_job:
 				continue;
 			if (c >= c_size) {
 				error("core_bitmap index error on node %s (NODE_INX:%d, C_SIZE:%u)",
-				      select_node_record[n].node_ptr->name,
+				      node_record_table_ptr[n]->name,
 				      n, c_size);
-				drain_nodes(select_node_record[n].node_ptr->name,
+				drain_nodes(node_record_table_ptr[n]->name,
 					    "Bad core count", getuid());
 				_free_avail_res_array(avail_res_array);
 				free_job_resources(&job_res);
@@ -1530,7 +1538,7 @@ alloc_job:
 				if (gres_task_limit[j] != NO_VAL)
 					task_limit_set = true;
 			}
-			node_ptr = node_record_table_ptr + i;
+			node_ptr = node_record_table_ptr[i];
 			node_gres_list[j] = node_ptr->gres_list;
 			sock_gres_list[j] =
 				avail_res_array[i]->sock_gres_list;
@@ -1547,7 +1555,7 @@ alloc_job:
 			sock_gres_list,
 			job_ptr->job_id, job_res,
 			job_ptr->details->overcommit,
-			tres_mc_ptr, node_record_table_ptr);
+			tres_mc_ptr);
 	}
 	xfree(gres_task_limit);
 	xfree(node_gres_list);
@@ -1574,7 +1582,9 @@ alloc_job:
 			 * subtract from the total cpu count or you
 			 * will get an incorrect count.
 			 */
-			job_ptr->total_cpus += select_node_record[i].cpus;
+
+			job_ptr->total_cpus +=
+				node_record_table_ptr[i]->cpus_efctv;
 		}
 	} else if (cr_type & CR_SOCKET) {
 		int ci = 0;
@@ -1585,10 +1595,13 @@ alloc_job:
 			if (!bit_test(job_res->node_bitmap, i))
 				continue;
 			sock_cnt = 0;
-			for (s = 0; s < select_node_record[i].tot_sockets; s++){
+			for (s = 0; s < node_record_table_ptr[i]->tot_sockets;
+			     s++) {
 				last_s = -1;
-				for (c = 0; c<select_node_record[i].cores; c++){
-					if (bit_test(job_res->core_bitmap, ci)){
+				for (c = 0; c < node_record_table_ptr[i]->cores;
+				     c++) {
+					if (bit_test(job_res->core_bitmap,
+						     ci)) {
 						if (s != last_s) {
 							sock_cnt++;
 							last_s = s;
@@ -1597,9 +1610,9 @@ alloc_job:
 					ci++;
 				}
 			}
-			job_ptr->total_cpus += (sock_cnt *
-						select_node_record[i].cores *
-						select_node_record[i].vpus);
+			job_ptr->total_cpus +=
+				(sock_cnt * node_record_table_ptr[i]->cores *
+				 node_record_table_ptr[i]->tpc);
 		}
 	} else if (build_cnt >= 0)
 		job_ptr->total_cpus = build_cnt;
@@ -1628,9 +1641,9 @@ alloc_job:
 		for (i = i_first, j = 0; i <= i_last; i++) {
 			if (!bit_test(job_res->node_bitmap, i))
 				continue;
-			nodename = select_node_record[i].node_ptr->name;
-			avail_mem = select_node_record[i].real_memory -
-				select_node_record[i].mem_spec_limit;
+			nodename = node_record_table_ptr[i]->name;
+			avail_mem = node_record_table_ptr[i]->real_memory -
+				    node_record_table_ptr[i]->mem_spec_limit;
 			if (save_mem & MEM_PER_CPU) {	/* Memory per CPU */
 				/*
 				 * If the job requested less threads that we
@@ -1680,8 +1693,6 @@ alloc_job:
 			job_res->memory_allocated[j] = needed_mem;
 			j++;
 		}
-		if ((error_code != SLURM_ERROR) && (save_mem == 0))
-			details_ptr->pn_min_memory = lowest_mem;
 	}
 	if (error_code == SLURM_ERROR)
 		free_job_resources(&job_ptr->job_resrcs);
@@ -2058,7 +2069,7 @@ timer_check:
 
 	FREE_NULL_LIST(cr_job_list);
 	part_data_destroy_res(future_part);
-	node_data_destroy(future_usage, NULL);
+	node_data_destroy(future_usage);
 	FREE_NULL_BITMAP(orig_map);
 
 	return rc;
@@ -2204,7 +2215,7 @@ top:	orig_node_map = bit_copy(save_node_map);
 			FREE_NULL_BITMAP(orig_node_map);
 			list_iterator_destroy(job_iterator);
 			part_data_destroy_res(future_part);
-			node_data_destroy(future_usage, NULL);
+			node_data_destroy(future_usage);
 			goto top;
 		}
 		list_iterator_destroy(job_iterator);
@@ -2241,7 +2252,7 @@ top:	orig_node_map = bit_copy(save_node_map);
 		}
 
 		part_data_destroy_res(future_part);
-		node_data_destroy(future_usage, NULL);
+		node_data_destroy(future_usage);
 	}
 	FREE_NULL_BITMAP(orig_node_map);
 	FREE_NULL_BITMAP(save_node_map);
@@ -2318,14 +2329,14 @@ extern int common_job_test(job_record_t *job_ptr, bitstr_t *node_bitmap,
 			alloc_mode = "Test_Only";
 		else if (mode == SELECT_MODE_RUN_NOW)
 			alloc_mode = "Run_Now";
-		info("%pJ node_mode:%s alloc_mode:%s",
-		     job_ptr, node_mode, alloc_mode);
+		verbose("%pJ node_mode:%s alloc_mode:%s",
+			job_ptr, node_mode, alloc_mode);
 
 		core_array_log("node_list & exc_cores", node_bitmap, exc_cores);
 
-		info("nodes: min:%u max:%u requested:%u avail:%u",
-		     min_nodes, max_nodes, req_nodes,
-		     bit_set_count(node_bitmap));
+		verbose("nodes: min:%u max:%u requested:%u avail:%u",
+			min_nodes, max_nodes, req_nodes,
+			bit_set_count(node_bitmap));
 		node_data_dump();
 	}
 
@@ -2354,17 +2365,14 @@ extern int common_job_test(job_record_t *job_ptr, bitstr_t *node_bitmap,
 	if ((slurm_conf.debug_flags & DEBUG_FLAG_CPU_BIND) ||
 	    (slurm_conf.debug_flags & DEBUG_FLAG_SELECT_TYPE)) {
 		if (job_ptr->job_resrcs) {
-			if (rc != SLURM_SUCCESS) {
-				info("error:%s",
-				     slurm_strerror(rc));
-			}
+			verbose("Test returned:%s", slurm_strerror(rc));
 			log_job_resources(job_ptr);
 			if (is_cons_tres)
 				gres_job_state_log(job_ptr->gres_list_req,
 						   job_ptr->job_id);
 		} else {
-			info("no job_resources info for %pJ rc=%d",
-			     job_ptr, rc);
+			verbose("no job_resources info for %pJ rc=%d",
+				job_ptr, rc);
 		}
 	}
 

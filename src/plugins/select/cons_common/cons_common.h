@@ -57,7 +57,7 @@ typedef struct avail_res {	/* Per-node resource availability */
 	uint16_t sock_cnt;	/* Number of sockets on this node */
 	List sock_gres_list;	/* Per-socket GRES availability, sock_gres_t */
 	uint16_t spec_threads;	/* Specialized threads to be reserved */
-	uint16_t vpus;		/* Virtual processors (CPUs) per core */
+	uint16_t tpc;		/* Threads/cpus per core */
 } avail_res_t;
 
 struct select_nodeinfo {
@@ -113,7 +113,6 @@ extern const uint32_t plugin_id;
 extern bool     preempt_by_part;
 extern bool     preempt_by_qos;
 extern uint16_t priority_flags;
-extern int      select_node_cnt;
 extern bool     spec_cores_first;
 extern bool     topo_optional;
 

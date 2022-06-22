@@ -1,6 +1,356 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 22.05.2
+==========================
+ -- Fix a segfault in slurmctld when requesting gres in job arrays.
+ -- Prevent jobs from launching on newly powered up nodes that register with
+    invalid config.
+ -- Fix a segfault when there's no memory.swap.current interface in cgroup/v2.
+ -- Fix memleak in cgroup/v2.
+
+* Changes in Slurm 22.05.1
+==========================
+ -- Flush the list of Include config files on SIGHUP.
+ -- Fix and update Slurm completion script.
+ -- jobacct_gather/cgroup - Add VMem support both for cgroup v1 and v2.
+ -- Allow subset of node state transitions when node is in INVAL state.
+ -- Remove INVAL state from cloud node after being powered down.
+ -- When showing reason UID in scontrol show node, use the authenticated UID
+    instead of the login UID.
+ -- Fix calculation of reservation's NodeCnt when using dynamic nodes.
+ -- Add SBATCH_{ERROR,INPUT,OUTPUT} input environment variables for --error,
+    --input and --output options respectively.
+ -- Prevent oversubscription of licenses by the backfill scheduler when not
+    using the new "bf_licenses" option.
+ -- Jobs with multiple nodes in a heterogeneous cluster now have access to all
+    the memory on each node by using --mem=0. Previously the memory limit was
+    set by the node with the least amount of memory.
+ -- Don't limit the size of TaskProlog output (previously TaskProlog output was
+    limited to 4094 characters per line, which limited the size of exported
+    environment variables or logging to the task).
+ -- Fix usage of possibly uninitialized buffer in proctrack/cgroup.
+ -- Fix memleak in proctrack/cgroup proctrack_p_wait.
+ -- Fix cloud/remote het srun jobs.
+ -- Fix a segfault that may happen on gpu configured as no_consume.
+
+* Changes in Slurm 22.05.0
+==========================
+ -- openapi/v0.0.38 - add group name to job info
+ -- openapi/v0.0.38 - add container field to job description.
+ -- openapi/v0.0.38 - add container to job submission.
+ -- openapi/[db]v0.0.38 - add container field to job description.
+ -- openapi/dbv0.0.38 - fix bug where QOS update set various limits to 0.
+ -- openapi/dbv0.0.38 - properly initialize wckey record.
+ -- openapi/dbv0.0.38 - properly initialize cluster record.
+ -- openapi/dbv0.0.38 - gracefully update existing QOSs.
+ -- Fix x11 forwarding with job_container/tmpfs and without home_xauthority.
+ -- Fix reconfig of dynamic nodes with gres.
+ -- Fix corner case issues when removing assocs/qos' while jobs are completing
+    and a reconfigure happens.
+ -- Add SlurmdParameters=numa_node_as_socket to use the numa node as a socket.
+ -- Avoid creating and referencing NULL script/env hash entries when not storing
+    the job script or job environment.
+ -- slurmd - If a het component job fails to launch due to a node prolog or
+    other failure, properly handle the whole het job.
+ -- Fix possible race condition while handling forwarded messages.
+ -- Add new SchedulerParameters option "bf_licenses" to track licenses as
+    within the backfill scheduler.
+ -- Fix resuming nodes not part of an allocation.
+ -- Minor memory leak fixes.
+ -- Use accept4() and pipe2() to ensure new file descriptors are always set
+    with close-on-exec flag.
+ -- slurmctld - allow users to request tokens for themselves by name.
+ -- srun - adjust output of "--mpi=list".
+ -- Fix "--gpu-bind=single:" having wrong env variables.
+ -- Sync missing pieces in slurmctld SIGHUP handler with respect to
+    REQUEST_RECONFIGURE RPC handler.
+ -- Fixed the behavior of the --states=all option in squeue to actually show
+    all of the states.
+ -- job_container - Don't constrain a job using --no-allocate.
+ -- Fix slurmctld segfault when a step requests a gres without a file.
+ -- Fix slurmctld segfault when cleaning up an overlapping step.
+ -- Dynamic node fixes and updates.
+ -- Added error logging when a node goes into an invalid state so that the user
+    can still see the reason even if the user set a custom reason beforehand.
+ -- Remove redundant message when libdbus is found during configure.
+ -- Fix pmix to honor SrunPortRange.
+ -- Fix issue with ntasks_per_socket and ntasks_per_core with --exclusive
+ -- openapi/v0.0.38 - change job parsing error message to reflect reality.
+ -- Avoid segfault/assert when --thread-spec used with config_overrides
+ -- Don't send SIGTERM to prematurely in run_command.
+ -- Add logging to inform where networking errors are occurring on slurmd end.
+ -- openapi/dbv0.0.38 - Enforce GET /association/ to dump only a single
+    association.
+ -- openapi/dbv0.0.38 - Enforce DELETE /association/ to delete only a single
+    association.
+ -- openapi/dbv0.0.38 - Add parameters to filter to GET /associations/.
+ -- openapi/dbv0.0.38 - Add DELETE /associations using parameters to set filters.
+ -- openapi/dbv0.0.38 - Fix plural form of delete association response schema.
+
+* Changes in Slurm 22.05.0rc1
+=============================
+ -- gres/gpu - Avoid stripping GRES type field during normalization if any
+    other GRES have a defined type field.
+ -- burst_buffer/datawarp - free bb_job after stage-out or teardown are done.
+ -- acct_gather_energy_rsmi has been renamed acct_gather_energy_gpu.
+ -- Remove support for (non-functional) --cpu-bind=boards.
+ -- accounting_storage/mysql - ensure new non-HetJobs have het_job_offset NO_VAL
+    in the database and fix the same field when retrieving older bad records.
+ -- PreemptMode now works as a condition for qos in sacctmgr.
+ -- scancel - add "--me" option.
+ -- gres/gpu - Fix configured/system-detected GRES match for some combinations
+    for which the sorting affected the expected selection result.
+ -- openapi/v0.0.38 - Fork existing openapi/v0.0.37 plugin.
+ -- openapi/dbv0.0.38 - Fork existing openapi/dbv0.0.37 plugin.
+ -- openapi/v0.0.35 - Plugin has been removed.
+ -- scrontab - Don't accept extra letters after a '@' repeating pattern.
+ -- openapi/dbv0.0.38 - Add missing method POST for /associations/.
+ -- Make DefMemPerCPU/MaxMemPerCPU and DefMemPerNode/MaxMemPerNode precedence
+    at the global level the same as in partition level, and print an error
+    if both of a pair are set.
+ -- openapi/v0.0.38 - Allow strings for JobIds instead of only numerical JobIds
+    for GET, DELETE, and POST job methods.
+ -- openapi/v0.0.38 - enable job priority field for job submissions and updates.
+ -- openapi/v0.0.38 - request node states query includes MIXED state instead of
+    only allocated.
+ -- openapi/dbv0.0.38 - Correct tree position of dbv0.0.38_job_step.
+ -- Enforce all Slurm plugin requirements for plugins specified with absolute
+    path.
+ -- Added --prefer option at job submission to allow for 'soft' constraints.
+ -- Remove support for PMIx 1.x
+ -- slurmrestd - Unlink unix sockets before binding to avoid errors where
+    previous run of slurmrestd did not properly cleanup the sockets.
+ -- Add extra 'EnvironmentFile=-/etc/default/$service' setting to service files.
+ -- slurmctld/agent - spawn more agent threads in a single _agent_retry().
+ -- openapi/v0.0.38 - change job response types to more specific types than
+    generic string.
+ -- srun - refuse to run on malformed SPANK environment variable.
+ -- Allow jobs to pack onto nodes already rebooting with the desired features.
+ -- Reset job start time after nodes are rebooted.
+ -- Node features (if any) are passed to RebootProgram if run from slurmctld.
+ -- Fix sending multiple features to RebootProgram.
+ -- If a task/srun prolog fails don't allow the step to continue running.
+ -- Fail srun when using invalid --cpu-bind options.
+ -- cgroup/v1 - Set swappiness at job level instead of at root level.
+ -- Fix issues where a step's GRES request could never be satisfied but the step
+    remained pending forever instead of being rejected.
+ -- openapi/v0.0.38 - Remove errant extra space after JOB_CPUS_SET flag.
+ -- slurmrestd - refuse to run with gid 0, or under SlurmUser's gid.
+ -- Storing batch scripts and env vars are now in indexed tables using
+    substantially less disk space.  Those storing scripts in 21.08 will all
+    be moved and indexed automatically.
+ -- Run MailProg through slurmscriptd instead of directly fork+exec()'ing
+    from slurmctld.
+ -- Add acct_gather_interconnect/sysfs plugin.
+ -- Fix gpus spanning more resources than needed when usng --cpus-per-gpu.
+ -- burst_buffer plugins - err_msg added to bb_p_job_validate().
+ -- burst_buffer plugins - Send user specific error message if permission
+    denied due to AllowUsers or DenyUsers in burst_buffer.conf.
+ -- Fatal if the mutually-exclusive JobAcctGatherParams options of UsePss and
+    NoShared are both defined.
+ -- Future and Cloud nodes are treated as "Planned Down" in usage reports.
+ -- Add "condflags=open" to sacctmgr show events to return open/currently down
+    events.
+ -- Skip --mem-per-gpu impact on GRES availability when CR_MEMORY not set.
+ -- Add reservation start time as a new schedulers sorting factor for magnetic
+    or multi-reservation job queue records.
+ -- Improve Dynamic Future node startup to load in config with mapped nodename.
+ -- Add new shard plugin for sharing gpus but not with mps.
+ -- acct_gather_energy/xcc - add support for Lenovo SD650 V2.
+ -- Remove cgroup_allowed_devices_file.conf support.
+ -- sacct -f flag implies -c flag.
+ -- Node state flags (DRAIN, FAILED, POWERING UP, etc.) will be cleared now if
+    node state is updated to FUTURE.
+ -- Clear GRES environment variables for jobs or steps that request --gres=none.
+ -- slurmctld - Avoid requiring environment to be set when container job is
+    specified.
+ -- Move the KeepAliveTime option into CommunicationParameters.
+ -- slurm.spec - stop explicitly packaging pkgconfig directory to avoid a
+    conflict with the pkgconfig package.
+ -- Fix sacctmgr load dump printing incorrect default QOS when no value is set.
+ -- Fix very early logging in the controller when daemonized
+ -- Fix possibility of primary group going missing when running jobs submitted
+    after a user has switched primary groups (eg: with sg).
+ -- Make it so srun no longer inherits SLURM_CPUS_PER_TASK. It now will only
+    inherit SRUN_CPUS_PER_TASK.
+ -- Make HetJob signaling requests using the HetJobId+HetJobOffset format behave
+    the same as with direct JobId requests with regards to job state and
+    whole_hetjob considerations.
+ -- scancel - avoid issuing a RPC for each HetJob non-leader components hit by
+    using filters (not using jobids) when a RPC is issued for their leader.
+ -- Make slurmctld call the JobCompPlugin set location operation on SIGUSR2. As
+    a relevant consequence, the filetxt plugin reopens the file for potential
+    logrotation.
+ -- openapi/v0.0.38 - added fields bf_table_size and bf_table_size_mean to
+    diag query.
+ -- Handle scontrol setdebug[flags] and scontrol reconfigure in slurmscriptd.
+ -- openapi/v0.0.38 - add /licenses endpoint.
+ -- slurmrestd - only compile JWT authentication plugin if libjwt is present.
+ -- Remove connect_timeout and timeout options from JobCompParams as there's no
+    longer a connectivity check happening in the jobcomp/elasticsearch plugin
+    when setting the location off of JobCompLoc.
+ -- Add %n for NodeName substitution in SlurmdSpoolDir in nss_slurm.conf.
+ -- job_container/tmpfs - add basic environment variables to InitScript.
+ -- openapi/dbv0.0.38 - split security entries in openapi.json.
+ -- openapi/v0.0.38 - Add schema for Slurm meta in responses.
+ -- openapi/dbv0.0.38 - Add schema for Slurm meta in responses.
+ -- openapi/v0.0.38 - Correct field "errno" to "error_number" in schema for
+    errors.
+ -- openapi/dbv0.0.38 - add failure response contents in openapi.json.
+ -- openapi/v0.0.38 - add failure response contents in openapi.json.
+ -- openapi/dbv0.0.38 - add requestBody for /users/ in openapi.json.
+ -- openapi/dbv0.0.38 - add requestBody for /accounts/ in openapi.json.
+ -- openapi/dbv0.0.38 - add missing response field "removed_associations"
+    in openapi.json
+ -- openapi/dbv0.0.38 - Correct type from object to array for user assocations
+    list in openapi.json.
+ -- openapi/dbv0.0.38 - Add missing field for tres minutes per qos in qos list
+    in openapi.json.
+ -- openapi/dbv0.0.38 - Add missing field for name in qos list in openapi.json.
+ -- openapi/dbv0.0.38 - Correct tres field in qos list in openapi.json.
+ -- openapi/dbv0.0.38 - Correct het job details types in jobs in openapi.json
+ -- openapi/dbv0.0.38 - Correct task type for job steps in openapi.json.
+ -- openapi/dbv0.0.38 - Sync fields for errors to source in openapi.json.
+ -- openapi/dbv0.0.38 - Add missing field for adding clusters in clusters list
+    in openapi.json.
+ -- openapi/v0.0.38 - correct parameter styles from "simple" to "form".
+ -- openapi/dbv0.0.38 - correct parameter styles from "simple" to "form".
+ -- openapi - add flags to slurm_openapi_p_get_specification().
+ -- openapi/v0.0.38 - use new operationId generation to ensure uniqueness.
+ -- openapi/dbv0.0.38 - use new operationId generation to ensure uniqueness.
+ -- slurmstepd - avoid possible race condition while updating step return code
+    during job startup.
+ -- slurmstepd - report and log I/O setup failure using corresponding error
+    code during job start.
+ -- Do not run the job if PrologSlurmctld times out.
+ -- Fix SPANK plugin calls slurm_spank_job_prolog and slurm_spank_job_epilog
+    not properly respecting PrologEpilogTimeout.
+ -- Add support for 'scontrol delete <ENTITY> <ID>' format alongside the already
+    expected 'scontrol delete <ENTITY>=<ID>'.
+ -- Fix task/cgroup plugin which was not adding stepd to memory cgroup.
+ -- preempt/qos - add support for WITHIN mode to allow for preemption between
+    jobs within the same qos.
+ -- Fix sattach for interactive step.
+ -- Fix srun -Z when using nss_slurm.
+ -- Avoid memory leak in srun -Z.
+ -- openapi/dbv0.0.38 - disable automatic lookup of all HetJob components on
+    specific job lookups.
+ -- Add support for hourly reoccurring reservations.
+ -- openapi/v0.0.38 - Fix misspelling of job parameter time_minimum.
+ -- openapi/v0.0.38 - Fix misspelling of job parameter cpu_binding_hint.
+ -- openapi/v0.0.38 - Fix misspelling of job parameter mcs_label
+ -- openapi/dbv0.0.38 - Fix issue where association's QOS list consisted of IDs
+    instead of names.
+ -- Allow nodes to be dynamically added and removed from the system.
+ -- srun --overlap now allows the step to share all resources (CPUs, memory, and
+    GRES), where previously --overlap only allowed the step to share CPUs with
+    other steps.
+ -- openapi/v0.0.38 - new format for how core and socket allocations are dumped
+    for jobs.
+ -- openapi/v0.0.38 - add RPC call statistics to diag endpoint.
+ -- openapi/[db]v0.0.36 - plugins have been marked as deprecated.
+ -- sacct - allocations made by srun will now always display the allocation and
+    step(s). Previously, the allocation and step were combined when possible.
+ -- Steps now allocate gres according to topo data.
+ -- Add validation of numbers provided to --gpu-bind=map_gpu and
+    --gpu-bind=mask_gpu=.
+ -- Fatal error if CgroupReleaseAgentDir is configured in cgroup.conf. The
+    option has long been obsolete.
+ -- cons_tres - change definition of the "least loaded node" (LLN) to the
+    node with the greatest ratio of available cpus to total cpus.
+ -- Fatal if more than one burst buffer plugin is configured.
+ -- Added keepaliveinterval and keepaliveprobes options to
+    CommunicationParameters.
+ -- Correctly failover to backup slurmdbd if the primary slurmdbd node crashes.
+ -- Add support to ship Include configuration files with configless.
+ -- Fix issues with track_script cleanup.
+ -- Add new max_token_lifespan limit to AuthAltParameters.
+ -- sacctmgr - allow Admins to update AdminComment and SystemComment fields.
+ -- slurmd - Cache node features at startup and scontrol reconfig. It avoids
+    executing node_features/helpers scripts in the middle of a job. This clould
+    potentially affect job performance.
+ -- Pass and use alias_list through credential instead of environment variable.
+ -- Add ability to get host addresses from nss_slurm.
+ -- Enable reverse fanout for cloud+alias_list jobs.
+ -- Disallow slurm.conf node configurations with NodeName=ALL.
+ -- Add support to delete/update nodes by specifying nodesets or the 'ALL'
+    keyword alongside the delete/update node message nodelist expression (i.e.
+    'scontrol delete/update NodeName=ALL' or 'scontrol delete/update
+    NodeName=ns1,nodes[1-3]').
+ -- Add support for PMIx v4
+ -- Add support for PMIx v5
+ -- Correctly load potentially NULL values from slurmdbd archive files.
+ -- Add slurmdbd.conf option AllowNoDefAcct to remove requirement for users to
+    have a default account.
+ -- Fix issues related to users with very large uids.
+ -- common/openapi - fix bug populating methods for parameter-less endpoint.
+ -- slurmrestd/operations - fix memory leak when resolving bad path.
+ -- sacctmgr - improve performance of query generation for archive load.
+ -- sattach - allow connecting to interactive steps with JOBID.interactive
+ -- Fix for --gpus-per-task parsing when using --cpus-per-gpu and multiple gpu
+    types in the same request.
+ -- rest_auth/local - always log when new slurmdbd connection fails.
+ -- openapi/dbv0.0.38 - gracefully update existing associations.
+ -- Improve auto-detection of pmix
+ -- openapi/dbv0.0.38 - Add missing method POST for /qos/.
+ -- scrontab - On errors, print 1-index line numbers instead of 0-indexing them.
+ -- openapi/dbv0.0.38 - Correct OpenAPI specification for diag request.
+ -- openapi/dbv0.0.38 - reject requests with incorrect TRES specification.
+ -- sacctmgr - reject requests with incorrect TRES specification.
+ -- Correct issue where conversion to/from JSON/YAML may have resulted in empty
+    strings being replaced with strings containing "null" instead.
+ -- Attempt to requeue jobs terminated by slurm.conf changes (node vanish, node
+    socket/core change, etc). Processes may still be running on excised nodes.
+    Admin should take precautions when removing nodes that have jobs on running
+    on them.
+ -- Fix race with task/cgroup memory and jobacctgather/cgroup, the first was
+    removing the pid from the task_X cgroup directory.
+ -- openapi/dbv0.0.38 - set default account org and desc to be account name.
+ -- openapi/dbv0.0.38 - Allow strings for JobId instead of only numerical JobId
+    for GET job methods.
+ -- Add switch/hpe_slingshot plugin.
+ -- cloud_reg_addrs - use hostname from slurmd rather than from munge
+    credential for NodeHostName.
+ -- Store assoc usage in parent assoc when deleted to preserve account
+    fairshare.
+ -- CVE-2022-29500 - Prevent credential abuse.
+ -- CVE-2022-29501 - Prevent abuse of REQUEST_FORWARD_DATA.
+ -- CVE-2022-29502 - Correctly validate io keys.
+ -- openapi/dbv0.0.38 - set with_deleted to false by default for /user[s].
+ -- openapi/dbv0.0.38 - add with_deleted input parameter to GET /user[s].
+ -- openapi/dbv0.0.38 - add deleted flag to /user[s] output.
+ -- openapi/dbv0.0.38 - set with_deleted to false by default for GET /qos.
+ -- openapi/dbv0.0.38 - add with_deleted input to GET /qos.
+ -- openapi/dbv0.0.38 - set with_deleted to false by default for GET /account[s]
+ -- openapi/dbv0.0.38 - add with_deleted input to GET /account[s].
+ -- Include k12 hash of the RPC message body in the auth/munge tokens to
+    provide for additional communication resiliency.
+ -- Allow job steps to continue to launch during OverTimeLimit.
+ -- slurmctld - avoid crash when attempting to load job without a script.
+ -- Fix exclusive jobs breaking MaxCPUsPerNode limit
+ -- Error if ConstrainSwapSpace is set and system doesn't have the kernel with
+    CONFIG_MEMCG_SWAP set. This will avoid bad configurations.
+ -- Add SlurmdParameters=numa_node_as_socket.
+ -- Fix incorrect node allocation when using multiple counts with --constraint
+    and --ntasks-per-node.
+
+* Changes in Slurm 21.08.9
+==========================
+ -- Fix cross-endian communication.
+ -- Fix slurmd segfault when seeing authentication issues alongside a failed
+    message forward.
+ -- Fix resuming nodes not part of an allocation.
+ -- Fix "--gpu-bind=single:" having wrong env variables.
+ -- Fix logic estimating when a job can start based on ANY_NODES / LICENSE_ONLY
+    reservations that could lead to an infinite loop in backfill.
+ -- Fix a segfault that may happen on gpu configured as no_consume.
+
+* Changes in Slurm 21.08.8-2
+============================
+ -- Fix communication forwarding when running with a mix of patch and unpatched
+    slurmd processes.
+
 * Changes in Slurm 21.08.8
 ==========================
  -- openapi/dbv0.0.37 - fix slurmrestd fatal() when deleting an association.
@@ -639,6 +989,12 @@ documents those changes that are of interest to users and administrators.
  -- Add support for automatically detecting and broadcasting executable shared
     object dependencies for sbcast and srun --bcast.
  -- Delay steps when memory already used instead of rejecting step request.
+
+* Changes in Slurm 20.11.10
+===========================
+ -- Fix cross-endian communication.
+ -- Fix slurmd segfault when seeing authentication issues alongside a failed
+    message forward.
 
 * Changes in Slurm 20.11.9
 ==========================

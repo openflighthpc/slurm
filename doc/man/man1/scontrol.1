@@ -1,4 +1,4 @@
-.TH scontrol "1" "Slurm Commands" "March 2022" "Slurm Commands"
+.TH scontrol "1" "Slurm Commands" "May 2022" "Slurm Commands"
 
 .SH "NAME"
 scontrol \- view or modify Slurm configuration and state.
@@ -127,9 +127,8 @@ The cluster to issue commands to. Only one cluster name may be specified.
 
 .TP
 \fBcreate\fR <\fISPECIFICATION\fR>
-Create a new partition or reservation.  See the full list of parameters
-below.  Include the tag "res" to create a reservation without specifying
-a reservation name.
+Create a new node, partition, or reservation.  See the full list of parameters
+below.
 .IP
 
 .TP
@@ -141,10 +140,11 @@ COMPLETING or DOWN state.
 .TP
 \fBdelete\fR <\fISPECIFICATION\fR>
 Delete the entry with the specified \fISPECIFICATION\fP.
-The two \fISPECIFICATION\fP choices are \fIPartitionName=<name>\fP and
-\fIReservation=<name>\fP. Reservations and partitions should have
-no associated jobs at the time of their deletion (modify the jobs first).
-If the specified partition is in use, the request is denied.
+The three \fISPECIFICATION\fP choices are \fINodeName=<nodelist>\fP,
+\fIPartitionName=<name>\fP and \fIReservation=<name>\fP. Nodes can't be deleted
+if they are in a reservation or have jobs on running. Reservations and
+partitions should have no associated jobs at the time of their deletion (modify
+the jobs first). If the specified partition is in use, the request is denied.
 .IP
 
 .TP
@@ -1066,6 +1066,13 @@ Set the job's partition to the specified value.
 .IP
 
 .TP
+\fBPrefer\fR=<\fIfeatures\fR>
+Set the job's preferred node features. This list is only preferred, not required
+like \fIFeatures\fP is.  This list will override what is requested in Features.
+See \fIFeatures\fP option above.
+.IP
+
+.TP
 \fBPriority\fR=<\fInumber\fR>
 Set the job's priority to the specified value.
 Note that a job priority of zero prevents the job from ever being scheduled.
@@ -1407,12 +1414,22 @@ current time limit, the \fIStepId\fP specification must precede the
 \fITimeLimit\fP specification.
 .IP
 
+.SH "NODES \- SPECIFICATIONS FOR CREATE COMMAND"
+
+Provide the same NodeName configration as found in the slurm.conf. See
+slurm.conf man page for details. Only State=CLOUD and State=FUTURE nodes are
+allowed.
+
 .SH "NODES \- SPECIFICATIONS FOR UPDATE COMMAND"
 
 .TP
 \fBNodeName\fR=<\fIname\fR>
 Identify the node(s) to be updated. Multiple node names may be specified using
-simple node range expressions (e.g. "lx[10\-20]"). This specification is required.
+simple node range expressions (e.g. "lx[10\-20]"). Nodesets can also be
+specified by themselves or mixed with node range expressions, using a comma as
+a list separator. If the keyword "ALL" is specified alone, then the update
+will be attempted against all the nodes in the local cluster. This specification
+is required.
 .IP
 
 .TP
@@ -1634,6 +1651,18 @@ of the slurmctld daemon with the \fI\-R\fR option and state files
 preserved or slurmctld's receipt of a SIGHUP.
 Update slurm.conf with any changes meant to be persistent across normal
 restarts of slurmctld or the execution of \fBscontrol reconfig\fR.
+.IP
+
+.SH "NODES \- SPECIFICATIONS FOR DELETE COMMAND"
+
+.TP
+\fBNodeName\fR=<\fInodes\fR>
+Identify the node(s) to be deleted. Multiple node names may be specified using
+simple node range expressions (e.g. "lx[10\-20]"). Nodesets can also be
+specified by themselves or mixed with node range expressions, using a comma as
+a list separator. If the keyword "ALL" is specified alone, then the update
+will be attempted against all the nodes in the local cluster. This specification
+is required.
 .IP
 
 .SH "NODES \- SPECIFICATIONS FOR SHOW COMMAND"
@@ -2004,7 +2033,7 @@ The memory size is specified in megabytes.
 .IP
 
 .TP
-\fBMaxMemPerCNode\fR=<\fIMB\fR>
+\fBMaxMemPerNode\fR=<\fIMB\fR>
 Set the maximum memory to be allocated per node for jobs in this partition.
 The memory size is specified in megabytes.
 .IP
@@ -2194,7 +2223,7 @@ See the slurm.conf man page for more information.
 Identify the name of the reservation to be created, updated, or deleted.
 This parameter is required for update and is the only parameter for delete.
 For create, if you do not want to give a reservation name, use
-"scontrol create res ..." and a name will be created automatically.
+"scontrol create reservation ..." and a name will be created automatically.
 .IP
 
 .TP
@@ -2392,6 +2421,11 @@ supported.
 Ignore currently running jobs when creating the reservation.
 This can be especially useful when reserving all nodes in the system
 for maintenance.
+.IP
+
+.TP
+\fBHOURLY\fR
+Repeat the reservation at the same time every hour.
 .IP
 
 .TP

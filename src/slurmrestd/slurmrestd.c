@@ -51,22 +51,22 @@
 
 #include "slurm/slurm.h"
 
+#include "src/common/conmgr.h"
 #include "src/common/data.h"
 #include "src/common/fd.h"
 #include "src/common/log.h"
-#include "src/common/node_select.h"
 #include "src/common/openapi.h"
 #include "src/common/plugrack.h"
 #include "src/common/proc_args.h"
 #include "src/common/read_config.h"
 #include "src/common/ref.h"
+#include "src/common/select.h"
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
-#include "src/slurmrestd/conmgr.h"
 #include "src/slurmrestd/http.h"
 #include "src/slurmrestd/operations.h"
 #include "src/slurmrestd/rest_auth.h"
@@ -316,8 +316,12 @@ static void _lock_down(void)
 		fatal("Unable to setuid: %m");
 	if (check_user && (getuid() == 0))
 		fatal("slurmrestd should not be run as the root user.");
+	if (check_user && (getgid() == 0))
+		fatal("slurmrestd should not be run with the root goup.");
 	if (check_user && (slurm_conf.slurm_user_id == getuid()))
 		fatal("slurmrestd should not be run as SlurmUser");
+	if (check_user && (gid_from_uid(slurm_conf.slurm_user_id) == getgid()))
+		fatal("slurmrestd should not be run with SlurmUser's group.");
 }
 
 /* simple wrapper to hand over operations router in http context */
@@ -523,7 +527,7 @@ int main(int argc, char **argv)
 	auth_rack = NULL;
 
 	xfree(auth_plugin_handles);
-	slurm_select_fini();
+	select_g_fini();
 	slurm_auth_fini();
 	slurm_conf_destroy();
 	log_fini();

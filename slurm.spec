@@ -1,5 +1,5 @@
 Name:		slurm
-Version:	21.08.8
+Version:	22.05.2
 %define rel	1
 Release:	%{rel}.flight1%{?dist}
 Summary:	Slurm Workload Manager
@@ -76,7 +76,9 @@ BuildRequires: systemd
 BuildRequires: munge-devel munge-libs
 BuildRequires: python3
 BuildRequires: readline-devel
-Obsoletes: slurm-lua slurm-munge slurm-plugins
+Obsoletes: slurm-lua <= %{version}
+Obsoletes: slurm-munge <= %{version}
+Obsoletes: slurm-plugins <= %{version}
 
 # fake systemd support when building rpms on other platforms
 %{!?_unitdir: %global _unitdir /lib/systemd/systemd}
@@ -242,7 +244,7 @@ Slurm compute node daemon. Used to launch jobs on compute nodes
 Summary: Slurm database daemon
 Group: System Environment/Base
 Requires: %{name}%{?_isa} = %{version}-%{release}
-Obsoletes: slurm-sql
+Obsoletes: slurm-sql <= %{version}
 %description slurmdbd
 Slurm database daemon. Used to accept and process database RPCs and upload
 database changes to slurmctld daemons on each cluster
@@ -274,7 +276,9 @@ OpenLava wrapper scripts used for helping migrate from OpenLava/LSF to Slurm
 Summary: Perl tool to print Slurm job state information
 Group: Development/System
 Requires: %{name}%{?_isa} = %{version}-%{release}
-Obsoletes: slurm-sjobexit slurm-sjstat slurm-seff
+Obsoletes: slurm-sjobexit <= %{version}
+Obsoletes: slurm-sjstat <= %{version}
+Obsoletes: slurm-seff <= %{version}
 %description contribs
 seff is a mail program used directly by the Slurm daemons. On completion of a
 job, wait for it's accounting information to be available and include that
@@ -293,7 +297,7 @@ Summary: PAM module for restricting access to compute nodes via Slurm
 Group: System Environment/Base
 Requires: %{name}%{?_isa} = %{version}-%{release}
 BuildRequires: pam-devel
-Obsoletes: pam_slurm
+Obsoletes: pam_slurm <= %{version}
 %description pam_slurm
 This module restricts access to compute nodes in a cluster where Slurm is in
 use.  Access is granted to root, any user with an Slurm-launched job currently
@@ -321,7 +325,6 @@ Provides a REST interface to Slurm.
 Summary: support daemons and software for the Cray SMW
 Group: System Environment/Base
 Requires: %{name}%{?_isa} = %{version}-%{release}
-Obsoletes: craysmw
 %description slurmsmwd
 support daemons and software for the Cray SMW.  Includes slurmsmwd which
 notifies slurm about failed nodes.
@@ -339,7 +342,6 @@ notifies slurm about failed nodes.
 	%{?_with_pam_dir} \
 	%{?_with_cpusetdir} \
 	%{?_with_mysql_config} \
-	%{?_with_ssl} \
 	%{?_without_cray:--enable-really-no-cray}\
 	%{?_with_cray_network:--enable-cray-network}\
 	%{?_with_multiple_slurmd:--enable-multiple-slurmd} \
@@ -558,7 +560,6 @@ rm -rf %{buildroot}
 %dir %attr(0755,root,root)
 %dir %{_prefix}/include/slurm
 %{_prefix}/include/slurm/*
-%dir %{_libdir}/pkgconfig
 %{_libdir}/pkgconfig/slurm.pc
 #############################################################################
 
