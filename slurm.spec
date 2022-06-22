@@ -345,7 +345,7 @@ notifies slurm about failed nodes.
 	%{?_without_cray:--enable-really-no-cray}\
 	%{?_with_cray_network:--enable-cray-network}\
 	%{?_with_multiple_slurmd:--enable-multiple-slurmd} \
-	%{?_with_pmix:--with-pmix=/usr} \
+	%{?_with_pmix} \
 	%{?_with_freeipmi} \
 	%{?_with_hdf5} \
 	%{?_with_shared_libslurm} \
