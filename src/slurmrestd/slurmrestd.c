@@ -103,7 +103,11 @@ static plugrack_t *auth_rack = NULL;
 
 static char *oas_specs = NULL;
 bool unshare_sysv = true;
+bool unshare_files = true;
 bool check_user = true;
+
+extern parsed_host_port_t *parse_host_port(const char *str);
+extern void free_parse_host_port(parsed_host_port_t *parsed);
 
 /* SIGPIPE handler - mostly a no-op */
 static void _sigpipe_handler(int signum)
@@ -153,6 +157,9 @@ static void _parse_env(void)
 		while (token) {
 			if (!xstrcasecmp(token, "disable_unshare_sysv")) {
 				unshare_sysv = false;
+			} else if (!xstrcasecmp(token,
+						"disable_unshare_files")) {
+				unshare_files = false;
 			} else if (!xstrcasecmp(token, "disable_user_check")) {
 				check_user = false;
 			} else {
@@ -304,7 +311,7 @@ static void _lock_down(void)
 		fatal("Unable to disable new privileges: %m");
 	if (unshare_sysv && unshare(CLONE_SYSVSEM))
 		fatal("Unable to unshare System V namespace: %m");
-	if (unshare(CLONE_FILES))
+	if (unshare_files && unshare(CLONE_FILES))
 		fatal("Unable to unshare file descriptors: %m");
 	if (gid && setgroups(0, NULL))
 		fatal("Unable to drop supplementary groups: %m");
@@ -370,6 +377,10 @@ int main(int argc, char **argv)
 		.on_connection = _setup_http_context,
 		.on_finish = on_http_connection_finish,
 	};
+	static const con_mgr_callbacks_t callbacks = {
+		.parse = parse_host_port,
+		.free_parse = free_parse_host_port,
+	};
 
 	if (sigaction(SIGPIPE, &sigpipe_handler, NULL) == -1)
 		fatal("%s: unable to control SIGPIPE: %m", __func__);
@@ -394,7 +405,8 @@ int main(int argc, char **argv)
 	if (data_init(NULL, NULL))
 		fatal("Unable to initialize data static structures");
 
-	if (!(conmgr = init_con_mgr(run_mode.listen ? thread_count : 1)))
+	if (!(conmgr = init_con_mgr((run_mode.listen ? thread_count : 1),
+				    callbacks)))
 		fatal("Unable to initialize connection manager");
 
 	if (init_operations())

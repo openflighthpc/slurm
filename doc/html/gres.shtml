@@ -307,7 +307,7 @@ as listed below with examples following that:</p>
 <ol>
 <li>No MPS configuration: The count of gres/mps elements defined in the
 <I>slurm.conf</I> will be evenly distributed across all GPUs configured on the
-node. For the example, "NodeName=tux[1-16] Gres=gpu:2,mps:200" will configure
+node. For example, "NodeName=tux[1-16] Gres=gpu:2,mps:200" will configure
 a count of 100 gres/mps resources on each of the two GPUs.</li>
 <li>MPS configuration includes only the <I>Name</I> and <I>Count</I> parameters:
 The count of gres/mps elements will be evenly distributed across all GPUs
@@ -498,20 +498,21 @@ the MIG user guide</a>.</p>
 
 <p>
 Sharding provides a generic mechanism where GPUs can be
-shared by multiple jobs, where each job is allocated some percentage of the
-GPU's resources. While it does permit multiple jobs to run on a given GPU it
-does not fence the processes running on the GPU, it only allows the GPU to be
-shared.
+shared by multiple jobs. While it does permit multiple jobs to run on a given
+GPU it does not fence the processes running on the GPU, it only allows the GPU
+to be shared. Sharding, therefore, works best with homogeneous workflows. It is
+recommended to limit the number of shards on a node to equal the max possible
+jobs that can run simultaneously on the node (i.e. cores).
 The total count of shards available on a node should be configured in
-the <I>slurm.conf</I> file (e.g. "NodeName=tux[1-16] Gres=gpu:2,shard:200").
+the <I>slurm.conf</I> file (e.g. "NodeName=tux[1-16] Gres=gpu:2,shard:64").
 Several options are available for configuring shards in the <I>gres.conf</I> file
 as listed below with examples following that:</p>
 
 <ol>
 <li>No Shard configuration: The count of gres/shard elements defined in the
 <I>slurm.conf</I> will be evenly distributed across all GPUs configured on the
-node. For the example, "NodeName=tux[1-16] Gres=gpu:2,shard:200" will configure
-a count of 100 gres/shard resources on each of the two GPUs.</li>
+node. For example, "NodeName=tux[1-16] Gres=gpu:2,shard:64" will configure
+a count of 32 gres/shard resources on each of the two GPUs.</li>
 <li>Shard configuration includes only the <I>Name</I> and <I>Count</I> parameters:
 The count of gres/shard elements will be evenly distributed across all GPUs
 configured on the node. This is similar to case 1, but places duplicate
@@ -543,8 +544,21 @@ Likewise, once a GPU has been allocated as a gres/shard resource it will
 not be available as a gres/gpu.
 However the same GPU can be allocated as shard generic resources to multiple jobs
 belonging to multiple users, so long as the total count of SHARD allocated to
-jobs does not exceed the configured count.
-Some example configurations for Slurm's gres.conf file are shown below.</p>
+jobs does not exceed the configured count.</p>
+
+<p>In order for this to be correctly configured, the appropriate nodes need
+to have the <i>shard</i> keyword added as a GRES for the relevant nodes as
+well as being added to the <i>GresTypes</i> parameter. If you want the shards
+to be tracked in accounting then <i>shard</i> also needs to be added to
+<i>AccountingStorageTRES</i>.
+See the relevant settings in an example slurm.conf:
+<pre>
+AccountingStorageTRES=gres/gpu,gres/shard
+GresTypes=gpu,shard
+NodeName=tux[1-16] Gres=gpu:2,shard:64
+</pre>
+
+<p>Some example configurations for Slurm's gres.conf file are shown below.</p>
 
 <PRE>
 # Example 1 of gres.conf
@@ -554,8 +568,8 @@ Name=gpu Type=gp100 File=/dev/nvidia0 Cores=0,1
 Name=gpu Type=gp100 File=/dev/nvidia1 Cores=0,1
 Name=gpu Type=p6000 File=/dev/nvidia2 Cores=2,3
 Name=gpu Type=p6000 File=/dev/nvidia3 Cores=2,3
-# Set gres/shard Count value to 100 on each of the 4 available GPUs
-Name=shard Count=400
+# Set gres/shard Count value to 8 on each of the 4 available GPUs
+Name=shard Count=32
 </PRE>
 
 <a id="Shard_config_example_2"></a>
@@ -567,10 +581,10 @@ Name=gpu Type=gtx1080 File=/dev/nvidia0 Cores=0,1
 Name=gpu Type=gtx1070 File=/dev/nvidia1 Cores=0,1
 Name=gpu Type=gtx1060 File=/dev/nvidia2 Cores=2,3
 Name=gpu Type=gtx1050 File=/dev/nvidia3 Cores=2,3
-Name=shard Count=1300   File=/dev/nvidia0
-Name=shard Count=1200   File=/dev/nvidia1
-Name=shard Count=1100   File=/dev/nvidia2
-Name=shard Count=1000   File=/dev/nvidia3
+Name=shard Count=8    File=/dev/nvidia0
+Name=shard Count=8    File=/dev/nvidia1
+Name=shard Count=8    File=/dev/nvidia2
+Name=shard Count=8    File=/dev/nvidia3
 </PRE>
 
 <p><b>NOTE:</b> <i>gres/shard</i> requires the use of the <i>select/cons_tres</i>
@@ -584,6 +598,6 @@ or <code class="commandline">GPU_DEVICE_ORDINAL</code> environment variable set
 which would be the same as if it were a GPU.
 </p>
 
-<p style="text-align: center;">Last modified 8 March 2022</p>
+<p style="text-align: center;">Last modified 10 August 2022</p>
 
 <!--#include virtual="footer.txt"-->

@@ -83,6 +83,7 @@
 #include "src/slurmctld/locks.h"
 #include "src/slurmctld/node_scheduler.h"
 #include "src/slurmctld/port_mgr.h"
+#include "src/slurmctld/power_save.h"
 #include "src/slurmctld/preempt.h"
 #include "src/slurmctld/proc_req.h"
 #include "src/slurmctld/read_config.h"
@@ -1869,6 +1870,8 @@ int read_slurm_conf(int recover, bool reconfig)
 
 	_set_response_cluster_rec();
 
+	config_power_mgr();
+
 	slurm_conf.last_update = time(NULL);
 end_it:
 	xfree(old_auth_type);
@@ -3102,7 +3105,7 @@ static void _restore_job_accounting(void)
 			} else if (IS_JOB_PENDING(job_ptr) &&
 				   job_ptr->details &&
 				   job_ptr->details->accrue_time)
-				acct_policy_add_accrue_time(job_ptr, true);
+				acct_policy_add_accrue_time(job_ptr, false);
 		}
 
 		license_list = license_validate(job_ptr->licenses, false, false,

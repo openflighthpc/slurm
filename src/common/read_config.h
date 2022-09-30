@@ -495,7 +495,7 @@ extern char *slurm_conf_get_nodename(const char *node_hostname);
 
 /*
  * slurm_conf_get_aliases - Return all the nodes NodeName value
- * associated to a given NodeHostname (usefull in case of multiple-slurmd
+ * associated to a given NodeHostname (useful in case of multiple-slurmd
  * to get the list of virtual nodes associated with a real node)
  *
  * NOTE: Call xfree() to release returned value's memory.
@@ -504,14 +504,12 @@ extern char *slurm_conf_get_nodename(const char *node_hostname);
 extern char *slurm_conf_get_aliases(const char *node_hostname);
 
 /*
- * slurm_conf_get_nodeaddr - Return the NodeAddr for given
- * NodeHostname or NodeName
+ * slurm_conf_get_nodeaddr - Return the NodeAddr for given NodeHostname
  *
  * NOTE: Call xfree() to release returned value's memory.
  * NOTE: Caller must NOT be holding slurm_conf_lock().
  */
-extern char *slurm_conf_get_nodeaddr(const char *node_hostname,
-				     const char *node_name);
+extern char *slurm_conf_get_nodeaddr(const char *node_hostname);
 
 /*
  * slurm_conf_get_aliased_nodename - Return the NodeName matching an alias

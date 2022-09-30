@@ -1,5 +1,5 @@
 Name:		slurm
-Version:	22.05.2
+Version:	22.05.4
 %define rel	1
 Release:	%{rel}.flight1%{?dist}
 Summary:	Slurm Workload Manager
@@ -68,6 +68,9 @@ Source:		%{slurm_source_dir}.tar.bz2
 %undefine _hardened_build
 %global _hardened_cflags "-Wl,-z,lazy"
 %global _hardened_ldflags "-Wl,-z,lazy"
+
+# Disable Link Time Optimization (LTO)
+%define _lto_cflags %{nil}
 
 Requires: munge
 

@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "Slurm Configuration File" "June 2022" "Slurm Configuration File"
+.TH "slurm.conf" "5" "Slurm Configuration File" "September 2022" "Slurm Configuration File"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -858,6 +858,12 @@ Defines specific subsystems which should provide more detailed event logging.
 Multiple subsystems can be specified with comma separators.
 Most DebugFlags will result in verbose\-level logging for the identified
 subsystems, and could impact performance.
+
+\fBNOTE\fR: You can also set debug flags by having the \fBSLURM_DEBUG_FLAGS\fR
+environment variable defined with the desired flags when the process (client
+command, daemon, etc.) is started.
+The environment variable takes precedence over the setting in the slurm.conf.
+
 Valid subsystems available include:
 .IP
 .RS
@@ -1072,7 +1078,7 @@ the job didn't specify \-\-cpus\-per\-task and \-\-cpus\-per\-gpu.
 
 .TP
 \fBDefMemPerCPU\fR
-Default real memory size available per allocated CPU in megabytes.
+Default real memory size available per usable allocated CPU in megabytes.
 Used to avoid over\-subscribing memory and causing paging.
 \fBDefMemPerCPU\fR would generally be used if individual processors
 are allocated to jobs (\fBSelectType=select/cons_res\fR or
@@ -1081,6 +1087,52 @@ The default value is 0 (unlimited).
 Also see \fBDefMemPerGPU\fR, \fBDefMemPerNode\fR and \fBMaxMemPerCPU\fR.
 \fBDefMemPerCPU\fR, \fBDefMemPerGPU\fR and \fBDefMemPerNode\fR are
 mutually exclusive.
+
+
+\fBNOTE:\fR This applies to \fBusable\fR allocated CPUs in a job allocation.
+This is important when more than one thread per core is configured.
+If a job requests \-\-threads\-per\-core with fewer threads on a core than
+exist on the core (or \-\-hint=nomultithread which implies
+\-\-threads\-per\-core=1), the job will be unable to use those extra threads on
+the core and those threads will not be included in the memory per CPU
+calculation. But if the job has access to all threads on the core, those threads
+will be included in the memory per CPU calculation even if the job did not
+explicitly request those threads.
+
+In the following examples, each core has two threads.
+
+In this first example, two tasks can run on separate hyperthreads
+in the same core because \-\-threads\-per\-core is not used. The
+third task uses both threads of the second core. The allocated
+memory per cpu includes all threads:
+
+.nf
+.ft B
+$ salloc \-n3 \-\-mem\-per\-cpu=100
+salloc: Granted job allocation 17199
+$ sacct \-j $SLURM_JOB_ID \-X \-o jobid%7,reqtres%35,alloctres%35
+  JobID                             ReqTRES                           AllocTRES
+\-\-\-\-\-\-\- \-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\- \-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-
+  17199     billing=3,cpu=3,mem=300M,node=1     billing=4,cpu=4,mem=400M,node=1
+.ft
+.fi
+
+In this second example, because of \-\-threads\-per\-core=1, each
+task is allocated an entire core but is only able to use one
+thread per core. Allocated CPUs includes all threads on each
+core. However, allocated memory per cpu includes only the
+usable thread in each core.
+
+.nf
+.ft B
+$ salloc \-n3 \-\-mem\-per\-cpu=100 \-\-threads\-per\-core=1
+salloc: Granted job allocation 17200
+$ sacct \-j $SLURM_JOB_ID \-X \-o jobid%7,reqtres%35,alloctres%35
+  JobID                             ReqTRES                           AllocTRES
+\-\-\-\-\-\-\- \-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\- \-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-
+  17200     billing=3,cpu=3,mem=300M,node=1     billing=6,cpu=6,mem=300M,node=1
+.ft
+.fi
 .IP
 
 .TP
@@ -1711,19 +1763,65 @@ The default value is 1.
 
 .TP
 \fBJobSubmitPlugins\fR
-A comma\-delimited list of job submission plugins to be used.
-The specified plugins will be executed in the order listed.
 These are intended to be site\-specific plugins which can be used to set
-default job parameters and/or logging events.
-Sample plugins available in the distribution include "all_partitions",
-"defaults", "logging", "lua", and "partition".
-For examples of use, see the Slurm code in "src/plugins/job_submit" and
-"contribs/lua/job_submit*.lua" then modify the code to satisfy your needs.
-Slurm can be configured to use multiple job_submit plugins if desired,
-however the lua plugin will only execute one lua script named "job_submit.lua"
-located in the default script directory (typically the subdirectory "etc" of
-the installation directory).
-No job submission plugins are used by default.
+default job parameters and/or logging events. Slurm can be configured to use
+multiple job_submit plugins if desired, which must be specified as a
+comma\-delimited list and will be executed in the order listed.
+.nf
+e.g. for multiple job_submit plugin configuration:
+JobSubmitPlugins=lua,require_timelimit
+.fi
+Take a look at <https://slurm.schedmd.com/job_submit_plugins.html> for further
+plugin implementation details. No job submission plugins are used by default.
+Currently available plugins are:
+.IP
+.RS
+.TP 24
+\fBall_partitions\fR
+Set default partition to all partitions on the cluster.
+.IP
+
+.TP
+\fBdefaults\fR
+Set default values for job submission or modify requests.
+.IP
+
+.TP
+\fBlogging\fR
+Log select job submission and modification parameters.
+.IP
+
+.TP
+\fBlua\fR
+Execute a Lua script implementing site's own job_submit logic. Only one Lua
+script will be executed. It must be named "job_submit.lua" and must be located
+in the default configuration directory (typically the subdirectory "etc" of the
+installation directory). Sample Lua scripts can be found with the Slurm
+distribution, in the directory contribs/lua. Slurmctld will fatal on startup if
+the configured lua script is invalid. Slurm will try to load the script for each
+job submission. If the script is broken or removed while slurmctld is running,
+Slurm will fallback to the previous working version of the script.
+.IP
+
+.TP
+\fBpartition\fR
+Set a job's default partition based upon job submission parameters and
+available partitions.
+.IP
+
+.TP
+\fBpbs\fR
+Translate PBS job submission options to Slurm equivalent (if possible).
+.IP
+
+.TP
+\fBrequire_timelimit\fR
+Force job submissions to specify a timelimit.
+.RE
+.IP
+
+\fBNOTE\fR: For examples of use see the Slurm code in "src/plugins/job_submit"
+and "contribs/lua/job_submit*.lua" then modify the code to satisfy your needs.
 .IP
 
 .TP
@@ -2182,12 +2280,8 @@ More information about MPI use is available here
 .TP
 \fBMpiParams\fR
 MPI parameters.
-Used to identify ports used by older versions of OpenMPI and native
-Cray systems.  The input format is "ports=12000\-12999" to identify a range of
-communication ports to be used.
-NOTE: This is not needed for modern versions of OpenMPI, taking it out can cause
-a small boost in scheduling performance.
-NOTE: This is require for Cray's PMI.
+Used to identify ports used by native Cray's PMI. The format to identify a
+range of communication ports is "ports=12000\-12999".
 .IP
 
 .TP
@@ -2469,7 +2563,6 @@ will the suspended jobs will be resumed by the Gang scheduler.
 .br
 \fBNOTE:\fR Suspended jobs will not release GRES. Higher priority jobs will not
 be able to preempt to gain access to GRES.
-.RE
 .IP
 
 .TP
@@ -2477,6 +2570,7 @@ be able to preempt to gain access to GRES.
 For \fBPreemptType=preempt/qos\fR, allow jobs within the same qos to preempt
 one another. While this can be set globally here, it is recommend that this
 only be set directly on a relevant subset of the system qos values instead. 
+.RE
 .IP
 
 .TP
@@ -2576,8 +2670,9 @@ The keywords below have no associated value
 .RS
 .TP 17
 \fBACCRUE_ALWAYS\fR
-If set, priority age factor will be increased despite job dependencies
-or holds.
+If set, priority age factor will be increased despite job ineligibility due to
+either dependencies, holds or begin time in the future. Accrue limits are
+ignored.
 .IP
 
 .TP
@@ -4361,6 +4456,14 @@ Memory is a consumable resource.
 NOTE: This implies \fIOverSubscribe=YES\fR or \fIOverSubscribe=FORCE\fR for
 all partitions.
 Setting a value for \fBDefMemPerCPU\fR is strongly recommended.
+.IP
+
+.TP
+\fBNOTE:\fR If memory isn't configured as a consumable resource (CR_CPU,
+CR_Core or CR_Socket without _Memory) memory can be oversubscribed. In this
+case the \fI--mem\fR option is only used to filter out nodes with lower
+configured memory and does not take running jobs into account. For instance,
+two jobs requesting all the memory of a node can run at the same time.
 .RE
 .IP
 
@@ -4801,7 +4904,7 @@ Requires hwloc v2.
 \fBnuma_node_as_socket\fR
 Use the hwloc NUMA Node to determine main hierarchy object to be used as socket.
 If the option is set Slurm will check the parent object of NUMA Noda and use it
-as socket. This option may be usefull for architectures likes AMD Epyc, where
+as socket. This option may be useful for architectures likes AMD Epyc, where
 number of nodes per socket may be configured.
 Mutually exclusive with l3cache_as_socket.
 Requires hwloc v2.
@@ -7041,26 +7144,33 @@ variable set to different values on each compute node. Available in
 .TP
 \fBSLURM_JOB_ACCOUNT\fR
 Account name used for the job.
-Available in \fBPrologSlurmctld\fR and \fBEpilogSlurmctld\fR.
+.IP
+
+.TP
+\fBSLURM_JOB_COMMENT\fR
+Comment added to the job.
+Available in \fBProlog\fR, \fBPrologSlurmctld\fR, \fBEpilog\fR and
+\fBEpilogSlurmctld\fR.
 .IP
 
 .TP
 \fBSLURM_JOB_CONSTRAINTS\fR
 Features required to run the job.
-Available in \fBProlog\fR, \fBPrologSlurmctld\fR and \fBEpilogSlurmctld\fR.
+Available in \fBProlog\fR, \fBPrologSlurmctld\fR, \fBEpilog\fR and
+\fBEpilogSlurmctld\fR.
 .IP
 
 .TP
 \fBSLURM_JOB_DERIVED_EC\fR
 The highest exit code of all of the job steps.
-Available in \fBEpilogSlurmctld\fR.
+Available in \fBEpilog\fR and \fBEpilogSlurmctld\fR.
 .IP
 
 .TP
 \fBSLURM_JOB_EXIT_CODE\fR
 The exit code of the job script (or salloc). The value is the status
 as returned by the wait() system call (See wait(2))
-Available in \fBEpilogSlurmctld\fR.
+Available in \fBEpilog\fR and \fBEpilogSlurmctld\fR.
 .IP
 
 .TP
@@ -7069,7 +7179,7 @@ The exit code of the job script (or salloc). The value has the format
 <exit>:<sig>. The first number is the exit code, typically as set by the
 exit() function. The second number of the signal that caused the process to
 terminate if it was terminated by a signal.
-Available in \fBEpilogSlurmctld\fR.
+Available in \fBEpilog\fR and \fBEpilogSlurmctld\fR.
 .IP
 
 .TP
@@ -7116,7 +7226,8 @@ Available in \fBPrologSlurmctld\fR and \fBEpilogSlurmctld\fR.
 .TP
 \fBSLURM_JOB_PARTITION\fR
 Partition that job runs in.
-Available in \fBProlog\fR, \fBPrologSlurmctld\fR and \fBEpilogSlurmctld\fR.
+Available in \fBProlog\fR, \fBPrologSlurmctld\fR, \fBEpilog\fR and
+\fBEpilogSlurmctld\fR.
 .IP
 
 .TP

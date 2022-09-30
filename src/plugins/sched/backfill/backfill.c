@@ -149,6 +149,7 @@ typedef struct {
 	job_record_t *job_ptr;
 	time_t latest_start;		/* Time when expected to start */
 	part_record_t *part_ptr;
+	slurmctld_resv_t *resv_ptr;
 } het_job_rec_t;
 
 typedef struct {
@@ -1743,6 +1744,7 @@ static void _attempt_backfill(void)
 	time_t tmp_preempt_start_time = 0;
 	bool tmp_preempt_in_progress = false;
 	bitstr_t *tmp_bitmap = NULL;
+	bool state_changed_break = false;
 	/* QOS Read lock */
 	assoc_mgr_lock_t qos_read_lock =
 		{ NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
@@ -1847,6 +1849,7 @@ static void _attempt_backfill(void)
 		uint32_t bf_job_priority, prio_reserve;
 		bool get_boot_time = false;
 		bool licenses_unavail;
+		bool use_prefer = false;
 
 		/* Run some final guaranteed logic after each job iteration */
 		if (job_ptr) {
@@ -1884,6 +1887,7 @@ static void _attempt_backfill(void)
 		job_ptr          = job_queue_rec->job_ptr;
 		part_ptr         = job_queue_rec->part_ptr;
 		bf_job_priority  = job_queue_rec->priority;
+		use_prefer = job_queue_rec->use_prefer;
 
 		if (job_ptr->array_recs &&
 		    (job_queue_rec->array_task_id == NO_VAL))
@@ -1914,6 +1918,7 @@ static void _attempt_backfill(void)
 				log_flag(BACKFILL, "system state changed, breaking out after testing %u(%d) jobs",
 					 slurmctld_diag_stats.bf_last_depth,
 					 job_test_count);
+				state_changed_break = true;
 				break;
 			}
 			/* Reset backfill scheduling timers, resume testing */
@@ -2052,9 +2057,7 @@ static void _attempt_backfill(void)
 		 * If we are trying to schedule preferred features don't
 		 * reserve.
 		 */
-		if (job_ptr->details->prefer &&
-		    (job_ptr->details->features_use ==
-		     job_ptr->details->prefer))
+		if (use_prefer)
 			job_no_reserve = TEST_NOW_ONLY;
 
 		/* If partition data is needed and not yet initialized, do so */
@@ -2132,8 +2135,9 @@ next_task:
 			continue;
 		}
 
-		log_flag(BACKFILL, "test for %pJ Prio=%u Partition=%s",
-			 job_ptr, job_ptr->priority, job_ptr->part_ptr->name);
+		log_flag(BACKFILL, "test for %pJ Prio=%u Partition=%s Reservation=%s",
+			 job_ptr, job_ptr->priority, job_ptr->part_ptr->name,
+			 job_ptr->resv_ptr ? job_ptr->resv_ptr->name : "NONE");
 
 		/* Test to see if we've exceeded any per user/partition limit */
 		if (_job_exceeds_max_bf_param(job_ptr, orig_sched_start))
@@ -2262,6 +2266,7 @@ next_task:
 				log_flag(BACKFILL, "system state changed, breaking out after testing %u(%d) jobs",
 					 slurmctld_diag_stats.bf_last_depth,
 					 job_test_count);
+				state_changed_break = true;
 				break;
 			}
 
@@ -2309,6 +2314,31 @@ next_task:
 
 			job_ptr->time_limit = save_time_limit;
 			job_ptr->part_ptr = part_ptr;
+		}
+
+		/*
+		 * feature_list_use is a temporary variable and should
+		 * be reset before each use.
+		 * Do this after bf_yield to ensure the pointers are valid even
+		 * if the job was updated during the bf_yield.
+		 */
+		if (use_prefer) {
+			/*
+			 * Prefer was removed from the job since the
+			 * job_queue_rec was created (during bf_yield).
+			 * This is a separate queue record for prefer. Skip it.
+			 */
+			if (!job_ptr->details->prefer)
+				continue;
+			job_ptr->details->features_use =
+				job_ptr->details->prefer;
+			job_ptr->details->feature_list_use =
+				job_ptr->details->prefer_list;
+		} else {
+			job_ptr->details->features_use =
+				job_ptr->details->features;
+			job_ptr->details->feature_list_use =
+				job_ptr->details->feature_list;
 		}
 
 		FREE_NULL_BITMAP(avail_bitmap);
@@ -3021,7 +3051,7 @@ skip_start:
 	}
 
 	_het_job_deadlock_fini();
-	if (!bf_hetjob_immediate &&
+	if (!bf_hetjob_immediate && !state_changed_break &&
 	    (!max_backfill_jobs_start ||
 	     (job_start_cnt < max_backfill_jobs_start)))
 		_het_job_start_test(node_space, 0);
@@ -3491,7 +3521,7 @@ static time_t _het_job_start_find(job_record_t *job_ptr)
 /*
  * Record the earliest that a hetjob component can start. If it can be
  * started in multiple partitions, we only record the earliest start time
- * for the job in any partition.
+ * for the job in any partition and reservation.
  */
 static void _het_job_start_set(job_record_t *job_ptr, time_t latest_start,
 			       uint32_t comp_time_limit)
@@ -3522,12 +3552,14 @@ static void _het_job_start_set(job_record_t *job_ptr, time_t latest_start,
 			} else if (rec) {
 				rec->latest_start = latest_start;
 				rec->part_ptr = job_ptr->part_ptr;
+				rec->resv_ptr = job_ptr->resv_ptr;
 			} else {
 				rec = xmalloc(sizeof(het_job_rec_t));
 				rec->job_id = job_ptr->job_id;
 				rec->job_ptr = job_ptr;
 				rec->latest_start = latest_start;
 				rec->part_ptr = job_ptr->part_ptr;
+				rec->resv_ptr = job_ptr->resv_ptr;
 				list_append(map->het_job_rec_list, rec);
 			}
 		} else {
@@ -3536,6 +3568,7 @@ static void _het_job_start_set(job_record_t *job_ptr, time_t latest_start,
 			rec->job_ptr = job_ptr;
 			rec->latest_start = latest_start;
 			rec->part_ptr = job_ptr->part_ptr;
+			rec->resv_ptr = job_ptr->resv_ptr;
 
 			map = xmalloc(sizeof(het_job_map_t));
 			map->comp_time_limit = comp_time_limit;
@@ -3624,6 +3657,10 @@ static bool _het_job_limit_check(het_job_map_t *map, time_t now)
 
 		job_ptr = rec->job_ptr;
 		job_ptr->part_ptr = rec->part_ptr;
+		if (rec->resv_ptr) {
+			job_ptr->resv_ptr = rec->resv_ptr;
+			job_ptr->resv_id = job_ptr->resv_ptr->resv_id;
+		}
 		selected_node_cnt = job_ptr->node_cnt_wag;
 		memcpy(tres_req_cnt, job_ptr->tres_req_cnt,
 		       slurmctld_tres_size);
@@ -3716,6 +3753,10 @@ static int _het_job_start_now(het_job_map_t *map, node_space_map_t *node_space)
 		bool reset_time = false;
 		job_ptr = rec->job_ptr;
 		job_ptr->part_ptr = rec->part_ptr;
+		if (rec->resv_ptr) {
+			job_ptr->resv_ptr = rec->resv_ptr;
+			job_ptr->resv_id = job_ptr->resv_ptr->resv_id;
+		}
 
 		/*
 		 * Identify the nodes which this job can use

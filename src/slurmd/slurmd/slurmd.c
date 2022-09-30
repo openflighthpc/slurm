@@ -407,8 +407,17 @@ main (int argc, char **argv)
 		error("Unable to remove pidfile `%s': %m",
 		      conf->pidfile);
 
+	/* Wait for prolog/epilog scripts to finish or timeout */
+	_wait_for_all_threads(slurm_conf.prolog_epilog_timeout);
+	/*
+	 * run_command_shutdown() will kill any scripts started with
+	 * run_command() including the prolog and epilog.
+	 * Call run_command_shutdown() *after* waiting for threads to complete
+	 * to give prolog and epilog scrripts a chance to finish,
+	 * otherwise jobs will fail and the node will be drained due to prolog
+	 * failure.
+	 */
 	run_command_shutdown();
-	_wait_for_all_threads(120);
 	_slurmd_fini();
 	_destroy_conf();
 	slurm_cred_fini();	/* must be after _destroy_conf() */
@@ -551,13 +560,18 @@ _wait_for_all_threads(int secs)
 	slurm_mutex_lock(&active_mutex);
 	while (active_threads > 0) {
 		verbose("waiting on %d active threads", active_threads);
-		rc = pthread_cond_timedwait(&active_cond, &active_mutex, &ts);
-		if (rc == ETIMEDOUT) {
-			error("Timeout waiting for completion of %d threads",
-			      active_threads);
-			slurm_cond_signal(&active_cond);
-			slurm_mutex_unlock(&active_mutex);
-			return;
+		if (secs == NO_VAL16) { /* Wait forever */
+			slurm_cond_wait(&active_cond, &active_mutex);
+		} else {
+			rc = pthread_cond_timedwait(&active_cond,
+						    &active_mutex, &ts);
+			if (rc == ETIMEDOUT) {
+				error("Timeout waiting for completion of %d threads",
+				      active_threads);
+				slurm_cond_signal(&active_cond);
+				slurm_mutex_unlock(&active_mutex);
+				return;
+			}
 		}
 	}
 	slurm_cond_signal(&active_cond);
@@ -696,6 +710,8 @@ static void _handle_node_reg_resp(slurm_msg_t *resp_msg)
 		 */
 		if ((conf->dynamic_type == DYN_NODE_FUTURE) &&
 		    resp->node_name) {
+			debug2("dynamic node response %s -> %s",
+			       conf->node_name, resp->node_name);
 			xfree(conf->node_name);
 			conf->node_name = xstrdup(resp->node_name);
 		}

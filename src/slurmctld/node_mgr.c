@@ -3576,7 +3576,8 @@ static void _node_did_resp(node_record_t *node_ptr)
 	time_t now = time(NULL);
 
 	if (waiting_for_node_boot(node_ptr) ||
-	    waiting_for_node_power_down(node_ptr))
+	    waiting_for_node_power_down(node_ptr) ||
+	    IS_NODE_FUTURE(node_ptr))
 		return;
 	node_ptr->last_response = now;
 	if (IS_NODE_NO_RESPOND(node_ptr) || IS_NODE_POWERING_UP(node_ptr)) {
@@ -4825,6 +4826,7 @@ static int _delete_node(char *name)
 	bit_clear(avail_node_bitmap, node_ptr->index);
 
 	_remove_node_from_features(node_ptr);
+	gres_node_remove(node_ptr);
 
 	delete_node_record(node_ptr);
 	slurm_conf_remove_node(name);
@@ -4880,6 +4882,7 @@ extern int delete_nodes(char *names, char **err_msg)
 
 	if (one_success) {
 		rehash_node();
+		set_cluster_tres(false);
 		_update_parts();
 		select_g_reconfigure();
 	}
