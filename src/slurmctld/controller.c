@@ -733,8 +733,6 @@ int main(int argc, char **argv)
 			fatal("failed to initialize power management plugin");
 		if (slurm_mcs_init() != SLURM_SUCCESS)
 			fatal("failed to initialize mcs plugin");
-		/* Must be called after reading in nodes, parts */
-		config_power_mgr();
 
 		/*
 		 * create attached thread to process RPCs
@@ -820,8 +818,10 @@ int main(int argc, char **argv)
 		 * join the power save thread after saving all state
 		 * since it could wait a while waiting for spawned
 		 * processes to exit
+		 * The thread is only started if power save is configured.
 		 */
-		pthread_join(slurmctld_config.thread_id_power, NULL);
+		if (slurmctld_config.thread_id_power)
+			pthread_join(slurmctld_config.thread_id_power, NULL);
 		slurmctld_config.thread_id_power = (pthread_t) 0;
 
 		/* stop the heartbeat last */

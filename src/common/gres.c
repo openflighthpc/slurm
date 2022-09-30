@@ -2547,7 +2547,8 @@ extern int gres_node_config_unpack(buf_t *buffer, char *node_name)
 			      __func__, tmp_name, node_name);
 			config_flags |= GRES_CONF_HAS_FILE;
 		}
-		if (new_has_file && (count64 > MAX_GRES_BITMAP)) {
+		if (new_has_file && (count64 > MAX_GRES_BITMAP) &&
+		    !gres_id_shared(config_flags)) {
 			/*
 			 * Avoid over-subscribing memory with
 			 * huge bitmaps
@@ -3388,7 +3389,7 @@ static int _node_config_validate(char *node_name, char *orig_config,
 						    gres_inx, gres_cnt,
 						    reason_down) !=
 					    SLURM_SUCCESS)
-						return EINVAL;
+						rc = EINVAL;
 
 					gres_inx++;
 				}
@@ -3550,8 +3551,11 @@ static void _sync_node_shared_to_sharing(gres_state_t *sharing_gres_state_node)
 
 	sharing_cnt = sharing_gres_ns->gres_cnt_avail;
 	if (shared_gres_ns->gres_bit_alloc) {
-		if (sharing_cnt == bit_size(shared_gres_ns->gres_bit_alloc))
-			return;		/* No change for gres/'shared' */
+		if ((sharing_cnt == bit_size(shared_gres_ns->gres_bit_alloc)) &&
+		    (sharing_cnt == shared_gres_ns->topo_cnt)) {
+			debug3("No change for gres/'shared'");
+			return;
+		}
 	}
 
 	if (sharing_cnt == 0)
@@ -4150,6 +4154,28 @@ extern int gres_node_reconfig(char *node_name,
 	xfree(gres_state_node_array);
 
 	return rc;
+}
+
+extern void gres_node_remove(node_record_t *node_ptr)
+{
+	if (!node_ptr->gres_list)
+		return;
+
+	slurm_mutex_lock(&gres_context_lock);
+	for (int i = 0; i < gres_context_cnt; i++) {
+		gres_state_t *gres_state_node;
+
+		if (!(gres_state_node =
+			list_find_first(node_ptr->gres_list, gres_find_id,
+					&gres_context[i].plugin_id)))
+			continue;
+
+		if (gres_state_node->gres_data) {
+			gres_node_state_t *gres_ns = gres_state_node->gres_data;
+			gres_context[i].total_cnt -= gres_ns->gres_cnt_config;
+		}
+	}
+	slurm_mutex_unlock(&gres_context_lock);
 }
 
 /*

@@ -983,10 +983,8 @@ extern void job_queue_append_internal(job_queue_req_t *job_queue_req)
 
 	if (job_queue_req->job_ptr->details &&
 	    job_queue_req->job_ptr->details->prefer) {
-		job_record_t *job_ptr = job_queue_req->job_ptr;
 		job_queue_rec = _create_job_queue_rec(job_queue_req);
-		job_queue_rec->features = job_ptr->details->prefer;
-		job_queue_rec->feature_list = job_ptr->details->prefer_list;
+		job_queue_rec->use_prefer = true;
 		list_append(job_queue_req->job_queue, job_queue_rec);
 	}
 
@@ -1088,8 +1086,12 @@ static int _schedule(bool full_queue)
 		}
 
 		bf_licenses = false;
-		if (xstrcasestr(slurm_conf.sched_params, "bf_licenses"))
-			bf_licenses = true;
+		if (xstrcasestr(slurm_conf.sched_params, "bf_licenses")) {
+			if (!xstrcmp(slurm_conf.schedtype, "sched/builtin"))
+				error("Ignoring SchedulerParameters=bf_licenses, this option is incompatible with sched/builtin.");
+			else
+				bf_licenses = true;
+		}
 
 		if ((tmp_ptr = xstrcasestr(slurm_conf.sched_params,
 					   "build_queue_timeout="))) {
@@ -1440,11 +1442,15 @@ next_part:
 			part_ptr = job_queue_rec->part_ptr;
 			job_ptr->priority = job_queue_rec->priority;
 
-			if (job_queue_rec->features) {
+			/*
+			 * feature_list_use is a temporary variable and should
+			 * be reset before each use.
+			 */
+			if (job_queue_rec->use_prefer) {
 				job_ptr->details->features_use =
-					job_queue_rec->features;
+					job_ptr->details->prefer;
 				job_ptr->details->feature_list_use =
-					job_queue_rec->feature_list;
+					job_ptr->details->prefer_list;
 			} else {
 				job_ptr->details->features_use =
 					job_ptr->details->features;

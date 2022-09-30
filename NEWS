@@ -1,6 +1,122 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 22.05.4
+==========================
+ -- Fix return code from salloc when the job is revoked prior to executing user
+    command.
+ -- Fix minor memory leak when dealing with gres with multiple files.
+ -- Fix printing for no_consume gres in scontrol show job.
+ -- sinfo - Fix truncation of very large values when outputting memory.
+ -- Fix multi-node step launch failure when nodes in the controller aren't in
+    natural order. This can happen with inconsistent node naming (such as
+    node15 and node052) or with dynamic nodes which can register in any order.
+ -- job_container/tmpfs - Prevent reading the plugin config multiple times per
+    step.
+ -- Fix wrong attempt of gres binding for gres w/out cores defined.
+ -- Fix build to work with '--without-shared-libslurm' configure flag.
+ -- Fix power_save mode when repeatedly configuring too fast.
+ -- Fix sacct -I option.
+ -- Prevent jobs from being scheduled on future nodes.
+ -- Fix memory leak in slurmd happening on reconfigure when CPUSpecList used.
+ -- Fix sacctmgr show event [min|max]cpus.
+ -- Fix regression in 22.05.0rc1 where a prolog or epilog that redirected stdout
+    to a file could get erroneously killed, resulting in job launch failure
+    (for the prolog) and the node being drained.
+ -- cgroup/v1 - Make a static variable to remove potential redundant checking
+    for if the system has swap or not.
+ -- cgroup/v1 - Add check for swap when running OOM check after task
+    termination.
+ -- job_submit/lua - add --prefer support
+ -- cgroup/v1 - fix issue where sibling steps could incorrectly be accounted as
+    OOM when step memory limit was the same as the job allocation. Detect OOM
+    events via memory.oom_control oom_kill when exposed by the kernel instead of
+    subscribing notifications with eventfd.
+ -- Fix accounting of oom_kill events in cgroup/v2 and task/cgroup.
+ -- Fix segfault when slurmd reports less than configured gres with links after
+    a slurmctld restart.
+ -- Fix TRES counts after node is deleted using scontrol.
+ -- sched/backfill - properly handle multi-reservation HetJobs.
+ -- sched/backfill - don't try to start HetJobs after system state change.
+ -- openapi/v0.0.38 - add submission of job->prefer value.
+ -- slurmdbd - become SlurmUser at the same point in logic as slurmctld to match
+    plugins initialization behavior. This avoids a fatal error when starting
+    slurmdbd as root and root cannot start the auth or accounting_storage
+    plugins (for example, if root cannot read the jwt key).
+ -- Fix memory leak when attempting to update a job's features with invalid
+    features.
+ -- Fix occasional slurmctld crash or hang in backfill due to invalid pointers.
+ -- Fix segfault on Cray machines if cgroup cpuset is used in cgroup/v1.
+
+* Changes in Slurm 22.05.3
+==========================
+ -- job_container/tmpfs - cleanup containers even when the .ns file isn't
+    mounted anymore.
+ -- Ignore the bf_licenses option if using sched/builtin.
+ -- Do not clear the job's requested QOS (qos_id) when ineligible due to QOS.
+ -- Emit error and add fail-safe when job's qos_id changes unexpectedly.
+ -- Fix timeout value in log.
+ -- openapi/v0.0.38 - fix setting of DefaultTime when dumping a partition.
+ -- openapi/dbv0.0.38 - correct parsing association QOS field.
+ -- Fix LaunchParameters=mpir_use_nodeaddr.
+ -- Fix various edge cases where accrue limits could be exceeded or cause
+    underflow error messages.
+ -- Fix issue where a job requesting --ntasks and --nodes could be wrongly
+    rejected when spanning heterogeneous nodes.
+ -- openapi/v0.0.38 - detect when partition PreemptMode is disabled
+ -- openapi/v0.0.38 - add QOS flag to handle partition PreemptMode=within
+ -- Add total_cpus and total_nodes values to the partition list in
+    the job_submit/lua plugin.
+ -- openapi/dbv0.0.38 - reject and error on invalid flag values in well defined
+    flag fields.
+ -- openapi/dbv0.0.38 - correct QOS preempt_mode flag requests being silently
+    ignored.
+ -- accounting_storage/mysql - allow QOS preempt_mode flag updates when GANG
+    mode is requested.
+ -- openapi/dbv0.0.38 - correct QOS flag modifications request being silently
+    ignored.
+ -- sacct/sinfo/squeue - use openapi/[db]v0.0.38 for --json and --yaml modes.
+ -- Improve error messages when using configless and fetching the config fails.
+ -- Fix segfault when reboot_from_controller is configured and scontrol reboot
+    is used.
+ -- Fix regression which prevented a cons_tres gpu job to be submitted to a
+    cons_tres cluster from a non-con_tres cluster.
+ -- openapi/dbv0.0.38 - correct association QOS list parsing for updates.
+ -- Fix rollup incorrectly divying up unused reservation time between
+    associations.
+ -- slurmrestd - add SLURMRESTD_SECURITY=disable_unshare_files environment
+    variable.
+ -- Update rsmi detection to handle new default library location.
+ -- Fix header inclusion from slurmstepd manager code leading to multiple
+    definition errors when linking --without-shared-libslurm.
+ -- slurm.spec - explicitly disable Link Time Optimization (LTO) to avoid
+    linking errors on systems where LTO-related RPM macros are enabled by
+    default and the binutils version has a bug.
+ -- Fix issue in the api/step_io message writing logic leading to incorrect
+    behavior in API consuming clients like srun or sattach, including a segfault
+    when freeing IO buffers holding traffic from the tasks to the client.
+ -- openapi/dbv0.0.38 - avoid job queries getting rejected when cluster is not
+    provided by client.
+ -- openapi/dbv0.0.38 - accept job state filter as verbose names instead of
+    only numeric state ids.
+ -- Fix regression in 22.05.0rc1: if slurmd shuts down while a prolog is
+    running, the job is cancelled and the node is drained.
+ -- Wait up to PrologEpilogTimeout before shutting down slurmd to allow prolog
+    and epilog scripts to complete or timeout. Previously, slurmd waited 120
+    seconds before timing out and killing prolog and epilog scripts.
+ -- GPU - Fix checking frequencies to check them all and not skip the last one.
+ -- GPU - Fix logic to set frequencies properly when handling multiple GPUs.
+ -- cgroup/v2 - Fix typo in error message.
+ -- cgroup/v2 - More robust pattern search for events.
+ -- Fix slurm_spank_job_[prolog|epilog] failures being masked if a Prolog or
+    Epilog script is defined (regression in 22.05.0rc1).
+ -- When a job requested nodes and can't immediately start, only report to
+    the user (squeue/scontrol et al) if nodes are down in the requested list.
+ -- openapi/dbv0.0.38 - Fix qos list/preempt not being parsed correctly.
+ -- Fix dynamic nodes registrations mapping previously assigned nodes.
+ -- Remove unnecessarily limit on count of 'shared' gres.
+ -- Fix shared gres on CLOUD nodes not properly initializing.
+
 * Changes in Slurm 22.05.2
 ==========================
  -- Fix a segfault in slurmctld when requesting gres in job arrays.
@@ -345,6 +461,10 @@ documents those changes that are of interest to users and administrators.
  -- Fix logic estimating when a job can start based on ANY_NODES / LICENSE_ONLY
     reservations that could lead to an infinite loop in backfill.
  -- Fix a segfault that may happen on gpu configured as no_consume.
+ -- Fix regression which prevented a cons_tres gpu job to be submitted to a
+    cons_tres cluster from a non-con_tres cluster.
+ -- select/linear - fix regression introduced in 21.08.6 which prevented step
+    requests with --threads-per-core or --hint=nomultithread from being created.
 
 * Changes in Slurm 21.08.8-2
 ============================

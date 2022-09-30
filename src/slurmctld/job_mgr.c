@@ -355,6 +355,7 @@ static int _job_fail_account(job_record_t *job_ptr, const char *func_name)
 		job_ptr->qos_ptr = tmp_qos;
 
 		job_ptr->assoc_ptr = NULL;
+		/* Don't clear assoc_id, since that is what the job requests */
 	}
 
 	job_ptr->assoc_id = 0;
@@ -385,8 +386,7 @@ extern int job_fail_qos(job_record_t *job_ptr, const char *func_name)
 
 		if (job_ptr->details) {
 			/* reset the job */
-			job_ptr->details->accrue_time = 0;
-			job_ptr->bit_flags &= ~JOB_ACCRUE_OVER;
+			acct_policy_remove_accrue_time(job_ptr, false);
 			job_ptr->details->begin_time = 0;
 			/* Update job with new begin_time. */
 			jobacct_storage_g_job_start(acct_db_conn, job_ptr);
@@ -407,12 +407,6 @@ extern int job_fail_qos(job_record_t *job_ptr, const char *func_name)
 			jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 
 		/*
-		 * Don't call acct_policy_remove_accrue_time() here, the cnt on
-		 * parent associations will be handled correctly by the removal
-		 * of the association.
-		 */
-
-		/*
 		 * Clear ptrs so that only qos usage is removed. Otherwise
 		 * association limits will be double accounted for when this
 		 * job finishes. Don't do this for acrrual time, it has be on
@@ -425,7 +419,7 @@ extern int job_fail_qos(job_record_t *job_ptr, const char *func_name)
 		job_ptr->assoc_ptr = tmp_assoc;
 
 		job_ptr->qos_ptr = NULL;
-		job_ptr->qos_id = 0;
+		/* Don't clear qos_id, since that is what the job requests */
 	}
 
 	return rc;
@@ -1097,6 +1091,12 @@ extern void set_job_failed_assoc_qos_ptr(job_record_t *job_ptr)
 			&qos_error, false, LOG_LEVEL_DEBUG2);
 
 		if ((qos_error == SLURM_SUCCESS) && job_ptr->qos_ptr) {
+			/* job_ptr->qos_id should never start at 0 */
+			if (job_ptr->qos_id != qos_rec.id) {
+				error("%s: Changing job_ptr->qos_id from %u to %u; this should never happen",
+				      __func__, job_ptr->qos_id, qos_rec.id);
+				job_ptr->qos_id = qos_rec.id;
+			}
 			debug("%s: Filling in QOS for %pJ QOS=%s(%u)",
 			      __func__, job_ptr, qos_rec.name, job_ptr->qos_id);
 			job_ptr->state_reason = WAIT_NO_REASON;
@@ -4915,6 +4915,12 @@ extern job_record_t *job_array_split(job_record_t *job_ptr)
 	details_new->prefer = xstrdup(job_details->prefer);
 	details_new->prefer_list =
 		feature_list_copy(job_details->prefer_list);
+	/*
+	 * features_use and feature_list_use are set in the schedulers before
+	 * attempting to schedule the job, so just set them to NULL here.
+	 */
+	details_new->features_use = NULL;
+	details_new->feature_list_use = NULL;
 	if (job_details->mc_ptr) {
 		i = sizeof(multi_core_data_t);
 		details_new->mc_ptr = xmalloc(i);
@@ -13773,6 +13779,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_specs,
 					   __func__, job_specs->features,
 					   job_ptr);
 				FREE_NULL_LIST(detail_ptr->feature_list);
+				xfree(detail_ptr->features);
 				detail_ptr->features = old_features;
 				detail_ptr->feature_list = old_list;
 				error_code = ESLURM_INVALID_FEATURE;
@@ -13782,12 +13789,17 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_specs,
 					   job_ptr);
 				xfree(old_features);
 				FREE_NULL_LIST(old_list);
+				detail_ptr->features_use = detail_ptr->features;
+				detail_ptr->feature_list_use =
+					detail_ptr->feature_list;
 			}
 		} else {
 			sched_info("%s: cleared features for %pJ", __func__,
 				   job_ptr);
 			xfree(detail_ptr->features);
 			FREE_NULL_LIST(detail_ptr->feature_list);
+			detail_ptr->features_use = NULL;
+			detail_ptr->feature_list_use = NULL;
 		}
 	}
 	if (error_code != SLURM_SUCCESS)
@@ -13810,6 +13822,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_specs,
 					   __func__, job_specs->prefer,
 					   job_ptr);
 				FREE_NULL_LIST(detail_ptr->prefer_list);
+				xfree(detail_ptr->prefer);
 				detail_ptr->prefer = old_prefer;
 				detail_ptr->prefer_list = old_list;
 				error_code = ESLURM_INVALID_PREFER;
@@ -13819,12 +13832,17 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_specs,
 					   job_ptr);
 				xfree(old_prefer);
 				FREE_NULL_LIST(old_list);
+				detail_ptr->features_use = detail_ptr->prefer;
+				detail_ptr->feature_list_use =
+					detail_ptr->prefer_list;
 			}
 		} else {
 			sched_info("%s: cleared prefer for %pJ", __func__,
 				   job_ptr);
 			xfree(detail_ptr->prefer);
 			FREE_NULL_LIST(detail_ptr->prefer_list);
+			detail_ptr->features_use = NULL;
+			detail_ptr->feature_list_use = NULL;
 		}
 	}
 	if (error_code != SLURM_SUCCESS)
@@ -15460,7 +15478,8 @@ extern void abort_job_on_nodes(job_record_t *job_ptr,
 			bit_set(tmp_node_bitmap, i);
 		}
 		kill_req = create_kill_job_msg(job_ptr, protocol_version);
-		kill_req->nodes		= bitmap2node_name(tmp_node_bitmap);
+		kill_req->nodes = bitmap2node_name_sortable(tmp_node_bitmap,
+							    false);
 		agent_info = xmalloc(sizeof(agent_arg_t));
 		agent_info->node_count	= bit_set_count(tmp_node_bitmap);
 		agent_info->retry	= 1;

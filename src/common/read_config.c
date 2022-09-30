@@ -2361,7 +2361,7 @@ extern char *slurm_conf_get_nodename(const char *node_hostname)
 
 /*
  * slurm_conf_get_aliases - Return all the nodes NodeName value
- * associated to a given NodeHostname (usefull in case of multiple-slurmd
+ * associated to a given NodeHostname (useful in case of multiple-slurmd
  * to get the list of virtual nodes associated with a real node)
  *
  * NOTE: Call xfree() to release returned value's memory.
@@ -2397,18 +2397,15 @@ extern char *slurm_conf_get_aliases(const char *node_hostname)
 }
 
 /*
- * slurm_conf_get_nodeaddr - Return the NodeAddr for given
- * NodeHostname or NodeName
+ * slurm_conf_get_nodeaddr - Return the NodeAddr for given NodeHostname
  *
  * NOTE: Call xfree() to release returned value's memory.
  * NOTE: Caller must NOT be holding slurm_conf_lock().
  */
-extern char *slurm_conf_get_nodeaddr(const char *node_hostname,
-				     const char *node_name)
+extern char *slurm_conf_get_nodeaddr(const char *node_hostname)
 {
 	int idx;
 	names_ll_t *p;
-	char *nodeaddr = NULL;
 
 	slurm_conf_lock();
 	_init_slurmd_nodehash();
@@ -2417,15 +2414,20 @@ extern char *slurm_conf_get_nodeaddr(const char *node_hostname,
 	p = host_to_node_hashtbl[idx];
 	while (p) {
 		if (!xstrcmp(p->hostname, node_hostname) ||
-		    !xstrcmp(p->alias, node_name)) {
-			nodeaddr = xstrdup(p->address);
-			break;
+		    !xstrcmp(p->alias, node_hostname)) {
+			char *nodeaddr;
+			if (p->address != NULL)
+				nodeaddr = xstrdup(p->address);
+			else
+				nodeaddr = NULL;
+			slurm_conf_unlock();
+			return nodeaddr;
 		}
 		p = p->next_hostname;
 	}
 	slurm_conf_unlock();
 
-	return nodeaddr;
+	return NULL;
 }
 
 
@@ -2802,8 +2804,10 @@ extern int slurm_conf_get_res_spec_info(const char *node_name,
 	p = node_to_host_hashtbl[idx];
 	while (p) {
 		if (xstrcmp(p->alias, node_name) == 0) {
-			if (core_spec_cnt)
+			if (core_spec_cnt) {
+				xfree(*cpu_spec_list);
 				*cpu_spec_list = xstrdup(p->cpu_spec_list);
+			}
 			if (core_spec_cnt)
 				*core_spec_cnt  = p->core_spec_cnt;
 			if (mem_spec_limit)
@@ -5824,7 +5828,7 @@ extern int debug_str2flags(char *debug_flags, uint64_t *flags_out)
 		else if (xstrcasecmp(tok, "Switch") == 0)
 			(*flags_out) |= DEBUG_FLAG_SWITCH;
 		else if (xstrcasecmp(tok, "Task") == 0)
-			error("DebugFlag Task is deprecated, please use CPU_Bind");
+			error("DebugFlag Task has been removed, please use CPU_Bind");
 		else if (xstrcasecmp(tok, "TraceJobs") == 0)
 			(*flags_out) |= DEBUG_FLAG_TRACE_JOBS;
 		else if (xstrcasecmp(tok, "Trigger") == 0)

@@ -199,6 +199,12 @@ extern int init(void)
 	      plugin_name);
 #endif
 
+	if (!get_slurm_jc_conf()) {
+		error("%s: Configuration not read correctly: Does '%s' not exist?",
+		      plugin_type, tmpfs_conf_file);
+		return SLURM_ERROR;
+	}
+
 	debug("%s loaded", plugin_name);
 
 	return SLURM_SUCCESS;
@@ -802,11 +808,21 @@ static int _delete_ns(uint32_t job_id, bool is_slurmd)
 	} else if (is_slurmd)
 		return SLURM_SUCCESS;
 
+	/*
+	 * umount2() sets errno to EINVAL if the target is not a mount point
+	 * but also if called with invalid flags.  Consider this if changing the
+	 * flags to umount2().
+	 */
 	rc = umount2(ns_holder, MNT_DETACH);
 	if (rc) {
-		error("%s: umount2 %s failed: %s",
-		      __func__, ns_holder, strerror(errno));
-		return SLURM_ERROR;
+		if (errno == EINVAL) {
+			debug2("%s: umount2 %s failed: %s",
+			       __func__, ns_holder, strerror(errno));
+		} else {
+			error("%s: umount2 %s failed: %s",
+			      __func__, ns_holder, strerror(errno));
+			return SLURM_ERROR;
+		}
 	}
 
 	/*
