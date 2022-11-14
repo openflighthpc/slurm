@@ -242,6 +242,20 @@ static void _job_queue_append(List job_queue, job_record_t *job_ptr,
 	if (job_ptr->resv_name)
 		return;
 
+	/*
+	 * For het jobs, backfill makes a plan for each component; however,
+	 * backfill doesn't track magnetic reservations in the plan, so backfill
+	 * can't start hetjobs in a magnetic reservation unless the het job
+	 * explicitly requests the magnetic reservation.
+	 *
+	 * Also, if there is a magnetic reservation that starts in the future,
+	 * backfill will not be able to start the het job if there is a separate
+	 * magnetic reservation queue record for the component. So, don't create
+	 * a separate magnetic reservation queue record for het jobs.
+	 */
+	if (job_ptr->het_job_id)
+		return;
+
 	job_resv_append_magnetic(&job_queue_req);
 }
 
@@ -1442,22 +1456,6 @@ next_part:
 			part_ptr = job_queue_rec->part_ptr;
 			job_ptr->priority = job_queue_rec->priority;
 
-			/*
-			 * feature_list_use is a temporary variable and should
-			 * be reset before each use.
-			 */
-			if (job_queue_rec->use_prefer) {
-				job_ptr->details->features_use =
-					job_ptr->details->prefer;
-				job_ptr->details->feature_list_use =
-					job_ptr->details->prefer_list;
-			} else {
-				job_ptr->details->features_use =
-					job_ptr->details->features;
-				job_ptr->details->feature_list_use =
-					job_ptr->details->feature_list;
-			}
-
 			if (!avail_front_end(job_ptr)) {
 				job_ptr->state_reason = WAIT_FRONT_END;
 				xfree(job_ptr->state_desc);
@@ -1475,6 +1473,24 @@ next_part:
 			if (!job_ptr || !IS_JOB_PENDING(job_ptr)) {
 				xfree(job_queue_rec);
 				continue;	/* started in other partition */
+			}
+
+			/*
+			 * feature_list_use is a temporary variable and should
+			 * be reset before each use. Do this after the check for
+			 * pending because the job could have started with
+			 * "preferred" job_queue_rec.
+			 */
+			if (job_queue_rec->use_prefer) {
+				job_ptr->details->features_use =
+					job_ptr->details->prefer;
+				job_ptr->details->feature_list_use =
+					job_ptr->details->prefer_list;
+			} else {
+				job_ptr->details->features_use =
+					job_ptr->details->features;
+				job_ptr->details->feature_list_use =
+					job_ptr->details->feature_list;
 			}
 
 			if (job_ptr->resv_list)
@@ -4901,6 +4917,8 @@ static int _valid_batch_features(job_record_t *job_ptr, bool can_reboot)
 static int _valid_feature_list(job_record_t *job_ptr, List feature_list,
 			       bool can_reboot)
 {
+	static time_t sched_update = 0;
+	static bool ignore_prefer_val = false;
 	ListIterator feat_iter;
 	job_feature_t *feat_ptr;
 	char *buf = NULL;
@@ -4914,6 +4932,15 @@ static int _valid_feature_list(job_record_t *job_ptr, List feature_list,
 		else
 			debug2("Reservation feature list is empty");
 		return rc;
+	}
+
+	if (sched_update != slurm_conf.last_update) {
+		sched_update = slurm_conf.last_update;
+		if (xstrcasestr(slurm_conf.sched_params,
+				"ignore_prefer_validation"))
+			ignore_prefer_val = true;
+		else
+			ignore_prefer_val = false;
 	}
 
 	feat_iter = list_iterator_create(feature_list);
@@ -4933,7 +4960,9 @@ static int _valid_feature_list(job_record_t *job_ptr, List feature_list,
 			xstrcat(buf, ")");
 			paren = feat_ptr->paren;
 		}
-		if (rc == SLURM_SUCCESS)
+		if (rc == SLURM_SUCCESS &&
+		    (!ignore_prefer_val ||
+		     (feature_list != job_ptr->details->prefer_list)))
 			rc = _valid_node_feature(feat_ptr->name, can_reboot);
 		if (feat_ptr->count)
 			xstrfmtcat(buf, "*%u", feat_ptr->count);

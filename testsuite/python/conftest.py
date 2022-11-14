@@ -69,7 +69,6 @@ def module_setup(request, tmp_path_factory):
     atf.properties['slurm-started'] = False
     atf.properties['configurations-modified'] = set()
     atf.properties['accounting-database-modified'] = False
-    atf.properties['jobs-submitted'] = False
     atf.properties['orig-environment'] = dict(os.environ)
     #print(f"properties = {atf.properties}")
 
@@ -79,7 +78,18 @@ def module_setup(request, tmp_path_factory):
     name = name[:30]
     atf.module_tmp_path = tmp_path_factory.mktemp(name, numbered=True)
 
+    # Module-level fixtures should run from within the module_tmp_path
+    os.chdir(atf.module_tmp_path)
+
+    # Stop Slurm if using auto-config and Slurm is already running
+    if atf.properties['auto-config'] and atf.is_slurmctld_running(quiet=True):
+        logging.warning("Auto-config requires Slurm to be initially stopped but Slurm was found running. Stopping Slurm")
+        atf.stop_slurm(quiet=True)
+
     yield
+
+    # Return to the folder from which pytest was executed
+    os.chdir(request.config.invocation_dir)
 
     # Teardown
     module_teardown()
@@ -87,27 +97,34 @@ def module_setup(request, tmp_path_factory):
 
 def module_teardown():
 
-    # Cancel any jobs that were submitted via submit_job
-    if atf.properties['jobs-submitted']:
-        atf.cancel_all_jobs(quiet=True)
+    failures = []
 
     if atf.properties['auto-config']:
 
-        # Stop slurm if we started it
         if atf.properties['slurm-started'] == True:
-            atf.stop_slurm(quiet=True)
+
+            # Cancel all jobs
+            if not atf.cancel_all_jobs(quiet=True):
+                failures.append("Not all jobs were successfully cancelled")
+
+            # Stop Slurm if we started it
+            if not atf.stop_slurm(fatal=False, quiet=True):
+                failures.append("Not all Slurm daemons were successfully stopped")
 
         # Restore any backed up configuration files
         for config in set(atf.properties['configurations-modified']):
             atf.restore_config_file(config)
 
-        # Restore the slurm database if modified
+        # Restore the Slurm database if modified
         if atf.properties['accounting-database-modified']:
             atf.restore_accounting_database()
 
     # Restore the prior environment
     os.environ.clear()
     os.environ.update(atf.properties['orig-environment'])
+
+    if failures:
+        pytest.fail(failures[0])
 
 
 @pytest.fixture(scope="function", autouse=True)

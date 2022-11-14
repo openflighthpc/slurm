@@ -1,6 +1,93 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 22.05.6
+==========================
+ -- Fix a partition's DisableRootJobs=no from preventing root jobs from working.
+ -- Fix the number of allocated cpus for an auto-adjustment case in which the
+    job requests --ntasks-per-node and --mem (per-node) but the limit is
+    MaxMemPerCPU.
+ -- Fix POWER_DOWN_FORCE request leaving node in completing state.
+ -- Do not count magnetic reservation queue records towards backfill limits.
+ -- Clarify error message when --send-libs=yes or BcastParameters=send_libs
+    fails to identify shared library files, and avoid creating an empty
+    "<filename>_libs" directory on the target filesystem.
+ -- Fix missing CoreSpec on dynamic nodes upon slurmctld restart.
+ -- Fix node state reporting when using specialized cores.
+ -- Fix number of CPUs allocated if --cpus-per-gpu used.
+ -- Add flag ignore_prefer_validation to not validate --prefer on a job.
+ -- Fix salloc/sbatch SLURM_TASKS_PER_NODE output environment variable when the
+    number of tasks is not requested.
+ -- Permit using wildcard magic cookies with X11 forwarding.
+ -- cgroup/v2 - Add check for swap when running OOM check after task
+    termination.
+ -- Fix deadlock caused by race condition when disabling power save with a
+    reconfigure.
+ -- Fix memory leak in the dbd when container is sent to the database.
+ -- openapi/dbv0.0.38 - correct dbv0.0.38_tres_info.
+ -- Fix node SuspendTime, SuspendTimeout, ResumeTimeout being updated after
+    altering partition node lists with scontrol.
+ -- jobcomp/elasticsearch - fix data_t memory leak after serialization.
+ -- Fix issue where '*' wasn't accepted in gpu/cpu bind.
+ -- Fix SLURM_GPUS_ON_NODE for shared GPU gres (MPS, shards).
+ -- Add SLURM_SHARDS_ON_NODE environment variable for shards.
+ -- Fix srun error with overcommit.
+ -- Fix bug in core selection for the default cyclic distribution of tasks
+    across sockets, that resulted in random task launch failures.
+ -- Fix core selection for steps requesting multiple tasks per core when
+    allocation contains more cores than required for step.
+ -- gpu/nvml - Fix MIG minor number generation when GPU minor number
+    (/dev/nvidia[minor_number]) and index (as seen in nvidia-smi) do not match.
+ -- Fix accrue time underflow errors after slurmctld reconfig or restart.
+ -- Surpress errant errors from prolog_complete about being unable to locate
+    "node:(null)".
+ -- Fix issue where shards were selected from multiple gpus and failed to
+    allocate.
+ -- Fix step cpu count calculation when using --ntasks-per-gpu=.
+ -- Fix overflow problems when validating array index parameters in slurmctld
+    and prevent a potential condition causing slurmctld to crash.
+ -- Remove dependency on json-c in slurmctld when running with power saving.
+    Only the new "SLURM_RESUME_FILE" support relies on this, and it will be
+    disabled if json-c support is unavailable instead.
+
+* Changes in Slurm 22.05.5
+==========================
+ -- Fix node becoming IDLE while in an invalid registration state.
+ -- When a job is completing avoid potential dereference.
+ -- Avoid setting preempt_time for a job erroneously.
+ -- Fix situation where we don't requeue correctly when a job is finishing.
+ -- job_container/tmpfs - Avoid leaking namespace file descriptor.
+ -- common/slurm_opt - fix memory leak in client commands or slurmrestd when the
+    --chdir option is set after option reset.
+ -- openapi/dbv0.0.38 - gracefully handle unknown associations assigned to jobs.
+ -- openapi/dbv0.0.38 - query all associations to avoid errors while dumping
+    jobs.
+ -- Load hash plugin at slurmstepd launch time to prevent issues loading the
+    plugin at step completion if the Slurm installation is upgraded.
+ -- Fix gcc 12.2.1 compile errors.
+ -- Fix future magnetic reservations preventing heterogeneous jobs from
+    starting.
+ -- Prevent incorrect error message from being generated for operator/admins
+    using the 'scontrol top' command.
+ -- slurmrestd - correct issue where larger requests could result in a single
+    byte getting removed from inside of the POST request.
+ -- Fix regression in task count calculation for --ntasks-per-gpu with multiple
+    nodes.
+ -- Update nvml plugin to match the unique id format for MIG devices in new
+    Nvidia drivers.
+ -- Fix segfault on backup slurmdbd if no QoS is present in DB.
+ -- Fix clang 11 compile errors.
+ -- Fix task distribution calculations across sockets with
+    --distribution=cyclic.
+ -- Fix task distribution calculations with --ntasks-per-gpu specified without
+    an explicit --ntasks value.
+ -- Fix job arrays not showing correct features.
+ -- Fix job having wrong features used when using preferred features.
+ -- Fix task/cray_aries error finishing an interactive step, avoiding correct
+    cleanup.
+ -- Correctly set max_nodes when --ntasks=1.
+ -- Fix configure script on FreeBSD.
+
 * Changes in Slurm 22.05.4
 ==========================
  -- Fix return code from salloc when the job is revoked prior to executing user
@@ -465,6 +552,7 @@ documents those changes that are of interest to users and administrators.
     cons_tres cluster from a non-con_tres cluster.
  -- select/linear - fix regression introduced in 21.08.6 which prevented step
     requests with --threads-per-core or --hint=nomultithread from being created.
+ -- Fix gcc 12.2.1 compile errors.
 
 * Changes in Slurm 21.08.8-2
 ============================

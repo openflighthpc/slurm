@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "September 2022" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "October 2022" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -412,8 +412,12 @@ CoreSpecCount and use the specialized resources on nodes it is allocated.
 This option can not be used with the \fB\-\-thread\-spec\fR option. This option
 applies to job allocations.
 .br
+
 \fBNOTE\fR: This option may implicitly impact the number of tasks if \fB\-n\fR
 was not specified.
+
+\fBNOTE\fR: Explicitly setting a job's specialized core value implicitly sets
+its --exclusive option, reserving entire nodes for the job.
 .IP
 
 .TP
@@ -514,14 +518,12 @@ Not supported unless the entire node is allocated to the job.
 .B map_cpu:<list>
 Bind by setting CPU masks on tasks (or ranks) as specified where <list> is
 <cpu_id_for_task_0>,<cpu_id_for_task_1>,...
-CPU IDs are interpreted as decimal values unless they are preceded
-with '0x' in which case they interpreted as hexadecimal values.
 If the number of tasks (or ranks) exceeds the number of elements in this list,
 elements in the list will be reused as needed starting from the beginning of
 the list.
 To simplify support for large task counts, the lists may follow a map with an
 asterisk and repetition count.
-For example "map_cpu:0x0f*4,0xf0*4".
+For example "map_cpu:0*4,3*4".
 .IP
 
 .TP
@@ -1266,12 +1268,10 @@ all GPUs in that NUMA environment).
 \fBmap_gpu:<list>\fR
 Bind by setting GPU masks on tasks (or ranks) as specified where <list> is
 <gpu_id_for_task_0>,<gpu_id_for_task_1>,... GPU IDs are interpreted as decimal
-values unless they are preceded with '0x' in which case they interpreted as
-hexadecimal values. If the number of tasks (or ranks) exceeds the number of
-elements in this list, elements in the list will be reused as needed starting
-from the beginning of the list. To simplify support for large task counts,
-the lists may follow a map with an asterisk and repetition count.
-For example "map_gpu:0*4,1*4".
+values. If the number of tasks (or ranks) exceeds the number of elements in this
+list, elements in the list will be reused as needed starting from the beginning
+of the list. To simplify support for large task counts, the lists may follow a
+map with an asterisk and repetition count. For example "map_gpu:0*4,1*4".
 If the task/cgroup plugin is used and ConstrainDevices is set in cgroup.conf,
 then the GPU IDs are zero\-based indexes relative to the GPUs allocated to the
 job (e.g. the first GPU is 0, even if the global ID is 3). Otherwise, the GPU
@@ -1439,7 +1439,8 @@ command will exit if the option argument is "help".
 Examples of use include "\-\-gres=gpu:2", "\-\-gres=gpu:kepler:2", and
 "\-\-gres=help".
 NOTE: This option applies to job and step allocations. By default, a job step
-is allocated all of the generic resources that have been allocated to the job.
+is allocated all of the generic resources that have been requested by the job,
+except those implicitly requested when a job is exclusive.
 To change the behavior so that each job step is allocated no generic resources,
 explicitly set the value of \-\-gres to specify zero counts for each generic
 resource OR set "\-\-gres=none" OR set the SLURM_STEP_GRES environment variable
@@ -2757,6 +2758,9 @@ and not used by the application. The application will not use these threads,
 but will be charged for their allocation.
 This option can not be used with the \fB\-\-core\-spec\fR option. This option
 applies to job allocations.
+
+\fBNOTE\fR: Explicitly setting a job's specialized thread value implicitly sets
+its --exclusive option, reserving entire nodes for the job.
 .IP
 
 .TP
@@ -3916,6 +3920,11 @@ srun communication port.
 \fBSLURM_CONTAINER\fR
 OCI Bundle for job.
 Only set if \fB\-\-container\fR is specified.
+.IP
+
+.TP
+\fBSLURM_SHARDS_ON_NODE\fR
+Number of GPU Shards available to the step on this node.
 .IP
 
 .TP

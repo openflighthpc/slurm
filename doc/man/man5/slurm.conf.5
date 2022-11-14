@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "Slurm Configuration File" "September 2022" "Slurm Configuration File"
+.TH "slurm.conf" "5" "Slurm Configuration File" "October 2022" "Slurm Configuration File"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -1177,6 +1177,9 @@ in every cluster in the federation.
 If a job has an invalid dependency and it can never run terminate it
 and set its state to be JOB_CANCELLED. By default the job stays pending
 with reason DependencyNeverSatisfied.
+.IP
+
+.TP
 \fBmax_depend_depth=#\fR
 Maximum number of jobs to test for a circular job dependency. Stop testing
 after this number of job dependencies have been tested. The default value is
@@ -3362,10 +3365,11 @@ in power save mode is assigned work to perform.
 For reasons of reliability, \fBResumeProgram\fR may execute more than once
 for a node when the \fBslurmctld\fR daemon crashes and is restarted.
 If \fBResumeProgram\fR is unable to restore a node to service with a responding
-slurmd and an updated BootTime, it should requeue any job associated with the
-node and set the node state to DOWN. If the node isn't actually rebooted
-(i.e. when multiple\-slurmd is configured) starting slurmd with "\-b" option
-might be useful.
+slurmd and an updated BootTime, it should set the node state to DOWN, which will
+result in a requeue of any job associated with the node - this will happen
+automatically if the node doesn't register within ResumeTimeout.
+If the node isn't actually rebooted (i.e. when multiple\-slurmd is configured)
+starting slurmd with "\-b" option might be useful.
 The program executes as \fBSlurmUser\fR.
 The argument to the program will be the names of nodes to
 be removed from power savings mode (using Slurm's hostlist
@@ -3959,6 +3963,16 @@ socket count, but \fBnot\fR optimize resource allocations on the NUMA nodes.
 because of that if Slurm is build with hwloc 2.0 or above Slurm will treat
 HWLOC_OBJ_PACKAGE as Socket, you can change this behavior using
 \fBSlurmdParameters\fR=l3cache_as_socket.
+.IP
+
+.TP
+\fBignore_prefer_validation\fR
+If set, and a job requests --prefer any features in the request that would
+create an invalid request with the current system will not generate an error.
+This is helpful for dynamic systems where nodes with features come and go.
+Please note using this option will not protect you from typos.
+.IP
+
 .TP
 \fBmax_array_tasks\fR
 Specify the maximum number of tasks that can be included in a job array.
@@ -5844,11 +5858,12 @@ The default value is 1.
 .TP
 \fBCoreSpecCount\fR
 Number of cores reserved for system use.
-These cores will not be available for allocation to user jobs.
 Depending upon the \fBTaskPluginParam\fR option of \fBSlurmdOffSpec\fR,
 the Slurm daemon slurmd may either be confined to these
 resources (the default) or prevented from using these resources.
 Isolation of slurmd from user jobs may improve application performance.
+A job can use these cores if AllowSpecResourcesUsage=yes and the user
+explicitly requests less than the configured CoreSpecCount.
 If this option and \fBCpuSpecList\fR are both designated for a
 node, an error is generated.  For information on the algorithm used by Slurm
 to select the cores refer to the core specialization documentation
@@ -5888,11 +5903,12 @@ node. If \fBCPUs\fR is omitted, its default will be set equal to the product of
 \fBCpuSpecList\fR
 A comma\-delimited list of Slurm abstract CPU IDs reserved for system use.
 The list will be expanded to include all other CPUs, if any, on the same cores.
-These cores will not be available for allocation to user jobs.
 Depending upon the \fBTaskPluginParam\fR option of \fBSlurmdOffSpec\fR,
 the Slurm daemon slurmd may either be confined to these
 resources (the default) or prevented from using these resources.
 Isolation of slurmd from user jobs may improve application performance.
+A job can use these cores if AllowSpecResourcesUsage=yes and the user
+explicitly requests less than the number of CPUs in this list.
 If this option and \fBCoreSpecCount\fR are both designated for a node,
 an error is generated.
 This option has no effect unless cgroup job confinement is also configured
@@ -7351,8 +7367,6 @@ StateSaveLocation=/var/spool/slurm.state
 SwitchType=switch/none
 TmpFS=/tmp
 WaitTime=30
-JobCredentialPrivateKey=/usr/local/slurm/private.key
-JobCredentialPublicCertificate=/usr/local/slurm/public.cert
 #
 # Node Configurations
 #
@@ -7427,18 +7441,6 @@ The file must exist on every compute node.
 \fBJobCompLoc\fR
 If this specifies a file, it must be writable by user \fBSlurmUser\fR.
 The file must be accessible by the primary and backup control machines.
-.IP
-
-.TP
-\fBJobCredentialPrivateKey\fR
-Must be readable only by user \fBSlurmUser\fR and writable by no other users.
-The file must be accessible by the primary and backup control machines.
-.IP
-
-.TP
-\fBJobCredentialPublicCertificate\fR
-Readable to all users on all nodes.
-Must not be writable by regular users.
 .IP
 
 .TP

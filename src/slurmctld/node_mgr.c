@@ -488,6 +488,7 @@ extern int load_all_node_state ( bool state_only )
 			config_ptr = create_config_record();
 			config_ptr->boards = boards;
 			config_ptr->cores = cores;
+			config_ptr->cpu_spec_list = xstrdup(cpu_spec_list);
 			config_ptr->cpus = cpus;
 			config_ptr->feature = xstrdup(features);
 			config_ptr->gres = xstrdup(gres);
@@ -1788,20 +1789,13 @@ int update_node(update_node_msg_t *update_node_msg, uid_t auth_uid)
 					     this_node_name);
 				}
 
-				if (IS_NODE_POWERED_DOWN(node_ptr)) {
-					node_ptr->node_state &=
-						(~NODE_STATE_POWERED_DOWN);
-					info("power down request repeating "
-					     "for node %s", this_node_name);
-				} else if (IS_NODE_POWERING_DOWN(node_ptr)) {
+				if (IS_NODE_POWERING_DOWN(node_ptr)) {
 					info("ignoring power down request for node %s, already powering down",
 					     this_node_name);
 					node_ptr->next_state = NO_VAL;
 					free(this_node_name);
 					continue;
-				} else
-					info("powering down node %s",
-					     this_node_name);
+				}
 
 				if (state_val & NODE_STATE_POWERED_DOWN) {
 					/* Force power down */
@@ -1824,6 +1818,15 @@ int update_node(update_node_msg_t *update_node_msg, uid_t auth_uid)
 					node_ptr->node_state &=
 						(~NODE_STATE_POWERING_UP);
 				}
+
+				if (IS_NODE_POWERED_DOWN(node_ptr)) {
+					info("power down request repeating for node %s",
+					     this_node_name);
+					node_ptr->node_state &=
+						(~NODE_STATE_POWERED_DOWN);
+				} else
+					info("powering down node %s",
+					     this_node_name);
 
 				node_ptr->node_state |=
 					NODE_STATE_POWER_DOWN;
@@ -3553,6 +3556,7 @@ static void _node_did_resp(front_end_record_t *fe_ptr)
 		fe_ptr->node_state = NODE_STATE_IDLE | node_flags;
 	}
 	if (IS_NODE_DOWN(fe_ptr) &&
+	    !IS_NODE_INVALID_REG(fe_ptr) &&
 	    ((slurm_conf.ret2service == 2) ||
 	     ((slurm_conf.ret2service == 1) &&
 	      !xstrcmp(fe_ptr->reason, "Not responding")))) {
@@ -3603,6 +3607,7 @@ static void _node_did_resp(node_record_t *node_ptr)
 		}
 	}
 	if (IS_NODE_DOWN(node_ptr) &&
+	    !IS_NODE_INVALID_REG(node_ptr) &&
 	    ((slurm_conf.ret2service == 2) ||
 	     (node_ptr->boot_req_time != 0)    ||
 	     ((slurm_conf.ret2service == 1) &&

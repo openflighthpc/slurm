@@ -24,6 +24,10 @@ import traceback
 # ATF module functions
 ##############################################################################
 
+default_command_timeout = 60
+default_polling_timeout = 15
+
+
 def node_range_to_list(node_expression):
     """Converts a node range expression into a list of node names.
 
@@ -73,7 +77,7 @@ def list_to_range(numeric_list):
     return re.sub(r'^\[(.*)\]$', r'\1', node_range_expression)
 
 
-def run_command(command, fatal=False, timeout=60, quiet=False, chdir=None, user=None, input=None, xfail=False):
+def run_command(command, fatal=False, timeout=default_command_timeout, quiet=False, chdir=None, user=None, input=None, xfail=False):
     """Executes a command and returns a dictionary result.
 
     Args:
@@ -212,7 +216,7 @@ def run_command_exit(command, **run_command_kwargs):
     return results['exit_code']
 
 
-def repeat_until(callable, condition, timeout=15, poll_interval=None, fatal=False):
+def repeat_until(callable, condition, timeout=default_polling_timeout, poll_interval=None, fatal=False):
     """Repeats a callable until a condition is met or it times out.
 
     The callable returns an object that the condition operates on.
@@ -223,14 +227,17 @@ def repeat_until(callable, condition, timeout=15, poll_interval=None, fatal=Fals
         condition (callable): A callable object that returns a boolean. This
             function will return True when the condition call returns True.
         timeout (integer): If timeout number of seconds expires before the
-            condition is met, return False. The default timeout is 15 seconds.
+            condition is met, return False.
         poll_interval (float): Number of seconds to wait between condition
             polls. This may be a decimal fraction. The default poll interval
             depends on the timeout used, but varies between .1 and 1 seconds.
         fatal (boolean): If True, a timeout will result in the test failing.
 
+    Returns:
+        True if the condition is met by the timeout, False otherwise.
+
     Example:
-        >>> repeat_until(lambda : random.randint(1,10), lambda n: n == 5, timeout=10, poll_interval=1)
+        >>> repeat_until(lambda : random.randint(1,10), lambda n: n == 5, timeout=30, poll_interval=1)
         True
     """
 
@@ -252,6 +259,7 @@ def repeat_until(callable, condition, timeout=15, poll_interval=None, fatal=Fals
     if fatal:
         pytest.fail(f"Condition was not met within the {timeout} second timeout")
     else:
+        logging.warning(f"Condition was not met within the {timeout} second timeout")
         return False
 
 
@@ -410,17 +418,23 @@ def stop_slurmctld(quiet=False):
         pytest.fail("Slurmctld is still running")
 
 
-def stop_slurm(quiet=False):
-    """Stops all applicable slurm daemons.
+def stop_slurm(fatal=True, quiet=False):
+    """Stops all applicable Slurm daemons.
 
-    This function examines the slurm configuration files in order to
+    This function examines the Slurm configuration files in order to
     determine which daemons need to be stopped.
 
     This function may only be used in auto-config mode.
 
     Args:
+        fatal (boolean): If True, a failure to stop all daemons will result in the test failing.
         quiet (boolean): If True, logging is performed at the TRACE log level.
+
+    Returns:
+        True if all Slurm daemons were stopped, False otherwise.
     """
+
+    failures = []
 
     if not properties['auto-config']:
         require_auto_config("wants to stop slurm")
@@ -429,33 +443,47 @@ def stop_slurm(quiet=False):
     if get_config_parameter('AccountingStorageType', live=False, quiet=quiet) == 'accounting_storage/slurmdbd':
 
         # Stop slurmdbd
-        run_command("sacctmgr shutdown", user=properties['slurm-user'], quiet=quiet)
+        results = run_command("sacctmgr shutdown", user=properties['slurm-user'], quiet=quiet)
+        if results['exit_code'] != 0:
+            failures.append(f"Command \"sacctmgr shutdown\" failed with rc={results['exit_code']}")
 
         # Verify that slurmdbd is not running (we might have to wait for rollups to complete)
         if not repeat_until(lambda : pids_from_exe(f"{properties['slurm-sbin-dir']}/slurmdbd"), lambda pids: len(pids) == 0, timeout=60):
-            pytest.fail("Slurmdbd is still running")
+            failures.append("Slurmdbd is still running")
 
     # Stop slurmctld and slurmds
-    run_command("scontrol shutdown", user=properties['slurm-user'], quiet=quiet)
+    results = run_command("scontrol shutdown", user=properties['slurm-user'], quiet=quiet)
+    if results['exit_code'] != 0:
+        failures.append(f"Command \"scontrol shutdown\" failed with rc={results['exit_code']}")
 
     # Verify that slurmctld is not running
     if not repeat_until(lambda : pids_from_exe(f"{properties['slurm-sbin-dir']}/slurmctld"), lambda pids: len(pids) == 0):
-        pytest.fail("Slurmctld is still running")
+        failures.append("Slurmctld is still running")
 
     # Build list of slurmds
     slurmd_list = []
     output = run_command_output(f"perl -nle 'print $1 if /^NodeName=(\\S+)/' {properties['slurm-config-dir']}/slurm.conf", quiet=quiet)
     if not output:
-        pytest.fail("Unable to determine the slurmd node names")
-    for node_name_expression in output.rstrip().split('\n'):
-        if node_name_expression != 'DEFAULT':
-            slurmd_list.extend(node_range_to_list(node_name_expression))
+        failures.append("Unable to determine the slurmd node names")
+    else:
+        for node_name_expression in output.rstrip().split('\n'):
+            if node_name_expression != 'DEFAULT':
+                slurmd_list.extend(node_range_to_list(node_name_expression))
 
     # Verify that slurmds are not running
     if not repeat_until(lambda : pids_from_exe(f"{properties['slurm-sbin-dir']}/slurmd"), lambda pids: len(pids) == 0):
         pids = pids_from_exe(f"{properties['slurm-sbin-dir']}/slurmd")
         run_command(f"pgrep -f {properties['slurm-sbin-dir']}/slurmd -a", quiet=quiet)
-        pytest.fail(f"Some slurmds are still running ({pids})")
+        failures.append(f"Some slurmds are still running ({pids})")
+
+    if failures:
+        if (fatal):
+            pytest.fail(failures[0])
+        else:
+            logging.warning(failures[0])
+            return False
+    else:
+        return True
 
 
 def restart_slurmctld(clean=False, quiet=False):
@@ -491,6 +519,9 @@ def require_slurm_running():
 
     In local-config mode, the test is skipped if slurm is not running.
     In auto-config mode, slurm is started if necessary.
+
+    In order to avoid multiple restarts of Slurm (in auto-config), this function
+    should be called at the end of the setup preconditions.
     """
 
     global nodes
@@ -725,7 +756,7 @@ def set_config_parameter(parameter_name, parameter_value, source='slurm', restar
         When setting a complex parameter (one which may be repeated and has
         its own subparameters, such as with nodes, partitions and gres),
         the parameter_value should be a dictionary of dictionaries.
- 
+
     Example:
         >>> set_config_parameter('ClusterName', 'cluster1')
     """
@@ -863,7 +894,7 @@ def require_config_parameter(parameter_name, parameter_value, condition=None, so
         When requiring a complex parameter (one which may be repeated and has
         its own subparameters, such as with nodes, partitions and gres),
         the parameter_value should be a dictionary of dictionaries.
- 
+
     Examples:
         >>> require_config_parameter('SelectType', 'select/cons_tres')
         >>> require_config_parameter('SlurmdTimeout', 5, lambda v: v <= 5)
@@ -1005,7 +1036,7 @@ def get_user_name():
     return pwd.getpwuid(os.getuid()).pw_name
 
 
-def cancel_jobs(job_list, timeout=5, poll_interval=.1, fatal=False, quiet=False):
+def cancel_jobs(job_list, timeout=default_polling_timeout, poll_interval=.1, fatal=False, quiet=False):
     """Cancels a list of jobs and waits for them to complete.
 
     Args:
@@ -1035,7 +1066,7 @@ def cancel_jobs(job_list, timeout=5, poll_interval=.1, fatal=False, quiet=False)
     return True
 
 
-def cancel_all_jobs(fatal=True, timeout=5, quiet=False):
+def cancel_all_jobs(timeout=default_polling_timeout, poll_interval=.1, fatal=False, quiet=False):
     """Cancels all jobs belonging to the test user.
 
     Args:
@@ -1047,13 +1078,9 @@ def cancel_all_jobs(fatal=True, timeout=5, quiet=False):
 
     user_name = get_user_name()
 
-    results = run_command(f"scancel -u {user_name}", quiet=quiet)
-    # Have to account for het scancel bug until bug 11806 is fixed
-    if results['exit_code'] != 0 and results['exit_code'] != 60:
-        pytest.fail(f"Failure cancelling jobs: {results['stderr']}")
+    run_command(f"scancel -u {user_name}", fatal=fatal, quiet=quiet)
 
-    # Inherits timeout from repeat_until
-    return repeat_command_until(f"squeue -u {user_name} --noheader", lambda results: results['stdout'] == '', fatal=fatal, timeout=timeout, quiet=quiet)
+    return repeat_command_until(f"squeue -u {user_name} --noheader", lambda results: results['stdout'] == '', timeout=timeout, poll_interval=poll_interval, fatal=fatal, quiet=quiet)
 
 
 def is_integer(value):
@@ -1332,8 +1359,6 @@ def submit_job(sbatch_args="--wrap \"sleep 60\"", **run_command_kwargs):
     output = run_command_output(f"sbatch {sbatch_args}", **run_command_kwargs)
 
     if match := re.search(r'Submitted \S+ job (\d+)', output):
-        if not properties['jobs-submitted']:
-            properties['jobs-submitted'] = True
         job_id = int(match.group(1))
         return job_id
     else:
@@ -1357,10 +1382,6 @@ def run_job(srun_args, **run_command_kwargs):
     """
 
     results = run_command(f"srun {srun_args}", **run_command_kwargs)
-
-    if results['exit_code'] == errno.ETIMEDOUT:
-        if not properties['jobs-submitted']:
-            properties['jobs-submitted'] = True
 
     return results
 
@@ -1470,8 +1491,6 @@ def alloc_job_id(salloc_args, **run_command_kwargs):
 
     results = run_command(f"salloc {salloc_args}", **run_command_kwargs)
     if match := re.search(r'Granted job allocation (\d+)', results['stderr']):
-        if not properties['jobs-submitted']:
-            properties['jobs-submitted'] = True
         job_id = int(match.group(1))
         return job_id
     else:
@@ -1598,7 +1617,7 @@ def get_job_parameter(job_id, parameter_name, default=None, quiet=False):
         return default
 
 
-def wait_for_job_state(job_id, desired_job_state, timeout=5, poll_interval=None, fatal=False, quiet=False):
+def wait_for_job_state(job_id, desired_job_state, timeout=default_polling_timeout, poll_interval=None, fatal=False, quiet=False):
     """Waits for the specified job state to be reached.
 
     This function polls the job state every poll interval seconds, waiting up
@@ -2459,5 +2478,3 @@ if results.returncode == 0:
         properties['sudo-rights'] = True
 else:
         properties['sudo-rights'] = False
-
-
