@@ -6,6 +6,7 @@ import pytest
 import re
 import time
 
+
 @pytest.fixture(scope="module", autouse=True)
 def setup():
     atf.require_config_parameter('PreemptType', 'preempt/partition_prio')
@@ -39,7 +40,7 @@ def partition2(partition_node):
 def cancel_jobs():
     """Cancel all jobs after each test"""
     yield
-    atf.cancel_all_jobs()
+    atf.cancel_all_jobs(fatal=True)
 
 
 def test_preempt_cancel(partition1, partition2, cancel_jobs):

@@ -5,6 +5,7 @@ import atf
 import pytest
 import re
 
+
 @pytest.fixture(scope="module", autouse=True)
 def setup():
     atf.require_accounting()
@@ -32,7 +33,7 @@ def queued_job(default_partition):
     queued_job_id = atf.submit_job(f"--output=/dev/null --error=/dev/null -n {total_cpus} --exclusive --wrap=\"sleep 600\"", fatal=True)
 
     return queued_job_id
-    
+
 
 def test_noheader(queued_job, default_partition):
     """Verify sprio --noheader option"""

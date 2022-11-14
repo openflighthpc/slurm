@@ -911,7 +911,6 @@ static int _set_partition_options(void *x, void *arg)
  */
 static int _init_power_config(void)
 {
-	int rc;
 	char *tmp_ptr;
 	bool partition_suspend_time_set = false;
 
@@ -999,12 +998,6 @@ static int _init_power_config(void)
 		xfree(resume_fail_prog);
 	}
 
-	if ((rc = data_init(MIME_TYPE_JSON_PLUGIN, NULL))) {
-		error("%s: unable to load JSON serializer: %s",
-		      __func__, slurm_strerror(rc));
-		return -1;
-	}
-
 	return 0;
 }
 
@@ -1066,8 +1059,10 @@ extern void start_power_mgr(pthread_t *thread_id)
 	slurm_mutex_lock(&power_mutex);
 	if (power_save_started || !power_save_enabled) {
 		if (!power_save_enabled && *thread_id) {
+			slurm_mutex_unlock(&power_mutex);
 			pthread_join(*thread_id, NULL);
 			*thread_id = 0;
+			return;
 		}
 		slurm_mutex_unlock(&power_mutex);
 		return;
@@ -1196,6 +1191,13 @@ extern void power_save_set_timeouts(bool *partition_suspend_time_set)
 	xassert(verify_lock(CONF_LOCK, READ_LOCK));
 	xassert(verify_lock(NODE_LOCK, WRITE_LOCK));
 	xassert(verify_lock(PART_LOCK, READ_LOCK));
+
+	/* Reset timeouts so new values can be caluclated. */
+	for (int i = 0; (node_ptr = next_node(&i)); i++) {
+		node_ptr->suspend_time = NO_VAL;
+		node_ptr->suspend_timeout = NO_VAL16;
+		node_ptr->resume_timeout = NO_VAL16;
+	}
 
 	/* Figure out per-partition options and push to node level. */
 	list_for_each(part_list, _set_partition_options,

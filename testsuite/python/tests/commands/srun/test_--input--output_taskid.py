@@ -8,11 +8,13 @@ import pexpect
 
 node_count = 4
 
+
 # Setup
 @pytest.fixture(scope="module", autouse=True)
 def setup():
-    atf.require_slurm_running()
     atf.require_nodes(node_count)
+    atf.require_slurm_running()
+
 
 def test_input_ouput_taskid():
     """Verify srun stdin/out routing with specific task number."""
@@ -30,7 +32,7 @@ def test_input_ouput_taskid():
     assert re.search(step_id, child_out) is not None, f"Step ({step_id}) not found in verbose output"
     assert re.search(f"{step_id} task {task_id}: running", child_out), f"Task ({task_id}) failed to run"
     assert re.search(f"{step_id} tasks 0-{task_id - 1},{task_id + 1}-{task_num - 1}: exited", child_out), f"Other tasks failed to exit"
-    
+
     # Test --output={task_id} sends only {task_id}'s output to stdout
     stdout = atf.run_command_output(f"srun --output={task_id} -O -N1 -n{task_num} env")
     match = re.search(r"SLURM_PROCID=(\d+)", stdout)

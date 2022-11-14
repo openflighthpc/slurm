@@ -4915,12 +4915,7 @@ extern job_record_t *job_array_split(job_record_t *job_ptr)
 	details_new->prefer = xstrdup(job_details->prefer);
 	details_new->prefer_list =
 		feature_list_copy(job_details->prefer_list);
-	/*
-	 * features_use and feature_list_use are set in the schedulers before
-	 * attempting to schedule the job, so just set them to NULL here.
-	 */
-	details_new->features_use = NULL;
-	details_new->feature_list_use = NULL;
+	set_job_features_use(details_new);
 	if (job_details->mc_ptr) {
 		i = sizeof(multi_core_data_t);
 		details_new->mc_ptr = xmalloc(i);
@@ -5321,6 +5316,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 {
 	static time_t sched_update = 0;
 	static int defer_sched = 0;
+	static bool ignore_prefer_val = false;
 	int error_code, i;
 	bool no_alloc, top_prio, test_only, too_fragmented, independent;
 	job_record_t *job_ptr;
@@ -5360,6 +5356,12 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 
 		if (xstrcasestr(slurm_conf.sched_params, "allow_zero_lic"))
 			validate_cfgd_licenses = false;
+
+		if (xstrcasestr(slurm_conf.sched_params,
+				"ignore_prefer_validation"))
+			ignore_prefer_val = true;
+		else
+			ignore_prefer_val = false;
 	}
 
 	if (job_specs->array_bitmap)
@@ -5507,17 +5509,21 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate,
 	 * If we have a prefer feature list check that, if not check the
 	 * normal features.
 	 */
-	if (job_ptr->details->prefer) {
-		job_ptr->details->features_use = job_ptr->details->prefer;
-		job_ptr->details->feature_list_use =
-			job_ptr->details->prefer_list;
-	} else {
+	set_job_features_use(job_ptr->details);
+
+	error_code = _select_nodes_parts(job_ptr, no_alloc, NULL, err_msg);
+
+	if ((error_code == ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE) &&
+	    (job_ptr->details->features_use == job_ptr->details->prefer) &&
+	    ignore_prefer_val) {
 		job_ptr->details->features_use = job_ptr->details->features;
 		job_ptr->details->feature_list_use =
 			job_ptr->details->feature_list;
+		error_code = _select_nodes_parts(job_ptr, no_alloc, NULL,
+						 err_msg);
+		set_job_features_use(job_ptr->details);
 	}
 
-	error_code = _select_nodes_parts(job_ptr, no_alloc, NULL, err_msg);
 	if (!test_only) {
 		last_job_update = now;
 	}
@@ -6347,13 +6353,17 @@ extern int prolog_complete(uint32_t job_id, uint32_t prolog_return_code,
 		error("Prolog launch failure, %pJ", job_ptr);
 #ifndef HAVE_FRONT_END
 	if (job_ptr->node_bitmap_pr) {
-		node_record_t *node_ptr;
+		node_record_t *node_ptr = NULL;
 
-		node_ptr = find_node_record(node_name);
+		if (node_name)
+			node_ptr = find_node_record(node_name);
+
 		if (node_ptr) {
 			bit_clear(job_ptr->node_bitmap_pr, node_ptr->index);
 		} else {
-			error("%s: can't find node:%s", __func__, node_name);
+			if (node_name)
+				error("%s: can't find node:%s",
+				      __func__, node_name);
 			bit_clear_all(job_ptr->node_bitmap_pr);
 		}
 	}
@@ -7764,7 +7774,7 @@ static int _test_strlen(char *test_str, char *str_name, int max_str_len)
 static bool _parse_array_tok(char *tok, bitstr_t *array_bitmap, uint32_t max)
 {
 	char *end_ptr = NULL;
-	int i, first, last, step = 1;
+	long int i, first, last, step = 1;
 
 	if (tok[0] == '[')	/* Strip leading "[" */
 		tok++;
@@ -7783,7 +7793,7 @@ static bool _parse_array_tok(char *tok, bitstr_t *array_bitmap, uint32_t max)
 				end_ptr++;
 			if ((end_ptr[0] != '\0') && (end_ptr[0] != '%'))
 				return false;
-			if (step <= 0)
+			if ((step <= 0) || (step >= max))
 				return false;
 		} else if ((end_ptr[0] != '\0') && (end_ptr[0] != '%')) {
 			return false;
@@ -8943,6 +8953,11 @@ static bool _valid_pn_min_mem(job_desc_msg_t *job_desc_msg,
 			      "limit", min_cpus);
 			job_desc_msg->pn_min_cpus = min_cpus;
 			cpus_per_node = MAX(cpus_per_node, min_cpus);
+			if (job_desc_msg->ntasks_per_node)
+				job_desc_msg->cpus_per_task =
+					(job_desc_msg->pn_min_cpus +
+					 job_desc_msg->ntasks_per_node - 1) /
+					job_desc_msg->ntasks_per_node;
 		}
 		sys_mem_limit *= cpus_per_node;
 	}
@@ -17372,7 +17387,11 @@ static int _job_requeue_op(uid_t uid, job_record_t *job_ptr, bool preempt,
 	if (is_running) {
 		job_ptr->job_state |= JOB_COMPLETING;
 		deallocate_nodes(job_ptr, false, is_suspended, preempt);
-		job_ptr->job_state &= (~JOB_COMPLETING);
+		if (!IS_JOB_COMPLETING(job_ptr) && !job_ptr->fed_details &&
+		    job_ptr->db_index)
+			is_completed = true;
+		else
+			job_ptr->job_state &= (~JOB_COMPLETING);
 	}
 
 	_set_requeued_job_pending_completing(job_ptr);
@@ -17860,9 +17879,10 @@ extern int job_set_top(top_job_msg_t *top_ptr, uid_t uid, int conn_fd,
 	uint32_t job_id = 0, task_id = 0;
 	slurm_msg_t resp_msg;
 	return_code_msg_t rc_msg;
+	uid_t job_uid = uid;
 
 	if (validate_operator(uid)) {
-		uid = 0;
+		job_uid = 0;
 	} else {
 		bool disable_user_top = true;
 		if (xstrcasestr(slurm_conf.sched_params, "enable_user_top"))
@@ -17917,7 +17937,7 @@ extern int job_set_top(top_job_msg_t *top_ptr, uid_t uid, int conn_fd,
 		rc = ESLURM_INVALID_JOB_ID;
 		goto reply;
 	}
-	rc = _set_top(top_job_list, uid);
+	rc = _set_top(top_job_list, job_uid);
 
 reply:	FREE_NULL_LIST(top_job_list);
 	xfree(job_str_tmp);
