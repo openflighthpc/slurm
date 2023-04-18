@@ -1,4 +1,4 @@
-.TH salloc "1" "Slurm Commands" "September 2022" "Slurm Commands"
+.TH salloc "1" "Slurm Commands" "March 2023" "Slurm Commands"
 
 .SH "NAME"
 salloc \- Obtain a Slurm job allocation (a set of nodes), execute a command,
@@ -229,14 +229,13 @@ An arbitrary comment.
 Nodes can have \fBfeatures\fR assigned to them by the Slurm administrator.
 Users can specify which of these \fBfeatures\fR are required by their job
 using the constraint option. If you are looking for 'soft' constraints please
-see see \fB\-\-prefer\fR for more information.
+see \fB\-\-prefer\fR for more information.
 Only nodes having features matching the job constraints will be used to
 satisfy the request.
 Multiple constraints may be specified with AND, OR, matching OR,
 resource counts, etc. (some operators are not supported on all system types).
 
-\fBNOTE\fR: If features that are part of the node_features/helpers plugin are
-requested, then only the \fBSingle Name\fR and \fBAND\fR options are supported.
+\fBNOTE\fR: Changeable features are features defined by a NodeFeatures plugin.
 
 Supported \fB\-\-constraint\fR options include:
 .IP
@@ -255,20 +254,35 @@ by appending an asterisk and count after the feature name.
 For example, \fB\-\-nodes=16 \-\-constraint="graphics*4 ..."\fR
 indicates that the job requires 16 nodes and that at least four of those
 nodes must have the feature "graphics."
+\fBNOTE\fR: This option is not supported by the helpers NodeFeatures plugin.
+Heterogeneous jobs can be used instead.
 .IP
 
 .TP
 \fBAND\fR
-If only nodes with all of specified features will be used.
+Only nodes with all of specified features will be used.
 The ampersand is used for an AND operator.
 For example, \fB\-\-constraint="intel&gpu"\fR
 .IP
 
 .TP
 \fBOR\fR
-If only nodes with at least one of specified features will be used.
-The vertical bar is used for an OR operator.
-For example, \fB\-\-constraint="intel|amd"\fR
+Only nodes with at least one of specified features will be used.
+The vertical bar is used for an OR operator. If changeable features are not
+requested, nodes in the allocation can have different features. For example,
+\fBsalloc -N2 \-\-constraint="intel|amd"\fR can result in a job allocation
+where one node has the intel feature and the other node has the amd feature.
+However, if the expression contains a changeable feature, then all OR operators
+are automatically treated as Matching OR so that all nodes in the job
+allocation have the same set of features. For example,
+\fBsalloc -N2 \-\-constraint="foo|bar&baz"\fR
+The job is allocated two nodes where both nodes have foo, or bar and baz (one
+or both nodes could have foo, bar, and baz). The helpers NodeFeatures plugin
+will find the first set of node features that matches all nodes in the job
+allocation; these features are set as active features on the node and passed to
+RebootProgram (see \fBslurm.conf\fR(5)) and the helper script (see
+\fBhelpers.conf\fR(5)). In this case, the helpers plugin uses the first of
+"foo" or "bar,baz" that match the two nodes in the job allocation.
 .IP
 
 .TP
@@ -294,6 +308,8 @@ modes. For example, while \fB\-\-constraint="[(knl&quad)*2&(knl&hemi)*4]"\fR is
 not supported, \fB\-\-constraint="[haswell*2&(knl&hemi)*4]"\fR is supported.
 Specification of multiple KNL modes requires the use of a heterogeneous job.
 
+\fBNOTE\fR: This option is not supported by the helpers NodeFeatures plugin.
+
 \fBNOTE\fR: Multiple Counts can cause jobs to be allocated with a non-optimal
 network layout.
 .IP
@@ -312,21 +328,39 @@ meets those requirements.
 AND operators require a count for each feature inside square brackets
 (i.e. "[quad*2&hemi*1]"). Slurm will only allow a single set of bracketed
 constraints per job.
+
+\fBNOTE\fR: Square brackets are not supported by the helpers NodeFeatures
+plugin. Matching OR can be requested without square brackets by using the
+vertical bar character with at least one changeable feature.
 .IP
 
 .TP
-\fBParenthesis\fR
-Parenthesis can be used to group like node features together. For example,
+\fBParentheses\fR
+Parentheses can be used to group like node features together. For example,
 \fB\-\-constraint="[(knl&snc4&flat)*4&haswell*1]"\fR might be used to specify
 that four nodes with the features "knl", "snc4" and "flat" plus one node with
-the feature "haswell" are required. All options within parenthesis should be
-grouped with AND (e.g. "&") operands.
+the feature "haswell" are required.
+Parentheses can also be used to group operations. Without parentheses, node
+features are parsed strictly from left to right.
+For example,
+\fB\-\-constraint="foo&bar|baz"\fR requests nodes with foo and bar, or baz.
+\fB\-\-constraint="foo|bar&baz"\fR requests nodes with foo and baz, or bar and
+baz (note how baz was AND'd with everything).
+\fB\-\-constraint="foo&(bar|baz)"\fR requests nodes with foo and at least
+one of bar or baz.
+\fBNOTE\fR: OR within parentheses should not be used with a KNL
+NodeFeatures plugin but is supported by the helpers NodeFeatures plugin.
 .RE
 .IP
 
 .TP
 \fB\-\-container\fR=<\fIpath_to_container\fR>
 Absolute path to OCI container bundle.
+.IP
+
+.TP
+\fB\-\-container-id\fR=<\fIcontainer_id\fR>
+Unique name for OCI container.
 .IP
 
 .TP
@@ -549,7 +583,17 @@ satisfied completed.
 <\fItype:job_id[:job_id][?type:job_id[:job_id]]\fR>.
 All dependencies must be satisfied if the "," separator is used.
 Any dependency may be satisfied if the "?" separator is used.
-Only one separator may be used.
+Only one separator may be used. For instance:
+.nf
+-d afterok:20:21,afterany:23
+.fi
+means that the job can run only after a 0 return code of jobs 20 and 21
+AND completion of job 23. However:
+.nf
+-d afterok:20:21?afterany:23
+.fi
+means that any of the conditions (afterok:20 OR afterok:21 OR afterany:23)
+will be enough to release the job.
 Many jobs can share the same dependency and these jobs may even belong to
 different  users. The  value may be changed after job submission using the
 scontrol command.
@@ -571,6 +615,7 @@ start or cancellation.
 .TP
 \fBafterany:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have terminated.
+This is the default dependency type.
 .IP
 
 .TP
@@ -806,6 +851,14 @@ partition's \fBOverSubscribe\fR option takes precedence over the job's option.
 NOTE: Since shared GRES (MPS) cannot be allocated at the same time as a sharing
 GRES (GPU) this option only allocates all sharing GRES and no underlying shared
 GRES.
+
+\fBNOTE\fR: This option is mutually exclusive with \fB\-\-oversubscribe\fR.
+.IP
+
+.TP
+\fB\-\-extra\fR=<\fIstring\fR>
+An arbitrary string enclosed in double quotes if using spaces or some
+special characters.
 .IP
 
 .TP
@@ -996,8 +1049,6 @@ the highest available frequency.
 Specify the total number of GPUs required for the job.
 An optional GPU type specification can be supplied.
 For example "\-\-gpus=volta:3".
-Multiple options can be requested in a comma separated list, for example:
-"\-\-gpus=volta:3,kepler:1".
 See also the \fB\-\-gpus\-per\-node\fR, \fB\-\-gpus\-per\-socket\fR and
 \fB\-\-gpus\-per\-task\fR options.
 .br
@@ -1194,8 +1245,8 @@ License names can be followed by a colon and count
 Multiple license names should be comma separated (e.g.
 "\-\-licenses=foo:4,bar").
 
-\fBNOTE\fR: When submitting heterogeneous jobs, license requests only work
-correctly when made on the first component job.
+\fBNOTE\fR: When submitting heterogeneous jobs, license requests
+may only be made on the first component job.
 For example "salloc \-L ansys:2 :".
 .IP
 
@@ -1501,6 +1552,123 @@ In all cases the job allocation request \fBmust specify the
 Also with any of these options steps are not allowed to share blades,
 so resources would remain idle inside an allocation if the step
 running on a blade does not take up all the nodes on the blade.
+
+The \fBnetwork\fR option is also available on systems with HPE Slingshot
+networks. It can be used to request a job VNI (to be used for communication
+between job steps in a job). It also can be used to override the default
+network resources allocated for the job step. Multiple values may be specified
+in a comma-separated list.
+.IP
+.RS
+.TP 6
+\fBtcs\fR=<\fIclass1\fR>[:<\fIclass2\fR>]...
+Set of traffic classes to configure for applications.
+Supported traffic classes are DEDICATED_ACCESS, LOW_LATENCY, BULK_DATA, and
+BEST_EFFORT.
+.IP
+
+.TP
+\fBno_vni\fR
+Don't allocate any VNIs for this job (even if multi-node).
+.IP
+
+.TP
+\fBjob_vni\fR
+Allocate a job VNI for this job.
+.IP
+
+.TP
+\fBsingle_node_vni\fR
+Allocate a job VNI for this job, even if it is a single-node job.
+.IP
+
+.TP
+\fBadjust_limits\fR
+If set, slurmd will set an upper bound on network resource reservations
+by taking the per-NIC maximum resource quantity and subtracting the
+reserved or used values (whichever is higher) for any system network services;
+this is the default.
+.IP
+
+.TP
+\fBno_adjust_limits\fR
+If set, slurmd will calculate network resource reservations
+based only upon the per-resource configuration default and number of tasks
+in the application; it will not set an upper bound on those reservation
+requests based on resource usage of already-existing system network services.
+Setting this will mean more application launches could fail based
+on network resource exhaustion, but if the application
+absolutely needs a certain amount of resources to function, this option
+will ensure that.
+.IP
+
+.TP
+\fBdef_<rsrc>\fR=<\fIval\fR>
+Per-CPU reserved allocation for this resource.
+.IP
+
+.TP
+\fBres_<rsrc>\fR=<\fIval\fR>
+Per-node reserved allocation for this resource.
+If set, overrides the per-CPU allocation.
+.IP
+
+.TP
+\fBmax_<rsrc>\fR=<\fIval\fR>
+Maximum per-node limit for this resource.
+.IP
+
+.TP
+\fBdepth\fR=<\fIdepth\fR>
+Multiplier for per-CPU resource allocation.
+Default is the number of reserved CPUs on the node.
+.RE
+.IP
+
+The resources that may be requested are:
+.IP
+.RS
+.TP 6
+\fBtxqs\fR
+Transmit command queues. The default is 2 per-CPU, maximum 1024 per-node.
+.IP
+
+.TP
+\fBtgqs\fR
+Target command queues. The default is 1 per-CPU, maximum 512 per-node.
+.IP
+
+.TP
+\fBeqs\fR
+Event queues. The default is 2 per-CPU, maximum 2047 per-node.
+.IP
+
+.TP
+\fBcts\fR
+Counters. The default is 1 per-CPU, maximum 2047 per-node.
+.IP
+
+.TP
+\fBtles\fR
+Trigger list entries. The default is 1 per-CPU, maximum 2048 per-node.
+.IP
+
+.TP
+\fBptes\fR
+Portable table entries. The default is 6 per-CPU, maximum 2048 per-node.
+.IP
+
+.TP
+\fBles\fR
+List entries. The default is 16 per-CPU, maximum 16384 per-node.
+.IP
+
+.TP
+\fBacs\fR
+Addressing contexts. The default is 4 per-CPU, maximum 1022 per-node.
+.RE
+.IP
+
 .IP
 
 .TP
@@ -1520,12 +1688,15 @@ Silence salloc's use of the terminal bell. Also see the option \fB\-\-bell\fR.
 \fB\-k\fR, \fB\-\-no\-kill\fR[=off]
 Do not automatically terminate a job if one of the nodes it has been
 allocated fails.  The user will assume the responsibilities for fault\-tolerance
-should a node fail.  When there is a node failure, any active job steps (usually
-MPI jobs) on that node will almost certainly suffer a fatal error, but with
-\fB\-\-no\-kill\fR, the job allocation will not be revoked so the user may
-launch new job steps on the remaining nodes in their allocation.
+should a node fail.
+The job allocation will not be revoked so the user may launch new
+job steps on the remaining nodes in their allocation.
+This option does not set the \fBSLURM_NO_KILL\fR environment variable.
+Therefore, when a node fails, steps running on that node will be killed unless
+the \fBSLURM_NO_KILL\fR environment variable was explicitly set or srun calls
+within the job allocation explicitly requested \-\-no\-kill.
 
-Specify an optional argument of "off" disable the effect of the
+Specify an optional argument of "off" to disable the effect of the
 \fBSALLOC_NO_KILL\fR environment variable.
 
 By default Slurm terminates the entire job allocation if any node fails in its
@@ -1574,11 +1745,16 @@ will be sorted by Slurm.
 .IP
 
 .TP
-\fB\-N\fR, \fB\-\-nodes\fR=<\fIminnodes\fR>[\-\fImaxnodes\fR]
+\fB\-N\fR, \fB\-\-nodes\fR=<\fIminnodes\fR>[\-\fImaxnodes\fR]|<\fIsize_string\fR>
 Request that a minimum of \fIminnodes\fR nodes be allocated to this job.
 A maximum node count may also be specified with \fImaxnodes\fR.
 If only one number is specified, this is used as both the minimum and
-maximum node count.
+maximum node count. Node count can be also specified as size_string.
+The size_string specification identifies what nodes values should be used.
+Multiple values may be specified using a comma separated list or
+with a step function by suffix containing a colon and
+number values with a "-" separator.
+For example, "--nodes=1-15:4" is equivalent to "--nodes=1,5,9,13".
 The partition's node limits supersede those of the job.
 If a job's node limits are outside of the range permitted for its
 associated partition, the job will be left in a PENDING state.
@@ -1615,9 +1791,11 @@ that the \fB\-\-cpus\-per\-task\fR option will change this default.
 Request the maximum \fIntasks\fR be invoked on each core.
 Meant to be used with the \fB\-\-ntasks\fR option.
 Related to \fB\-\-ntasks\-per\-node\fR except at the core level
-instead of the node level.
+instead of the node level. This option will be inhertited by srun.
+.br
 \fBNOTE\fR: This option is not supported when using
-\fISelectType=select/linear\fR.
+\fISelectType=select/linear\fR. This value can not be greater than
+\fB\-\-threads\-per\-core\fR.
 .IP
 
 .TP
@@ -1702,6 +1880,8 @@ This option may result in the allocation being granted sooner than if the
 \fB\-\-oversubscribe\fR option was not set and allow higher system utilization,
 but application performance will likely suffer due to competition for resources.
 Also see the \fB\-\-exclusive\fR option.
+
+\fBNOTE\fR: This option is mutually exclusive with \fB\-\-exclusive\fR.
 .IP
 
 .TP
@@ -1832,8 +2012,8 @@ If a \fIsig_num\fR is specified without any \fIsig_time\fR,
 the default time will be 60 seconds.
 Use the "R:" option to allow this job to overlap with a reservation with
 MaxStartDelay set.
-To have the signal sent at preemption time see the
-\fBpreempt_send_user_signal\fR \fBSlurmctldParameter\fR.
+To have the signal sent at preemption time see the \fBsend_user_signal\fR
+\fBPreemptParameter\fR.
 .IP
 
 .TP
@@ -1933,6 +2113,35 @@ Acceptable time formats include "minutes", "minutes:seconds",
 Specify a minimum amount of temporary disk space per node.
 Default units are megabytes.
 Different units can be specified using the suffix [K|M|G|T].
+.IP
+
+.TP
+\fB\-\-tres\-per\-task\fR=<\fIlist\fR>
+Specifies a comma\-delimited list of trackable resources required for the job on
+each task to be spawned in the job's resource allocation.
+The format of each entry on the list is "name[[:type]:count]".
+The name is that of the trackable resource.
+The count is the number of those resources with a default value of 1.
+.br
+The count can have a suffix of
+.br
+"k" or "K" (multiple of 1024),
+.br
+"m" or "M" (multiple of 1024 x 1024),
+.br
+"g" or "G" (multiple of 1024 x 1024 x 1024),
+.br
+"t" or "T" (multiple of 1024 x 1024 x 1024 x 1024),
+.br
+"p" or "P" (multiple of 1024 x 1024 x 1024 x 1024 x 1024).
+.br
+The specified resources will be allocated to the job on each node.
+The available trackable resources are configurable by the system
+administrator.
+.br
+\fBNOTE\fR: Invalid TRES for \-\-tres\-per\-task include
+bb,billing,energy,fs,mem,node,pages,vmem.
+.br
 .IP
 
 .TP
@@ -2065,6 +2274,11 @@ Same as \-\-container\fR.
 .IP
 
 .TP
+\fBSALLOC_CONTAINER_ID\fR
+Same as \-\-container-id\fR.
+.IP
+
+.TP
 \fBSALLOC_CORE_SPEC\fR
 Same as \fB\-\-core\-spec\fR
 .IP
@@ -2076,8 +2290,7 @@ Same as \fB\-\-cpus\-per\-gpu\fR
 
 .TP
 \fBSALLOC_DEBUG\fR
-Same as \fB\-v, \-\-verbose\fR. Must be set to 0 or 1 to disable or enable
-the option.
+Same as \fB\-v, \-\-verbose\fR, when set to 1, when set to 2 gives -vv, etc.
 .IP
 
 .TP
@@ -2310,6 +2523,12 @@ Only set if \fB\-\-container\fR is specified.
 .IP
 
 .TP
+\fBSLURM_CONTAINER_ID\fR
+OCI id for job.
+Only set if \fB\-\-container-id\fR is specified.
+.IP
+
+.TP
 \fBSLURM_CPUS_PER_GPU\fR
 Number of CPUs requested per allocated GPU.
 Only set if the \fB\-\-cpus\-per\-gpu\fR option is specified.
@@ -2379,11 +2598,6 @@ Account name associated of the job allocation.
 .IP
 
 .TP
-\fBSLURM_JOB_ID\fR
-The ID of the job allocation.
-.IP
-
-.TP
 \fBSLURM_JOB_CPUS_PER_NODE\fR
 Count of CPUs available to the job on the nodes in the allocation, using the
 format \fICPU_count\fR[(x\fInumber_of_nodes\fR)][,\fICPU_count\fR
@@ -2398,10 +2612,20 @@ CPUs to jobs, so this number indicates the number of CPUs allocated to the job.
 .IP
 
 .TP
+\fBSLURM_JOB_END_TIME\fR
+The UNIX timestamp for a job's projected end time.
+.IP
+
+.TP
 \fBSLURM_JOB_GPUS\fR
 The global GPU IDs of the GPUs allocated to this job. The GPU IDs are not
 relative to any device cgroup, even if devices are constrained with task/cgroup.
 Only set in batch and interactive jobs.
+.IP
+
+.TP
+\fBSLURM_JOB_ID\fR
+The ID of the job allocation.
 .IP
 
 .TP
@@ -2427,6 +2651,11 @@ Quality Of Service (QOS) of the job allocation.
 .TP
 \fBSLURM_JOB_RESERVATION\fR
 Advanced reservation containing the job allocation, if any.
+.IP
+
+.TP
+\fBSLURM_JOB_START_TIME\fR
+UNIX timestamp for a job's start time.
 .IP
 
 .TP
@@ -2492,7 +2721,7 @@ Included for backwards compatibility.
 .TP
 \fBSLURM_NODELIST\fR
 List of nodes allocated to the job. See \fBSLURM_JOB_NODELIST\fR. Included
-for backwards compabitility.
+for backwards compatibility.
 .IP
 
 .TP

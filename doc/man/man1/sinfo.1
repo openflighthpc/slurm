@@ -46,6 +46,11 @@ Show all partitions from the federation if a member of one.
 .IP
 
 .TP
+\fB\-F\fR, \fB\-\-future\fR
+Report nodes in FUTURE state.
+.IP
+
+.TP
 \fB\-o\fR, \fB\-\-format\fR=<\fIoutput_format\fR>
 Specify the information to be displayed using an \fBsinfo\fR
 format string.
@@ -69,7 +74,7 @@ options are:
 
 .TP
 .I "\-\-long"
-"%#P %.5a %.10l %.10s %.4r %.8h %.10g %.6D %.11T %N"
+"%#P %.5a %.10l %.10s %.4r %.8h %.10g %.6D %.11T %.11i %N"
 .IP
 
 .TP
@@ -99,7 +104,7 @@ A pass is made over the records to be printed to establish the size in order
 to align the sinfo output, then a second pass is made over the records to
 print them.
 Note that the literal character "#" itself is not a valid field length
-specification, but is only used to document this behaviour.
+specification, but is only used to document this behavior.
 
 The format of each field is "%[[.]size]type[suffix]"
 .IP
@@ -218,6 +223,11 @@ Print the OverSubscribe setting for the partition.
 .TP
 \fB%H\fR
 Print the timestamp of the reason a node is unavailable.
+.IP
+
+.TP
+\fB%i\fR
+If a node is in an advanced reservation print the name of that reservation.
 .IP
 
 .TP
@@ -600,7 +610,7 @@ State of nodes, extended form.
 
 .TP
 \fBStateComplete\fR
-State of nodes, including all node state flags. eg. "idle+cloud+power"
+State of nodes, including all node state flags. e.g. "idle+cloud+power"
 .IP
 
 .TP
@@ -1171,6 +1181,11 @@ Same as \fB\-a, \-\-all\fR
 .TP
 \fBSINFO_FEDERATION\fR
 Same as \fB\-\-federation\fR
+.IP
+
+.TP
+\fBSCONTROL_FUTURE\fR
+\fB\-F, \-\-future\fR
 .IP
 
 .TP

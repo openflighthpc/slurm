@@ -51,13 +51,13 @@
 #include "src/common/slurm_xlator.h"
 #include "ext_sensors_rrd.h"
 #include "src/common/fd.h"
-#include "src/common/slurm_jobacct_gather.h"
+#include "src/interfaces/jobacct_gather.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
-#include "src/common/slurm_ext_sensors.h"
+#include "src/interfaces/ext_sensors.h"
 #include "src/common/xstring.h"
-#include "src/slurmd/common/proctrack.h"
+#include "src/interfaces/proctrack.h"
 
 #include <rrd.h>
 
@@ -108,7 +108,7 @@ static rrd_value_t last_valid_watt;
 static int _update_node_data(void);
 static int _update_switch_data(void);
 static int _update_door_data(void);
-extern int _ext_sensors_read_conf(void);
+static int _ext_sensors_read_conf(void);
 static void _ext_sensors_clear_free_conf(void);
 
 /* Local RRD functions */
@@ -521,7 +521,7 @@ static int _update_door_data(void)
 	return SLURM_SUCCESS;
 }
 
-extern int _ext_sensors_read_conf(void)
+static int _ext_sensors_read_conf(void)
 {
 	s_p_options_t options[] = {
 		{"JobData", S_P_STRING},

@@ -1,6 +1,566 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 23.02.1
+==========================
+ -- job_container/tmpfs - cleanup job container even if namespace mount is
+    already unmounted.
+ -- When cluster specific tables are be removed also remove the job_env_table
+    and job_script_table.
+ -- Fix the way bf_max_job_test is applied to job arrays in backfill.
+ -- data_parser/v0.0.39 - Avoid dumping -1 value or NULL when step's
+    consumed_energy is unset.
+ -- scontrol - Fix showing Array Job Steps.
+ -- scontrol - Fix showing Job HetStep.
+ -- openapi/dbv0.0.38 - Fix not displaying an error when updating QOS or
+    associations fails.
+ -- data_parser/v0.0.39 - Avoid crash while parsing composite structures.
+ -- sched/backfill - fix deleted planned node staying in planned node bitmap.
+ -- Fix nodes remaining as PLANNED after slurmctld save state recovery.
+ -- Fix parsing of cgroup.controllers file with a blank line at the end.
+ -- Add cgroup.conf EnableControllers option for cgroup/v2.
+ -- Get correct cgroup root to allow slurmd to run in containers like Docker.
+ -- Fix "(null)" cluster name in SLURM_WORKING_CLUSTER env.
+ -- slurmctld - add missing PrivateData=jobs check to step ContainerID lookup
+    requests originated from 'scontrol show step container-id=<id>' or certain
+    scrun operations when container state can't be directly queried.
+ -- Automatically sort the TaskPlugin list reverse-alphabetically. This
+    addresses an issue where cpu masks were reset if task/affinity was listed
+    before task/cgroup on cgroup/v2 systems with Linux kernel < 6.2.
+ -- Fix some failed terminate job requests from a 23.02 slurmctld to a 22.05 or
+    21.08 slurmd.
+ -- Fix compile issues on 32-bit systems.
+ -- Fix nodes un-draining after being drained due to unkillable step.
+ -- Fix remote licenses allowed percentages reset to 0 during upgrade.
+ -- sacct - Avoid truncating time strings when using SLURM_TIME_FORMAT with
+    the --parsable option.
+ -- data_parser/v0.0.39 - fix segfault when default qos is not set.
+ -- Fix regression in 22.05.0rc1 that broke Nodes=ALL in a NodeSet.
+ -- openapi/v0.0.39 - fix jobs submitted via slurmrestd being allocated fewer
+    CPUs than tasks when requesting multiple tasks.
+ -- Fix job not being scheduled on valid nodes and potentially being rejected
+    when using parentheses at the beginning of square brackets in a feature
+    request, for example: "feat1&[(feat2|feat3)]".
+ -- Fix a job being scheduled on nodes that do not match a feature request that
+    uses parentheses inside of brackets and requests additional features outside
+    of brackets, for example: "feat1&[feat2|(feat3|feat4)]".
+ -- Fix regression in 23.02.0rc1 which made --gres-flags=enforce-binding no
+    longer enforce optimal core-gpu job placement.
+ -- switch/hpe_slingshot - add option to disable VNI allocation per-job.
+ -- switch/hpe_slingshot - restrict CXI services to the requesting user.
+ -- switch/hpe_slingshot - Only output tcs once in SLINGSHOT_TCS env.
+ -- switch/hpe_slingshot - Fix updating LEs and ACs limits.
+ -- switch/hpe_slingshot - Use correct Max for EQs and CTs.
+ -- switch/hpe_slingshot - support configuring network options per-job.
+ -- switch/hpe_slingshot - retry destroying CXI service if necessary.
+ -- Fix memory leak caused by job preemption when licenses are configured.
+ -- mpi/pmix - Fix v5 to load correctly when libpmix.so isn't in the normal
+    lib path.
+ -- data_parser/v0.0.39 - fix regression where "memory_per_node" would be
+    rejected for job submission.
+ -- data_parser/v0.0.39 - fix regression where "memory_per_cpu" would be
+    rejected for job submission.
+ -- slurmctld - add an assert to check for magic number presence before deleting
+    a partition record and clear the magic afterwards to better diagnose
+    potential memory problems.
+ -- Clean up OCI containers task directories correctly.
+ -- slurm.spec - add "--with jwt" option.
+ -- scrun - Run under existing job when SLURM_JOB_ID is present.
+ -- Prevent a slurmstepd crash when the I/O subsystem has hung.
+ -- common/conmgr - fix memory leak of complete connection list.
+ -- data_parser/v0.0.39 - fix memory leak when parsing every field in a struct.
+ -- job_container/tmpfs - avoid printing extraneous error messages when running
+    a spank plugin that implements slurm_spank_job_prolog() or
+    slurm_spank_job_epilog().
+ -- Fix srun < 23.02 always getting an "exact" core allocation.
+ -- Prevent scontrol < 23.02 from setting MaxCPUsPerSocket to 0.
+ -- Add ScronParameters=explicit_scancel and corresponding scancel --cron
+    option.
+
+* Changes in Slurm 23.02.0
+==========================
+ -- scrun - Install into /bin instead of /sbin, which also ensures it is
+    included in the RPM packages.
+ -- data_parser/v0.0.39 - avoid erroring on unknown association id.
+ -- data_parser/v0.0.39 - avoid fatal while dumping TRES values.
+ -- Improve error message for using --cpus-per-gpus without any GPUs.
+ -- switch/hpe_slingshot - fix rolling upgrades from 22.05 to 23.02
+ -- Change cgroup/v1 behavior when waiting for a pid to be moved by waiting some
+    time between retries. This helps with stray cgroup dirs on slow kernels.
+ -- Workaround a bug in kernels < 3.18 with cpuset which randomly leaves stray
+    cgroups after jobs have ended.
+ -- Rebuild the prepacked buf going to the slurmstepd if TRES changed.
+ -- Add new 'make clean-contrib' target to build system to clean contribs dir.
+ -- Treat newlines as delimeters for hostlist_create(). (This is used internally
+    by "scontrol show hostlist" and for handling SLURM_JOB_NODELIST.)
+ -- scontrol - Print "Invalid job id specified" for 'scontrol show step ...'
+    when the job does not exist, rather than "Unexpected error".
+ -- Handle mismatched TRES count from the slurmstepd's instead of fatal()'ing.
+ -- Fix GPU setup on CRAY systems when using the CRAY_CUDA_MPS environment
+    variable. GPUs are now correctly detected in such scenarios.
+ -- data_parser/v0.0.39 - improve flag handling to avoid flags having bits left
+    unset after parsing.
+ -- topology/tree - Add new TopologyParam=SwitchAsNodeRank option to reorder
+    nodes based on switch layout. This can be useful if the naming convention
+    for the nodes does not natually map to the network topology.
+ -- openapi/v0.0.38 - avoid signed math errors while dumping node resources.
+ -- openapi/dbv0.0.39 - avoid error while dumping account coordinators.
+ -- data_parser/v0.0.39 - correct dump of stats backfill mean table size.
+ -- openapi/dbv0.0.39 - avoid error while adding account coordinators.
+ -- scrun - catch invalid values of environment SCRUN_FILE_DEBUG.
+ -- scrun - avoid memory leak due to invalid annotation.
+ -- scrun - avoid false error when pidfile not requested.
+ -- Do not constrain memory in task/cgroup unless CR_Memory is set.
+ -- Fix the job prolog not running for jobs with the interactive step
+    (salloc jobs with LaunchParameters=use_interactive_step set in slurm.conf)
+    that were scheduled on powered down nodes. The prolog not running also
+    broke job_container/tmpfs, pam_slurm_adopt, and x11 forwarding.
+ -- swich/hpe_slingshot - fix issues using 22.05 commands with 23.02 slurmd.
+ -- swith/hpe_slingshot - avoid slurmd segfault if there is a protocol error.
+ -- task/affinity - fix slurmd segfault when request launch task requests of
+    type "--cpu-bind=[map,mask]_cpu:<list>" have no <list> provided.
+ -- salloc/sbatch/srun - error out if "--cpu-bind=[map,mask]_cpu:<list>" fails
+    to extract a list of cpus.
+ -- job_container/tmpfs - cleanup job_mount when container creation fails.
+ -- job_container/tmpfs - don't attempt to remove job_mount directory when it is
+    still mounted.
+ -- Fix regression in rc1 causing sacctmgr to segfault when printing unrelated
+    fields.
+ -- jobcomp/kafka - don't use the purge API if librdkafka < v1.0.0.
+ -- Change shown start time of pending array job to be start time of earliest
+    pending array task.
+ -- job_container/tmpfs - ensure that step_ns_fd is closed before cleaning up
+    the namespace.
+ -- Fix assert when suspending or requeueing array tasks with scontrol.
+ -- Fix federated job submissions.
+ -- Fix sinfo returning non-zero exit code when querying specific clusters.
+ -- openapi/v0.0.39 - correct OpenAPI schema for job update requests.
+ -- openapi/v0.0.39 - prevent assertion on jobs endpoint by altering how the
+    "memory_per_cpu" and "memory_per_node" fields are managed.
+ -- Fix regression in 23.02.0rc1 which caused slurmctld to segfault when
+    gres is added or removed in the configuration.
+ -- Removed the default setting for GpuFreqDef. If unset, no attempt to change
+    the GPU frequency will be made if --gpu-freq is not set for the step.
+ -- Fixed GpuFreqDef option. When set in slurm.conf, it will be used if
+    --gpu-freq was not explicitly set by the job step.
+ -- Update database index for usage tables used for archive and purge.
+ -- Fix configure script on FreeBSD.
+
+* Changes in Slurm 23.02.0rc1
+=============================
+ -- Make scontrol reconfigure and sending a SIGHUP to the slurmctld behave the
+    same. If you were using SIGHUP as a 'lighter' scontrol reconfigure to rotate
+    logs please update your scripts to use SIGUSR2 instead.
+ -- Add Account and QOS name type specifications for sprio output formatting.
+ -- openapi/[db]v0.0.36 - plugins have been removed.
+ -- openapi/[db]v0.0.37 - tagged as deprecated.
+ -- openapi/[db]v0.0.39 - forked plugin openapi/[db]v0.0.38.
+ -- Add SRUN_{ERROR,INPUT,OUTPUT} input environment variables for --error,
+    --input and --output options respectively.
+ -- Add MaxCPUsPerSocket to partition configuration, similar to MaxCPUsPerNode.
+ -- openapi/v0.0.39 - change nice request field from string to integer.
+ -- sacctmgr - no longer force updates to the AdminComment, Comment, or
+    SystemComment to lower-case.
+ -- openapi/dbv0.0.39 - more graceful handling of POSTs when expected field
+    lists are missing or unparsable.
+ -- burst_buffer/lua - pass the job's UID and GID to slurm_bb_pre_run,
+    slurm_bb_data_in, slurm_bb_post_run, and slurm_bb_data_out in
+    burst_buffer.lua.
+ -- openapi/v0.0.39 - add new field default_memory_per_node for partitions.
+ -- Change cloud nodes to show by default. PrivateData=cloud is no longer
+    needed.
+ -- Add -F/--future option to sinfo to display future nodes.
+ -- openapi/dbv0.0.39 - resolve job user from uid when user is not provided.
+ -- sacct/sinfo/squeue - use openapi/[db]v0.0.39 for --json and --yaml modes.
+ -- sdiag - Add --json and --yaml arguments.
+ -- Cgroupv2 plugin will not show "Controller is not enabled" error when started
+    from cmd.
+ -- sreport - Count planned (FKA reserved) time for jobs running in IGNORE_JOBS
+    reservations. Previously was lumped into IDLE time.
+ -- job_container/tmpfs - support running with an arbitrary list of private
+    mount points (/tmp and /dev/shm are nolonger required, but are the default).
+ -- sacct - Rename 'Reserved' field to 'Planned' to match sreport and the
+    nomenclature of the 'Planned' node.
+ -- oci.conf: Add %U as OCI pattern replacement to numeric user id.
+ -- cli_filter/lua, jobcomp/lua, job_submit/lua - expose all Slurm error codes.
+ -- jobcomp/elasticsearch - expose features field.
+ -- jobcomp/elasticsearch - post non-NULL but empty string fields.
+ -- Make advanced reservation flag MAINT not replace nodes, similar to
+    STATIC_ALLOC
+ -- NVML - Add usage gathering for Nvidia gpus.
+ -- node_features plugins - invalid users specified for AllowUserBoot will now
+    result in fatal() rather than just an error.
+ -- job_container/tmpfs - Set more environment variables in InitScript.
+ -- Make all cgroup directories created by Slurm owned by root.
+ -- sbatch - add parsing of #PBS -d and #PBS -w.
+ -- Avoid network receive error on heavily loaded machines where the network
+    operation can be restarted.
+ -- Deprecate AllowedKmemSpace, ConstrainKmemSpace, MaxKmemPercent, and
+    MinKmemSpace.
+ -- accounting_storage/mysql - change purge/archive to calculate record ages
+    based on end time, rather than start or submission times.
+ -- Add strigger --draining and -R/--resume options.
+ -- Allow updating SLURM_NTASKS environment variable (from scontrol update job).
+ -- Limit het job license requests to the leader job only.
+ -- Change --oversubscribe and --exclusive to be mutually exclusive for job
+    submission. Job submission commands will now fatal if both are set.
+    Previously, these options would override each other, with the last one in
+    the job submission command taking effect.
+ -- job_submit/lua - add support for log_user() from slurm_job_modify().
+ -- openapi/v0.0.39 - add submission of job->prefer value.
+ -- Fix tasks binding to GPUs when using --ntasks-per-gpu and GPUs have
+    different core/socket affinity.
+ -- Add support for padding StdOut/StdErr/StdIn format specifiers to scontrol
+    show job.
+--  Fix sacctmgr qos filter to properly select assocs by qos inheritance rules.
+ -- Prevent slurmctld from starting with invalid jobcomp plugin.
+ -- Fix `sinfo -i` and interactive `scontrol> show node` replies for nodes
+    going from powering down to powered down state.
+ -- auth/jwt - support Azure (among other) JWKS files by preferring x5c field
+    over locally reconstructing an RSA256 key file.
+ -- auth/jwt - add optional AuthAltParameters field "userclaimfield=" to allow
+    overriding "sun" claim to site specific field.
+ -- scontrol - Requested TRES and allocated TRES will now always be printed when
+    showing jobs, instead of one TRES output that was either the requested or
+    allocated.
+ -- Improve scheduling performance for dynamic nodes and nodes with features by
+    consolidating like config records.
+ -- Expose argc and entire argv to job_submit and cli_filter plugins for jobs
+    submitted via salloc/srun or sbatch <script> (not via --wrap).
+ -- Job command/script name is now packed with no arguments, thus clients
+    displaying job information will only show the command/script name.
+ -- Make acct_gather_energy plugins handle slurmd reconfiguration and support
+    restart for gpu and xcc implementations.
+ -- Fix --slurmd-debug to treat its argument as log level (as documented)
+    instead of previous approach with it being an offset to configured log
+    level.
+ -- srun --slurmd-debug option is now only allowed for root and SlurmUser
+ -- Change 'scontrol requeue' behavior for scron jobs to use cronspec to
+    determine the next start time.
+ -- serializer/url-encoded - interpet query keys without a value (flags) to be
+    true instead of NULL.
+ -- Add --autocomplete= option to all client commands.
+ -- Allow for concurrent processing of job_submit_g_submit() and
+    job_submit_g_modify() calls.
+ -- Allow jobs to queue even if the user is not in AllowGroups when
+    EnforcePartLimits=no is set. This ensures consistency for all the Partition
+    access controls, and matches the documented behavior for EnforcePartLimits.
+ -- Fix srun tasks binding/allocation when using --ntasks-per-core option. Now,
+    --ntasks-per-core=1 implies --cpu-bind=cores and --ntasks-per-core>1 implies
+    --cpu-bind=threads.
+ -- salloc/sbatch/srun check and abort if ntasks-per-core > threads-per-core.
+ -- burst_buffer/lua - fix building heterogeneous job scripts where the
+    directive is not the default "BB_LUA".
+ -- If a node is in a reservation add the reservation name to it for
+    scontrol/sinfo/sview.
+ -- common/cgroup - improve possible TOCTOU situation when reading cgroup files.
+ -- slurmctld will fatal() when reconfiguring the job_submit plugin fails.
+ -- Add ResumeAfter=<secs> option to "scontrol update nodename=".
+ -- slurmrestd - switch to returning UNPROCESSABLE_CONTENT when parsing
+    succeeds but an error about the actual contents causes a request to fail.
+ -- slurmrestd - queries that result in empty contents will now be treated as
+    SUCCESS. While the query worked, nothing was returned, which allows callers
+    to determine how to then proceed.
+ -- Add PowerDownOnIdle partition option.
+ -- Make it so the [Allow|Deny]Accounts parameter for a partition is
+    hierarchical.
+ -- Add the ability for a add (+=) or remove (-=) nodes from a reservation
+ -- Fix several problems when creating/editing partitions in sview.
+ -- Enhanced burst_buffer.lua - pass UID and GID to most hooks; pass a table
+    containing detailed job information to many hooks. See
+    etc/burst_buffer.lua.example for a complete list of changes.
+ -- Add a new "nodes=" argument to scontrol setdebug to allow the debug level
+    on the slurmd processes to be temporarily altered.
+ -- Add InfluxDBTimeout parameter to acct_gather.conf.
+ -- job_container/tmpfs - add support for expanding %h and %n in BasePath.
+ -- Prevent job submission/update with afterok/afternotok dependency set to
+    an unknown jobid.
+ -- Change to a new FAIL_SIGNAL job state reason (instead of FAIL_LAUNCH) for
+    jobs that have raised a signal on setup.
+ -- Add "[jobid.stepid]" prefix from slurmstepd and "slurmscriptd" prefix from
+    slurmcriptd to Syslog logging. Previously was only happening when logging
+    to a file.
+ -- Make it so scrontab prints client-side the job_submit() err_msg (which can
+    be set i.e. by using the log_user() function for the lua plugin).
+ -- Remove ability for reservation to have STATIC_ALLOC or MAINT flags and
+    REPLACE[_DOWN] flags simultaneously.
+ -- Accept only one reoccurring flag when creating/updating any reservation.
+ -- Remove ability to update a reservation to have a reoccurring flag if it
+    is a floating reservation.
+ -- squeue - removed unused '%s' and 'SelectJobInfo' formats.
+ -- Add purge and archive functionality for job environment and job batch script
+    records.
+ -- srun - return an error if step suffers a node failure.
+ -- squeue - align print format for exit and derived codes with that of other
+    components (<exit_status>:<signal_number>).
+ -- Add new SlurmctldParameters=validate_nodeaddr_threads=<number> option to
+    allow concurrent hostname resolution at slurmctld startup.
+ -- Have 'scontrol show hostlist -' read from stdin.
+ -- Extend support for Include files to all "configless" client commands.
+ -- Make node weight usable for powered down and rebooting nodes.
+ -- node_features plugins - node_features_p_reboot_weight() function removed.
+ -- Removed 'launch' plugin.
+ -- Add "Extra" field to job to store extra information other than a comment.
+ -- Add new AccountingStoreFlags=job_extra option to store a job's extra field
+    in the database.
+ -- slurmrestd - add option to allow rest_auth/local to switch user id on first
+    user connection.
+ -- oci.conf - add DisableHooks option.
+ -- oci.conf - add SrunPath and SrunArgs options.
+ -- oci.conf - add StdIODebug, SyslogDebug, FileDebug and DebugFlags options to
+    allow controlling container specific logging.
+ -- oci.conf - remove requirement of RunTimeQuery when RunTimeRun is set.
+ -- slurmstepd - cleanup generated environment file for containers when step
+    completes instead of deferring cleanup to OCI runtime.
+ -- oci.conf - add configuration option "IgnoreFileConfigJson=" to allow a site
+    to choose to ignore config.json.
+ -- oci.conf - Add PID (%p) pattern replacement.
+ -- slurmrestd - correct ordering issue of saving changes to a container's
+    modified config.json where config changes by job modifing plugins would be
+    silently lost.
+ -- slurmstepd - merge container config.json environment into job environment
+    and then overwrite config.json environment. Avoids instance where processes in
+    container will not have access to job environment variables.
+ -- slurmstepd - defer creating container environment file until after all
+    plugin based modifications to the job environment are complete.
+ -- oci.conf - modify configuration option "CreateEnvFile=" to support creating
+ -- oci.conf - add RunTimeEnvExclude and EnvExclude.
+ -- slurmstepd - fix container pattern bundle path replacement (%b) with
+    bundle path instead of spool dir path.
+ -- oci.conf - add MountSpoolDir.
+ -- slurmstepd - create per task spool directory per container to avoid
+    conflicts when there are more than 1 container tasks on any given node.
+ -- mpi/pmix - set PMIX_SERVER_TMPDIR to container spool directory instead of
+    slurmd spool directory which caused PMIx to fail to load in containers.
+ -- Add new "defer_batch" option to SchedulerParameters to only defer
+    scheduling for batch jobs.
+ -- Reject jobs submitted with impossible --time, --deadline, and --begin
+    combinations at submission time
+ -- Add new DebugFlags option 'JobComp' to replace 'Elasticsearch'.
+ -- sacct - Add --array option to expand job arrays and display array tasks on
+    separate lines.
+ -- Fix jobs submitted with a deadline never being cleared after the
+    reservation is done.
+ -- Change srun/salloc to wait indefinitely for their allocations to be ready.
+ -- Do not attempt to "fix" malformed input to 'scontrol show hostlist'.
+ -- RSMI - Add usage gathering for AMD gpus (requires ROCM 5.5+).
+ -- Add job's allocated nodes, features, oversubscribe, partition, and
+    reservation to SLURM_RESUME_FILE output for power saving.
+ -- Automatically create directories for stdout/stderr output files. Paths may
+    use %j and related substitution characters as well.
+ -- Add --tres-per-task to salloc/sbatch/srun.
+ -- Add configurable job requeue limit parameter - MaxBatchRequeue - in
+    slurm.conf to permit changes from the old hard-coded value of 5.
+ -- Add a new "nodes=" argument to "scontrol setdebugflags" as well.
+ -- slurmd - add --authinfo option to allow AuthInfo options to be changed
+    during the configless startup.
+ -- helpers.conf - Allow specification of node specific features.
+ -- helpers.conf - Allow many features to one helper script.
+ -- Allow nodefeatures plugin features to work with cloud nodes.
+ -- squeue - removed --array-unique option.
+ -- openapi/v0.0.39 - expand job stderr, stdin, and stdout path replacement
+    symbols when dumping job information via dump_job_info().
+ -- Make slurmstepd cgroups constrained by total configured memory from
+    slurm.conf (NodeName=<> RealMemory=#) instead of total physical memory.
+ -- node_features/helpers - add support for the OR and parentheses operators
+    in a --constraint expression.
+ -- Fix race condition between PMIx authentication and slurmstepd task launches
+    that can lead to job launch failures.
+ -- fatal() when [Prolog|Epilog]Slurmctld are defined but not executable.
+ -- slurmctld - Add new RPC rate limiting feature. This is enabled through
+    SlurmctldParameters=rl_enable, otherwise disabled by default.
+ -- Validate node registered active features are a super set of node's
+    currently active changeable features.
+ -- On clusters without any PrologFlags options, batch jobs with failed prologs
+    nolonger generate an output file.
+ -- sreport - print "Top ALL Users" for Top User report when topcount = -1.
+ -- Add SLURM_JOB_START_TIME and SLURM_JOB_END_TIME environment variables.
+ -- Add SuspendExcStates option to slurm.conf to avoid suspending/powering down
+    specific node states.
+ -- job_container/tmpfs - Add "Shared" option to support shared namespaces.
+    This allows autofs to work with the job_container/tmpfs plugin when enabled.
+ -- Fix incorrect min node estimation for pending jobs as displayed by client
+    commands (e.g. squeue, scontrol show job).
+ -- Add support for DCMI power readings in IPMI plugin.
+ -- Prevent the backfill counter of tested jobs being reset by sdiag -r.
+ -- sacctmgr - Add --json and --yaml arguments.
+ -- openapi/v0.0.39 - Conversion of parsing and dumping of data to
+    data_parser/v0.0.39 plugins. Significant restructuring of OpenAPI
+    specification compared to previous plugin version.
+ -- openapi/dbv0.0.39 - Conversion of parsing and dumping of data to
+    data_parser/v0.0.39 plugins. Significant restructuring of OpenAPI
+    specification compared to previous plugin version.
+ -- Validate --gpu-bind options more strictly.
+ -- Fix slurmd segfault on bad EnergyIPMIPowerSensors= parameter.
+ -- Allow for --nodelist to contain more nodes than required by --nodes.
+ -- Add missing logic for JobCompParams configuration key pair to be available
+    for consumers of the get/print/write configuration API functions.
+ -- mpi/cray_shasta - Add new PALS/PMI environment variables.
+ -- Add cache around calls to getnameinfo().
+ -- Add CommunicationParameters=getnameinfo_cache_timeout to tune or disable the
+    getnameinfo cache.
+ -- Limit the number of successive times a batch job may be requeued due to a
+    prolog failure. This limit is defined by the value of the max_batch_requeue
+    parameter (default 5). Jobs over this limit will be put on admin hold.
+ -- Rename "nodes" to "nodes_resume" in SLURM_RESUME_FILE job output.
+ -- Rename "all_nodes" to "all_nodes_resume" in SLURM_RESUME_FILE output.
+ -- Add new PrologFlags=ForceRequeueOnFail option to automatically requeue
+    batch jobs on Prolog failures regardless of the job --requeue setting.
+ -- Add HealthCheckNodeState=NONDRAINED_IDLE option.
+ -- Add 'explicit' to Flags in gres.conf
+ -- Improve validation of --constraint expression syntax.
+ -- srun - support job array ids as an argument to --jobid.
+ -- Add jobcomp/kafka plugin.
+ -- Automatically filter out E-Cores on Intel processors to avoid issues from
+    differing threads-per-core values within a single socket.
+ -- Add LaunchParameters=ulimit_pam_adopt, which enables setting RLIMIT_RSS in
+    adopted processes.
+ -- Add new PreemptParameters=reclaim_licenses option which will allow higher
+    priority jobs to preempt jobs to free up used licenses. (This is only
+    enabled for with PreemptModes of CANCEL and REQUEUE, as Slurm cannot
+    guarantee suspended jobs will release licenses correctly.)
+ -- Make it so that the REQUEST_STEP_STAT handler only polls jobacct_gather
+    information once per RPC. This improves sstat results performance time.
+ -- Fix sbcast --force option to work with --send-libs option. Now when --force
+    is set, library directores transmitted will overwrite pre-existing libraries
+    that were previously transmitted.
+ -- hpe/slingshot - Add support for user requestible job VNIs.
+ -- hpe/slingshot - Add support for user requestible single node vnis.
+ -- hpe/slingshot - Add support for the instant-on feature.
+ -- Add ability to update SuspendExc* parameters with scontrol.
+ -- Add ability to preserve SuspendExc* parameters on reconfig with
+    ReconfigFlags=KeepPowerSaveSettings.
+ -- Add ability to restore SuspendExc* parameters on restart with slurmctld -R
+    option.
+ -- Fix leaving allocated gres on a non-cloud node after being allocated
+    from a powered down state after a slurmctld restart.
+ -- 'scontrol update job' can now set a GRES specification to "0" to effectively
+    clear a GRES speficiation from a job.
+ -- Jobs with old GRES that are no longer configured in any configuration files
+    can now be succesfully updated to use currently configured GRES.
+ -- Add tres_per_node to resource_allocation_response_msg to fix srun jobs
+    running with outdated GRES. This is necessary for srun jobs whose GRES are
+    updated while they are pending. By having tres_per_node in the
+    resourece_allocation_response_msg, slurmctld can send back the correct and
+    updated GRES, whereas without it, the srun job would use the old GRES.
+ -- Cleaned up various "warning", "Warning", and "WARNING" messages with a new
+    warning() logging call. All will now print as "warning: ...".
+ -- Add SLURM_JOB_OVERSUBSCRIBE environment variable for Epilog, Prolog,
+    EpilogSlurmctld, PrologSlurmctld, and mail ouput.
+ -- Fix node reason time skew when setting a reboot message.
+ -- Append ResumeTimeout message to an existing node reason instead of always
+    clearing it first.
+ -- slurmrestd - added support for Bearer Authentication using auth/jwt.
+ -- Add check to detect invalid HetJob component and abort job if identified.
+ -- sched/backfill - fix job test against advanced reservations if job uses a
+    preemptable QOS with Flags=NoReserve.
+ -- New command scrun has been added. scrun acts as an Open Container Initiative
+    (OCI) runtime proxy to run containers seamlessly via Slurm.
+
+* Changes in Slurm 22.05.9
+==========================
+ -- Allocate correct number of sockets when requesting gres and running with
+    CR_SOCKET*.
+ -- Fix handling of --prefer for job arrays.
+ -- Fix regression in 22.05.5 that causes some jobs that request
+    --ntasks-per-node to be incorrectly rejected.
+ -- Fix slurmctld crash when a step requests fewer tasks than nodes.
+ -- Fix incorrect task count in steps that request --ntasks-per-node and a node
+    count with a range (e.g. -N1-2).
+ -- Fix some valid step requests hanging instead of running.
+ -- slurmrestd - avoid possible race condition which would cause slurmrestd to
+    silently no longer accept new client connections.
+ -- Fix GPU setup on CRAY systems when using the CRAY_CUDA_MPS environment
+    variable. GPUs are now correctly detected in such scenarios.
+ -- Fix the job prolog not running for jobs with the interactive step
+    (salloc jobs with LaunchParameters=use_interactive_step set in slurm.conf)
+    that were scheduled on powered down nodes. The prolog not running also
+    broke job_container/tmpfs, pam_slurm_adopt, and x11 forwarding.
+ -- task/affinity - fix slurmd segfault when request launch task requests of
+    type "--cpu-bind=[map,mask]_cpu:<list>" have no <list> provided.
+ -- sched/backfill - fix segfault when removing a PLANNED node from system.
+ -- sched/backfill - fix deleted planned node staying in planned node bitmap.
+ -- Fix nodes remaining as PLANNED after slurmctld save state recovery.
+ -- Fix regression in 22.05.0rc1 that broke Nodes=ALL in a NodeSet.
+
+* Changes in Slurm 22.05.8
+==========================
+ -- Fix potential deadlock at slurmctld startup when job has invalid qos.
+ -- Avoid unnecessary call to clusteracct_storage_g_cluster_tres() when pinging
+    dynamic nodes. This avoids significant slowdowns for slurmctld when
+    ping_nodes() calls all nodes to re-register.
+ -- openapi/dbv0.0.3[6-8] - fix segfault that could arrise from Slurm database
+    connnection failing.
+ -- Fix regression introduced in 22.05.0rc1 when updating a NodeName=<nodelist>
+    with NodeAddr and/or NodeHostname if the specified nodelist wasn't sorted.
+ -- openapi/v0.0.38 - change type of nice field for job submissions to integer
+    from string.
+ -- openapi/v0.0.38 - add oversubscribe option to job submission properties.
+ -- openapi/v0.0.38 - fix incorrect data used to populate "time/start" field
+    for jobs.
+ -- openapi/dbv0.0.38 - avoid dumping failure if preempt qos with level 0 is
+    provided by slurmdbd query.
+ -- Avoid an fd leak when lib dir for sbcast fails to be created.
+ -- common/slurmdbd_pack - fix env and script hash when unpacking a 21.08
+    dbd_job_start_msg_t.
+ -- Fix a race between job_container/tmpfs, cncu, x11 setup and adoption of pids
+    in cray with pam_slurm_adopt.
+
+* Changes in Slurm 22.05.7
+==========================
+ -- Fix slurmctlds in a federation not recovering a lost connection until a
+    slurmctld restart or a federation update.
+ -- Fix incorrectly rejecting jobs that request GRES on multiple sockets and
+    --gres-flags=enforce-binding.
+ -- Fix job core selection with --gres-flags=enforce-binding: this fixes cases
+    where enforce-binding was not respected.
+ -- openapi/v0.0.38 - set assoc_id resolution failure as a debug log instead of
+    an error log.
+ -- Fix issues when running in FrontEnd mode.
+ -- Fix srun and salloc I/O code to set keepaliveinterval/keepalivetime on
+    connections.
+ -- Fix overwrite race of cont_id in cgroup/v2 when using task/cgroup with
+    proctrack/cray_aries.
+ -- Fix node remaining allocated after a reconfig with a completing job that
+    has an EpilogSlurmctld instance still running.
+ -- openapi/dbv0.0.38 - fix a cast to a wrong type
+ -- openapi/dbv0.0.38 - correct issues where modifying association fields were
+    ignored.
+ -- openapi/dbv0.0.38 - correct issue where 16 bit integers were not able to be
+    unset.
+ -- openapi/dbv0.0.38 - correct issue where 16 & 32 bit integers were not able
+    to be unset.
+ -- Fix 'scontrol show hostlist' to read off a pipe correctly.
+ -- Fix 'scontrol reconfigure' with configless enabled to send updated configs
+    to 21.08 nodes correctly. (22.05 nodes are unaffected.)
+ -- Fix assertion and locks for dynamic node registrations with rpc queueing.
+ -- rest_auth/local - avoid logging root access as an error but instead as a
+    normal info log.
+ -- slurmrestd - switch users earlier on startup to avoid sockets being made as
+    root.
+ -- slurmrestd - disable umask during socket creation as the authentication is
+    handled by Slurm instead of file ACLs.
+ -- Fix sbcast, srun --bcast, sstat not working with cloud/dynamic nodes.
+ -- sacctmgr - Allow removal of user's default account when AllowNoDefAcct=yes.
+ -- Fix segfault caused by race condition when a reconfiguration is requested
+    while slurmd initializes.
+ -- openapi/v0.0.38 - avoid divison by zero causing slurmrestd to crash during
+    diag queries.
+ -- Update default values for text/blob columns in the database if upgrading
+    to MariaDB >= 10.2.1 from a pre-10.2.1 version or from MySQL to avoid
+    sacctmgr failures.
+ -- Fix several minor memory leaks in the cgroup/v2 plugin.
+ -- Fix possible issue when enabling controllers with long names in cgroup/v2.
+ -- Fix potential segfault in slurmd when using acct_gather_energy/ipmi.
+ -- Fix controller being able to contact non-addressable step hosts.
+ -- Allow setting SuspendTime to -1 when used on a partition.
+ -- openapi/v0.0.38 - fix maximum_memory_per_node description typo.
+ -- openapi/v0.0.38 - add maximum_memory_per_cpu to GET /partitions
+ -- openapi/v0.0.38 - add default_memory_per_node to GET /partitions
+ -- Fix dynamic node losing dynamic node status when changing state to FUTURE.
+ -- Fix adoption into most recent job in pam_slurm_adopt and cgroup/v2.
+ -- gres/shard - Fix plugin_name definition to print correctly in debug lines.
+
 * Changes in Slurm 22.05.6
 ==========================
  -- Fix a partition's DisableRootJobs=no from preventing root jobs from working.

@@ -40,6 +40,7 @@
 
 #include "src/sacctmgr/sacctmgr.h"
 #include "src/common/assoc_mgr.h"
+#include "src/interfaces/data_parser.h"
 
 static int _set_cond(int *start, int argc, char **argv,
 		     slurmdb_account_cond_t *acct_cond,
@@ -587,6 +588,8 @@ extern int sacctmgr_list_account(int argc, char **argv)
 	ListIterator itr2 = NULL;
 	slurmdb_account_rec_t *acct = NULL;
 	slurmdb_assoc_rec_t *assoc = NULL;
+	char *tmp_char = NULL;
+	uint32_t tmp_uint32;
 
 	int field_count = 0;
 
@@ -647,6 +650,14 @@ extern int sacctmgr_list_account(int argc, char **argv)
 
 	acct_list = slurmdb_accounts_get(db_conn, acct_cond);
 	slurmdb_destroy_account_cond(acct_cond);
+
+	if (mime_type) {
+		rc = DATA_DUMP_CLI(ACCOUNT_LIST, acct_list, "accounts", argc,
+				   argv, db_conn, mime_type);
+		FREE_NULL_LIST(print_fields_list);
+		FREE_NULL_LIST(acct_list);
+		return rc;
+	}
 
 	if (!acct_list) {
 		exit_code=1;
@@ -714,10 +725,13 @@ extern int sacctmgr_list_account(int argc, char **argv)
 			while((field = list_next(itr2))) {
 				switch(field->type) {
 				case PRINT_QOS:
+					tmp_char = get_qos_complete_str(NULL,
+									NULL);
 					field->print_routine(
-						field, NULL,
-						NULL,
+						field,
+						tmp_char,
 						(curr_inx == field_count));
+					xfree(tmp_char);
 					break;
 				case PRINT_ACCT:
 					field->print_routine(
@@ -745,9 +759,10 @@ extern int sacctmgr_list_account(int argc, char **argv)
 						 field_count));
 					break;
 				case PRINT_PRIO:
+					tmp_uint32 = INFINITE;
 					field->print_routine(
 						field,
-						INFINITE,
+						&tmp_uint32,
 						(curr_inx == field_count));
 					break;
 				default:

@@ -55,17 +55,20 @@
 #include "src/common/data.h"
 #include "src/common/fd.h"
 #include "src/common/log.h"
-#include "src/common/openapi.h"
 #include "src/common/plugrack.h"
 #include "src/common/proc_args.h"
 #include "src/common/read_config.h"
 #include "src/common/ref.h"
-#include "src/common/select.h"
-#include "src/common/slurm_auth.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+
+#include "src/interfaces/accounting_storage.h"
+#include "src/interfaces/auth.h"
+#include "src/interfaces/openapi.h"
+#include "src/interfaces/select.h"
+#include "src/interfaces/serializer.h"
 
 #include "src/slurmrestd/http.h"
 #include "src/slurmrestd/operations.h"
@@ -105,6 +108,7 @@ static char *oas_specs = NULL;
 bool unshare_sysv = true;
 bool unshare_files = true;
 bool check_user = true;
+bool become_user = false;
 
 extern parsed_host_port_t *parse_host_port(const char *str);
 extern void free_parse_host_port(parsed_host_port_t *parsed);
@@ -120,7 +124,7 @@ static void _parse_env(void)
 	char *buffer = NULL;
 
 	if ((buffer = getenv("SLURMRESTD_DEBUG")) != NULL) {
-		debug_level = atoi(buffer);
+		debug_level = log_string2num(buffer);
 
 		if (debug_level <= 0)
 			fatal("Invalid env SLURMRESTD_DEBUG: %s", buffer);
@@ -162,6 +166,8 @@ static void _parse_env(void)
 				unshare_files = false;
 			} else if (!xstrcasecmp(token, "disable_user_check")) {
 				check_user = false;
+			} else if (!xstrcasecmp(token, "become_user")) {
+				become_user = true;
 			} else {
 				fatal("Unexpected value in SLURMRESTD_SECURITY=%s",
 				      token);
@@ -307,6 +313,9 @@ static void _parse_commandline(int argc, char **argv)
  */
 static void _lock_down(void)
 {
+	if ((getuid() == SLURM_AUTH_NOBODY) || (getgid() == SLURM_AUTH_NOBODY))
+		fatal("slurmrestd must not be run as nobody");
+
 	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1)
 		fatal("Unable to disable new privileges: %m");
 	if (unshare_sysv && unshare(CLONE_SYSVSEM))
@@ -321,19 +330,27 @@ static void _lock_down(void)
 		fatal("Unable to setgid: %m");
 	if (uid != 0 && setuid(uid))
 		fatal("Unable to setuid: %m");
-	if (check_user && (getuid() == 0))
+	if (check_user && !become_user && (getuid() == 0))
 		fatal("slurmrestd should not be run as the root user.");
-	if (check_user && (getgid() == 0))
+	if (check_user && !become_user && (getgid() == 0))
 		fatal("slurmrestd should not be run with the root goup.");
-	if (check_user && (slurm_conf.slurm_user_id == getuid()))
+
+	if (become_user && getuid())
+		fatal("slurmrestd must run as root in become_user mode");
+	else if (check_user && (slurm_conf.slurm_user_id == getuid()))
 		fatal("slurmrestd should not be run as SlurmUser");
-	if (check_user && (gid_from_uid(slurm_conf.slurm_user_id) == getgid()))
+
+	if (become_user && getgid())
+		fatal("slurmrestd must run as root in become_user mode");
+	else if (check_user &&
+		 (gid_from_uid(slurm_conf.slurm_user_id) == getgid()))
 		fatal("slurmrestd should not be run with SlurmUser's group.");
 }
 
 /* simple wrapper to hand over operations router in http context */
-static void *_setup_http_context(con_mgr_fd_t *con)
+static void *_setup_http_context(con_mgr_fd_t *con, void *arg)
 {
+	xassert(operations_router == arg);
 	return setup_http_context(con, operations_router);
 }
 
@@ -387,6 +404,10 @@ int main(int argc, char **argv)
 
 	_parse_env();
 	_parse_commandline(argc, argv);
+
+	/* attempt to release all unneeded permissions */
+	_lock_down();
+
 	_examine_stdin();
 	_examine_stderr();
 	_examine_stdout();
@@ -394,16 +415,18 @@ int main(int argc, char **argv)
 
 	run_mode.listen = !list_is_empty(socket_listen);
 
-	if (slurm_conf_init(slurm_conf_filename))
-		fatal("Unable to load Slurm configuration");
+	slurm_init(slurm_conf_filename);
 
 	if (thread_count < 2)
 		fatal("Request at least 2 threads for processing");
 	if (thread_count > 1024)
 		fatal("Excessive thread count");
 
-	if (data_init(NULL, NULL))
+	if (data_init())
 		fatal("Unable to initialize data static structures");
+
+	if (serializer_g_init(NULL, NULL))
+		fatal("Unable to initialize serializers");
 
 	if (!(conmgr = init_con_mgr((run_mode.listen ? thread_count : 1),
 				    callbacks)))
@@ -456,7 +479,7 @@ int main(int argc, char **argv)
 				      auth_plugin_types[i]);
 	}
 
-	if (init_rest_auth(auth_plugin_handles, auth_plugin_count))
+	if (init_rest_auth(become_user, auth_plugin_handles, auth_plugin_count))
 		fatal("Unable to initialize rest authentication");
 
 	if (oas_specs && !xstrcasecmp(oas_specs, "list")) {
@@ -488,25 +511,26 @@ int main(int argc, char **argv)
 		debug("Interactive mode activated (TTY detected on STDIN)");
 
 	if (!run_mode.listen) {
-		if ((rc = con_mgr_process_fd(conmgr, STDIN_FILENO,
+		if ((rc = con_mgr_process_fd(conmgr, CON_TYPE_RAW, STDIN_FILENO,
 					     STDOUT_FILENO, conmgr_events, NULL,
-					     0)))
+					     0, operations_router)))
 			fatal("%s: unable to process stdin: %s",
 			      __func__, slurm_strerror(rc));
 
 		/* fail on first error if this is piped process */
 		conmgr->exit_on_error = true;
 	} else if (run_mode.listen) {
-		if (con_mgr_create_sockets(conmgr, socket_listen,
-					   conmgr_events))
+		mode_t mask = umask(0);
+
+		if (con_mgr_create_sockets(conmgr, CON_TYPE_RAW, socket_listen,
+					   conmgr_events, operations_router))
 			fatal("Unable to create sockets");
+
+		umask(mask);
 
 		FREE_NULL_LIST(socket_listen);
 		debug("%s: server listen mode activated", __func__);
 	}
-
-	/* attempt to release all unneeded permissions before talking to clients */
-	_lock_down();
 
 	rc = con_mgr_run(conmgr);
 
@@ -527,6 +551,7 @@ int main(int argc, char **argv)
 	openapi_state = NULL;
 	free_con_mgr(conmgr);
 
+	serializer_g_fini();
 	data_fini();
 	for (size_t i = 0; i < auth_plugin_count; i++) {
 		plugrack_release_by_type(auth_rack, auth_plugin_types[i]);
@@ -539,9 +564,7 @@ int main(int argc, char **argv)
 	auth_rack = NULL;
 
 	xfree(auth_plugin_handles);
-	select_g_fini();
-	slurm_auth_fini();
-	slurm_conf_destroy();
+	slurm_fini();
 	log_fini();
 
 	/* send parsing RC if there were no higher level errors */

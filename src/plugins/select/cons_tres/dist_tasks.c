@@ -90,9 +90,11 @@ static int _at_tpn_limit(const uint32_t n, const job_record_t *job_ptr,
  *			job_ptr->job_resrcs->node_bitmap
  */
 extern int dist_tasks_compute_c_b(job_record_t *job_ptr,
-				  uint32_t *gres_task_limit)
+				  uint32_t *gres_task_limit,
+				  uint32_t *gres_min_cpus)
 {
 	bool over_subscribe = false;
+	bool do_gres_min_cpus = false;
 	uint32_t n, tid, t, maxtasks, l;
 	uint16_t *avail_cpus;
 	job_resources_t *job_res = job_ptr->job_resrcs;
@@ -100,8 +102,9 @@ extern int dist_tasks_compute_c_b(job_record_t *job_ptr,
 	char *err_msg = NULL;
 	uint16_t *vpus;
 	bool space_remaining;
-	int i, i_first, i_last, rem_cpus, rem_tasks;
+	int rem_cpus, rem_tasks;
 	uint16_t cpus_per_task;
+	node_record_t *node_ptr;
 
 	if (!job_res)
 		err_msg = "job_res is NULL";
@@ -121,15 +124,9 @@ extern int dist_tasks_compute_c_b(job_record_t *job_ptr,
 		job_ptr->details->cpus_per_task = 1;
 	cpus_per_task = job_ptr->details->cpus_per_task;
 
-	i_first = bit_ffs(job_res->node_bitmap);
-	if (i_first >= 0)
-		i_last  = bit_fls(job_res->node_bitmap);
-	else
-		i_last = -2;
-	for (i = i_first, n = 0; i <= i_last; i++) {
-		if (!bit_test(job_res->node_bitmap, i))
-			continue;
-		vpus[n++] = node_record_table_ptr[i]->tpc;
+	for (int i = 0, n = 0;
+	     (node_ptr = next_node_bitmap(job_res->node_bitmap, &i)); i++) {
+		vpus[n++] = node_ptr->tpc;
 	}
 
 	maxtasks = job_res->ncpus;
@@ -163,6 +160,8 @@ extern int dist_tasks_compute_c_b(job_record_t *job_ptr,
 	tid = 0;
 	for (n = 0; ((n < job_res->nhosts) && (tid < maxtasks)); n++) {
 		if (avail_cpus[n]) {
+			if (gres_min_cpus[n])
+				do_gres_min_cpus = true;
 			/* Ignore gres_task_limit for first task per node */
 			tid++;
 			job_res->tasks_per_node[n]++;
@@ -262,6 +261,8 @@ extern int dist_tasks_compute_c_b(job_record_t *job_ptr,
 		if (!space_remaining)
 			over_subscribe = true;
 	}
+	if (do_gres_min_cpus)
+		dist_tasks_gres_min_cpus(job_ptr, avail_cpus, gres_min_cpus);
 	xfree(avail_cpus);
 	xfree(vpus);
 

@@ -1,4 +1,4 @@
-.TH sacctmgr "1" "Slurm Commands" "August 2022" "Slurm Commands"
+.TH sacctmgr "1" "Slurm Commands" "March 2023" "Slurm Commands"
 
 .SH "NAME"
 sacctmgr \- Used to view and modify Slurm account information.
@@ -48,6 +48,11 @@ Commit changes immediately without asking for confirmation.
 .IP
 
 .TP
+\fB\-\-json\fR
+Dump job information as JSON. All other formatting arguments will be ignored.
+.IP
+
+.TP
 \fB\-n\fR, \fB\-\-noheader\fR
 No header will be added to the beginning of the output.
 .IP
@@ -72,6 +77,11 @@ This is equivalent to the \fBquiet\fR command.
 \fB\-r\fR, \fB\-\-readonly\fR
 Makes it so the running sacctmgr cannot modify accounting information.
 The \fBreadonly\fR option is for use within interactive mode.
+.IP
+
+.TP
+\fB\-\-yaml\fR
+Dump job information as YAML. All other formatting arguments will be ignored.
 .IP
 
 .TP
@@ -275,7 +285,7 @@ A group of clusters that work together to schedule jobs.
 .TP
 \fBjob\fR
 Used to modify specific fields of a job: Derived Exit Code, Comment,
-AdminComment, SystemComment, or WCKey.
+AdminComment, Extra, SystemComment, or WCKey.
 .IP
 
 .TP
@@ -1392,6 +1402,13 @@ variable.
 .IP
 
 .TP
+\fBExtra\fR=<\fIextra\fR>
+The job's extra string when the AccountingStoreFlags parameter in the slurm.conf
+file contains 'job_extra'. The user can only modify the extra string of their
+own job.
+.IP
+
+.TP
 \fBJobID\fR=<\fIjobid_list\fR>
 The id of the job to change.  Not needed if altering multiple jobs using wckey
 specification.
@@ -1445,6 +1462,7 @@ job to be initiated.
 .TP
 \fBFlags\fR
 Used by the slurmctld to override or enforce certain characteristics.
+To clear a previously set value use the modify command with a new value of \-1.
 .br
 Valid options are
 .RS
@@ -2237,6 +2255,12 @@ for 1 minute would reduce unused_wall by 1 minute.
 .SH "SPECIFICATIONS FOR RESOURCE"
 
 .TP
+\fBLastConsumed\fR=<\fIOPT\fR>
+Number of software resources of a specific name consumed out of \fBCount\fR on
+the system being controlled by a resource manager.
+.IP
+
+.TP
 \fBClusters\fR=<\fIname_list\fR>
 Comma separated list of cluster names on which specified resources are to be
 available.  If no names are designated then the clusters already
@@ -2255,9 +2279,20 @@ A brief description of the resource.
 .IP
 
 .TP
-\fBFlags\fR=<\fIOPT\fR>
-Flags that identify specific attributes of the system resource.  At this time
-no flags have been defined.
+\fBFlags\fR[-|+]=<\fIOPT\fR>
+Flags that identify specific attributes of the system resource.
+.br
+Valid options are
+.RS
+.TP
+\fBAbsolute\fR
+If set the resource will treat the counts for \fBAllowed\fR and \fBAllocated\fR
+as absolute counts instead of percentages.
+
+NOTE: If removing this with flags-=absolute there is no effort to convert the
+numbers in the database back to percentages. This is required by the user.
+.IP
+.RE
 .IP
 
 .TP
@@ -2269,8 +2304,8 @@ from local resources defined in a slurm.conf.
 .IP
 
 .TP
-\fBPercentAllowed\fR=<\fIpercent_allowed\fR>
-Percentage of a specific resource that can be used on specified cluster.
+\fBAllowed\fR=<\fIallowed\fR>
+Percentage/Count of a specific resource that can be used on specified cluster.
 .IP
 
 .TP
@@ -2293,7 +2328,7 @@ type is License.
 
 .TP
 \fBWithClusters\fR
-Display the clusters percentage of resources.  If a resource hasn't
+Display the clusters percentage/count of resources. If a resource hasn't
 been given to a cluster the resource will not be displayed with this flag.
 .IP
 
@@ -2315,7 +2350,13 @@ available for usage by Slurm clusters.
 
 .TP
 \fBAllocated\fR
-The percent of licenses allocated to a cluster.
+The percent/count of licenses allocated to a cluster.
+.IP
+
+.TP
+\fBLastConsumed\fR
+The count of a specific resource consumed out of \fBCount\fR on the system
+globally.
 .IP
 
 .TP
