@@ -52,8 +52,8 @@
 #include "src/common/parse_time.h"
 #include "src/common/proc_args.h"
 #include "src/common/ref.h"
-#include "src/common/select.h"
-#include "src/common/slurm_acct_gather_profile.h"
+#include "src/interfaces/select.h"
+#include "src/interfaces/acct_gather_profile.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_resource_info.h"
@@ -183,7 +183,7 @@ const params_t job_params[] = {
 	{ "no_shell", LONG_OPT_NO_SHELL, true },
 	{ "open_mode", LONG_OPT_OPEN_MODE },
 	{ "overcommit", 'O', true },
-	{ "oversubscribe", 's', true },
+	{ "oversubscribe", 's' },
 	{ "hetjob_group", LONG_OPT_HET_GROUP, true },
 	{ "parsable", LONG_OPT_PARSABLE, true },
 	{ "partition", 'p' },
@@ -363,11 +363,11 @@ static int _fill_job_desc_from_opts(slurm_opt_t *opt, job_desc_msg_t *desc)
 	desc->env_size = envcount(desc->environment);
 
 	/* Disable sending uid/gid as it is handled by auth layer */
-	desc->user_id = NO_VAL;
-	desc->group_id = NO_VAL;
+	desc->user_id = SLURM_AUTH_NOBODY;
+	desc->group_id = SLURM_AUTH_NOBODY;
 
-	desc->argc     = sbopt->script_argc;
-	desc->argv     = sbopt->script_argv;
+	desc->argc     = opt->argc;
+	desc->argv     = opt->argv;
 	desc->std_err  = xstrdup(opt->efname);
 	desc->std_in   = xstrdup(opt->ifname);
 	desc->std_out  = xstrdup(opt->ofname);
@@ -572,7 +572,7 @@ static void _dump_node_res(data_t *dnodes, job_resources_t *j,
 			   const size_t sock_inx, size_t *bit_inx,
 			   const size_t array_size)
 {
-	size_t bit_reps;
+	int bit_reps;
 	data_t *dnode = data_set_dict(data_list_append(dnodes));
 	data_t *dsockets = data_set_dict(data_key_set(dnode, "sockets"));
 	data_t **sockets;
@@ -593,9 +593,9 @@ static void _dump_node_res(data_t *dnodes, job_resources_t *j,
 
 	bit_reps = j->sockets_per_node[sock_inx] *
 		   j->cores_per_socket[sock_inx];
-	for (size_t i = 0; i < bit_reps; i++) {
-		size_t socket_inx = i / j->cores_per_socket[sock_inx];
-		size_t core_inx = i % j->cores_per_socket[sock_inx];
+	for (int i = 0; i < bit_reps; i++) {
+		int socket_inx = i / j->cores_per_socket[sock_inx];
+		int core_inx = i % j->cores_per_socket[sock_inx];
 
 		xassert(*bit_inx < array_size);
 
@@ -1149,8 +1149,8 @@ static int _handle_job_post(const char *context_id,
 	if (get_log_level() >= LOG_LEVEL_DEBUG5) {
 		char *buffer = NULL;
 
-		data_g_serialize(&buffer, query, MIME_TYPE_JSON,
-				 DATA_SER_FLAGS_COMPACT);
+		serialize_g_data_to_string(&buffer, NULL, query, MIME_TYPE_JSON,
+					   SER_FLAGS_COMPACT);
 		debug5("%s: job update from %s: %s",
 		       __func__, context_id, buffer);
 		xfree(buffer);
@@ -1293,14 +1293,14 @@ static int _op_handler_submit_job_post(const char *context_id,
 	if (get_log_level() >= LOG_LEVEL_DEBUG5) {
 		char *buffer = NULL;
 
-		data_g_serialize(&buffer, query, MIME_TYPE_JSON,
-				 DATA_SER_FLAGS_COMPACT);
+		serialize_g_data_to_string(&buffer, NULL, query, MIME_TYPE_JSON,
+					   SER_FLAGS_COMPACT);
 		debug5("%s: job submit query from %s: %s",
 		       __func__, context_id, buffer);
 		xfree(buffer);
 
-		data_g_serialize(&buffer, parameters, MIME_TYPE_JSON,
-				 DATA_SER_FLAGS_COMPACT);
+		serialize_g_data_to_string(&buffer, NULL, parameters,
+					   MIME_TYPE_JSON, SER_FLAGS_COMPACT);
 		debug5("%s: job submit parameters from %s: %s",
 		       __func__, context_id, buffer);
 		xfree(buffer);
@@ -1339,7 +1339,7 @@ static int _op_handler_submit_job_post(const char *context_id,
 				if (slurm_submit_batch_het_job(jobs_rc.jobs,
 							       &resp))
 					rc = errno;
-				list_destroy(jobs_rc.jobs);
+				FREE_NULL_LIST(jobs_rc.jobs);
 			} else {
 				if (slurm_submit_batch_job(jobs_rc.job, &resp))
 					rc = errno;

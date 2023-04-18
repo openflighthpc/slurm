@@ -44,7 +44,7 @@
 #include "src/common/data.h"
 #include "src/common/log.h"
 #include "src/common/read_config.h"
-#include "src/common/select.h"
+#include "src/interfaces/select.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurmdbd_defs.h"
 #include "src/common/uid.h"
@@ -77,7 +77,7 @@
  * top of every parser/dumper, we put the pointer math to keep everything simple
  * in the function when using the offsets. The field can be a nested dictionary
  * and any "/" will automatically be expanded into dictionary entries to make
- * writting these definitions easy.
+ * writing these definitions easy.
  *
  * Every struct type and primitive type is defined in parser_type_t along with a
  * description of what is being transcribed. With most types, there is a dumper
@@ -343,7 +343,7 @@ static const parser_t parse_job[] = {
 	_add_parse(UINT32, resvid, "reservation/id"),
 	_add_parse(UINT32, resv_name, "reservation/name"),
 	/* skipping show_full */
-	_add_parse(UINT32, eligible, "time/start"),
+	_add_parse(UINT32, start, "time/start"),
 	_add_parse(JOB_STATE, state, "state/current"),
 	_add_parse(JOB_REASON, state_reason_prev, "state/reason"),
 	_add_parse(UINT32, submit, "time/submission"),
@@ -810,8 +810,8 @@ static int _parse_to_int64(const parser_t *const parse, void *obj, data_t *str,
 
 	if (data_get_type(str) == DATA_TYPE_NULL)
 		*dst = (double)NO_VAL;
-	else if (data_convert_type(str, DATA_TYPE_FLOAT) == DATA_TYPE_FLOAT)
-		*dst = data_get_float(str);
+	else if (data_convert_type(str, DATA_TYPE_INT_64) == DATA_TYPE_INT_64)
+		*dst = data_get_int(str);
 	else
 		rc = ESLURM_DATA_CONV_FAILED;
 
@@ -844,10 +844,17 @@ static int _parse_to_uint16(const parser_t *const parse, void *obj, data_t *str,
 	int rc = SLURM_SUCCESS;
 
 	if (data_get_type(str) == DATA_TYPE_NULL)
-		*dst = 0;
-	else if (data_convert_type(str, DATA_TYPE_INT_64) == DATA_TYPE_INT_64)
-		*dst = data_get_int(str);
-	else
+		*dst = INFINITE16;
+	else if (data_convert_type(str, DATA_TYPE_INT_64) == DATA_TYPE_INT_64) {
+		if (data_get_int(str) == NO_VAL64)
+			*dst = NO_VAL16;
+		else if (data_get_int(str) == INFINITE64)
+			*dst = INFINITE16;
+		else if (0xFFFFFFFFFFFF0000 & data_get_int(str))
+			rc = ESLURM_DATA_CONV_FAILED;
+		else
+			*dst = data_get_int(str);
+	} else
 		rc = ESLURM_DATA_CONV_FAILED;
 
 	log_flag(DATA, "%s: string %hu rc[%d]=%s", __func__, *dst, rc,
@@ -914,12 +921,15 @@ static int _parse_to_uint32(const parser_t *const parse, void *obj, data_t *str,
 	int rc = SLURM_SUCCESS;
 
 	if (data_get_type(str) == DATA_TYPE_NULL) {
-		*dst = 0;
+		*dst = INFINITE;
 	} else if (data_convert_type(str, DATA_TYPE_INT_64) ==
 		   DATA_TYPE_INT_64) {
-		/* catch -1 and set to NO_VAL instead of rolling */
-		if (0xFFFFFFFF00000000 & data_get_int(str))
+		if (data_get_int(str) == NO_VAL64)
 			*dst = NO_VAL;
+		else if (data_get_int(str) == INFINITE64)
+			*dst = INFINITE;
+		else if (0xFFFFFFFF00000000 & data_get_int(str))
+			rc = ESLURM_DATA_CONV_FAILED;
 		else
 			*dst = data_get_int(str);
 	} else
@@ -1405,8 +1415,13 @@ static int _dump_qos_preempt_list(const parser_t *const parse, void *obj,
 	if (!*preempt_bitstr)
 		return SLURM_SUCCESS;
 
+	if (bit_ffs(*preempt_bitstr) == -1) {
+		/* ignore if there are no bits set */
+		return SLURM_SUCCESS;
+	}
+
 	/* based on get_qos_complete_str_bitstr() */
-	for (int i = 0; (i < bit_size(*preempt_bitstr)); i++) {
+	for (int i = 1; (i < bit_size(*preempt_bitstr)); i++) {
 		slurmdb_qos_rec_t *ptr_qos;
 
 		if (!bit_test(*preempt_bitstr, i))
@@ -1777,8 +1792,7 @@ static int _dump_assoc_id(const parser_t *const parse, void *obj, data_t *dst,
 
 	if (!(assoc = list_find_first(penv->g_assoc_list,
 				      slurmdb_find_assoc_in_list, associd))) {
-		error("%s: unable to resolve assoc_id %u",
-		      __func__, *associd);
+		debug("%s: unable to resolve assoc_id %u", __func__, *associd);
 
 		data_set_dict(dst);
 		data_set_int(data_key_set(dst, "id"), *associd);

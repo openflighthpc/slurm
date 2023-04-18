@@ -44,6 +44,7 @@
 
 #define OPT_LONG_HELP  0x100
 #define OPT_LONG_USAGE 0x101
+#define OPT_LONG_AUTOCOMP 0x102
 
 static int      _get_info(shares_request_msg_t *shares_req,
 			  shares_response_msg_t **shares_resp);
@@ -72,6 +73,7 @@ int main (int argc, char **argv)
 	bool all_users = 0;
 
 	static struct option long_options[] = {
+		{"autocomplete", required_argument, 0, OPT_LONG_AUTOCOMP},
 		{"accounts", 1, 0, 'A'},
 		{"all",      0, 0, 'a'},
                 {"helpformat",0,0, 'e'},
@@ -97,7 +99,7 @@ int main (int argc, char **argv)
 	quiet_flag        = 0;
 	verbosity         = 0;
 	memset(&req_msg, 0, sizeof(shares_request_msg_t));
-	slurm_conf_init(NULL);
+	slurm_init(NULL);
 	log_init("sshare", opts, SYSLOG_FACILITY_DAEMON, NULL);
 
 	while ((opt_char = getopt_long(argc, argv, "aA:ehlM:no:pPqUu:t:vVm",
@@ -177,6 +179,10 @@ int main (int argc, char **argv)
 		case OPT_LONG_USAGE:
 			_usage();
 			exit(0);
+		case OPT_LONG_AUTOCOMP:
+			suggest_completion(long_options, optarg);
+			exit(0);
+			break;
 		default:
 			exit_code = 1;
 			fprintf(stderr, "getopt error, returned %c\n",

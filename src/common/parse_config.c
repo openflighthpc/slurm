@@ -62,6 +62,7 @@
 #include "src/common/slurm_protocol_interface.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
+#include "src/common/xregex.h"
 #include "src/common/xstring.h"
 
 #include "slurm/slurm.h"
@@ -174,12 +175,16 @@ static s_p_values_t *_conf_hashtbl_lookup(const s_p_hashtbl_t *tbl,
 	return NULL;
 }
 
-s_p_hashtbl_t *s_p_hashtbl_create(const s_p_options_t options[])
+s_p_hashtbl_t *s_p_hashtbl_create_cnt(const s_p_options_t options[], int *cnt)
 {
 	s_p_hashtbl_t *tbl = xmalloc(sizeof(*tbl));
 
+	if (cnt)
+		*cnt = 0;
 	for (const s_p_options_t *op = options; op->key; op++) {
 		s_p_values_t *value = xmalloc(sizeof(*value));
+		if (cnt)
+			(*cnt)++;
 		value->key = xstrdup(op->key);
 		value->operator = S_P_OPERATOR_SET;
 		value->type = op->type;
@@ -205,6 +210,11 @@ s_p_hashtbl_t *s_p_hashtbl_create(const s_p_options_t options[])
 		fatal("keyvalue regex compilation failed");
 
 	return tbl;
+}
+
+extern s_p_hashtbl_t *s_p_hashtbl_create(const s_p_options_t options[])
+{
+	return s_p_hashtbl_create_cnt(options, NULL);
 }
 
 /* Swap the data in two data structures without changing the linked list
@@ -303,6 +313,7 @@ static int _keyvalue_regex(s_p_hashtbl_t *tbl, const char *line,
 	size_t nmatch = 8;
 	regmatch_t pmatch[8];
 	char op;
+	int rc;
 
 	*key = NULL;
 	*value = NULL;
@@ -310,8 +321,12 @@ static int _keyvalue_regex(s_p_hashtbl_t *tbl, const char *line,
 	*operator = S_P_OPERATOR_SET;
 	memset(pmatch, 0, sizeof(regmatch_t)*nmatch);
 
-	if (regexec(&tbl->keyvalue_re, line, nmatch, pmatch, 0) == REG_NOMATCH)
+	if ((rc = regexec(&tbl->keyvalue_re, line, nmatch, pmatch, 0))) {
+		if (rc != REG_NOMATCH)
+			dump_regex_error(rc, &tbl->keyvalue_re, "regexec(%s)",
+					 line);
 		return -1;
+	}
 
 	*key = (char *)(xstrndup(line + pmatch[1].rm_so,
 				 pmatch[1].rm_eo - pmatch[1].rm_so));
@@ -1054,25 +1069,6 @@ static int _parse_next_key(s_p_hashtbl_t *hashtbl,
 	return 1;
 }
 
-static char * _add_full_path(char *file_name, char *slurm_conf_path)
-{
-	char *path_name = NULL, *slash;
-
-	if ((file_name == NULL) || (file_name[0] == '/')) {
-		path_name = xstrdup(file_name);
-		return path_name;
-	}
-
-	path_name = xstrdup(slurm_conf_path);
-	slash = strrchr(path_name, '/');
-	if (slash)
-		slash[0] = '\0';
-	xstrcat(path_name, "/");
-	xstrcat(path_name, file_name);
-
-	return path_name;
-}
-
 static char *_parse_for_format(s_p_hashtbl_t *f_hashtbl, char *path)
 {
 	char *filename = xstrdup(path);
@@ -1194,7 +1190,7 @@ static int _parse_include_directive(s_p_hashtbl_t *hashtbl, uint32_t *hash_val,
 		xfree(file_with_mod);
 		if (!file_name)	/* Error printed by _parse_for_format() */
 			return -1;
-		path_name = _add_full_path(file_name, slurm_conf_path);
+		path_name = get_extra_conf_path(file_name);
 		if (!last_ancestor)
 			last_ancestor = xbasename(slurm_conf_path);
 		rc = s_p_parse_file(hashtbl, hash_val, path_name, ignore_new,
@@ -2248,6 +2244,15 @@ extern buf_t *s_p_pack_hashtbl(const s_p_hashtbl_t *hashtbl,
 			continue;
 
 		switch (options[i].type) {
+		case S_P_ARRAY:
+			if (options[i].pack) {
+				pack32(p->data_count, buffer);
+				void **ptr_array = (void **)p->data;
+				for (int j = 0; j < p->data_count; j++) {
+					options[i].pack(ptr_array[j], buffer);
+				}
+			}
+			break;
 		case S_P_STRING:
 		case S_P_PLAIN_STRING:
 			packstr((char *)p->data, buffer);
@@ -2289,7 +2294,8 @@ extern buf_t *s_p_pack_hashtbl(const s_p_hashtbl_t *hashtbl,
 /*
  * Given a buffer, unpack key, type, op and value into a hashtbl.
  */
-extern s_p_hashtbl_t *s_p_unpack_hashtbl(buf_t *buffer)
+extern s_p_hashtbl_t *s_p_unpack_hashtbl_full(buf_t *buffer,
+					      const s_p_options_t options[])
 {
 	s_p_values_t *value = NULL;
 	s_p_hashtbl_t *hashtbl = NULL;
@@ -2324,6 +2330,21 @@ extern s_p_hashtbl_t *s_p_unpack_hashtbl(buf_t *buffer)
 			continue;
 
 		switch (value->type) {
+		case S_P_ARRAY:
+			xassert(options);
+			if (options[i].unpack) {
+				void **ptr_array;
+				safe_unpack32(&uint32_tmp, buffer);
+				value->data_count = uint32_tmp;
+				value->data = xcalloc(value->data_count,
+						      sizeof(void *));
+				ptr_array = (void **)value->data;
+				for (int j = 0; j < value->data_count; j++) {
+					ptr_array[j] =
+						options[i].unpack(buffer);
+				}
+			}
+			break;
 		case S_P_STRING:
 		case S_P_PLAIN_STRING:
 			safe_unpackstr_xmalloc(&tmp_char, &uint32_tmp, buffer);
@@ -2383,6 +2404,11 @@ unpack_error:
 	s_p_hashtbl_destroy(hashtbl);
 	error("%s: failed", __func__);
 	return NULL;
+}
+
+extern s_p_hashtbl_t *s_p_unpack_hashtbl(buf_t *buffer)
+{
+	return s_p_unpack_hashtbl_full(buffer, NULL);
 }
 
 extern void transfer_s_p_options(s_p_options_t **full_options,

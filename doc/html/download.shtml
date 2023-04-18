@@ -93,7 +93,7 @@ There is a wrapper for Maui/Moab's showq command
 <li><b>Scripting interfaces</b></li>
 <ul>
 <li>A <b>Perl</b> interface is included in the Slurm distribution in the
-<i>contribs/perlapi</i> directory and packaged in the <i>perapi</i> RPM.</li>
+<i>contribs/perlapi</i> directory and packaged in the <i>perlapi</i> RPM.</li>
 
 <li><a href="https://github.com/pyslurm/">PySlurm</a> is a
 Python/Cython module to interface with Slurm.
@@ -170,7 +170,8 @@ time as performed with this tool:
 	<p>Some Slurm plugins (<a href="rest.html">slurmrestd</a>,
 	<a href="burst_buffer.html">burst_buffer/datawarp</a>,
 	<a href="burst_buffer.html">burst_buffer/lua</a>,
-	<a href="elasticsearch.html">jobcomp/elasticsearch</a>
+	<a href="elasticsearch.html">jobcomp/elasticsearch</a>,
+	<a href="jobcomp_kafka.html">jobcomp/kafka</a>
 	and <a href="power_mgmt.html">power/cray_aries</a>) parse and/or
 	serialize JSON format data. These plugins and slurmrestd are designed to
 	make use of the JSON-C library for this purpose. Instructions for the

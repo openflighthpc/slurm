@@ -42,9 +42,11 @@
 #include "config.h"
 
 #define _GNU_SOURCE	/* for setresuid() */
+#define _XOPEN_SOURCE 500 /* for ftw.h */
 
 #include <ctype.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <grp.h>
 #ifdef HAVE_NUMA
 #undef NUMA_VERSION1_COMPATIBILITY
@@ -72,34 +74,34 @@
 #include "src/common/fd.h"
 #include "src/common/fetch_config.h"
 #include "src/common/forward.h"
-#include "src/common/gres.h"
+#include "src/interfaces/gres.h"
 #include "src/common/group_cache.h"
 #include "src/common/hostlist.h"
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"
-#include "src/common/node_features.h"
-#include "src/common/plugstack.h"
-#include "src/common/prep.h"
+#include "src/interfaces/node_features.h"
+#include "src/interfaces/prep.h"
 #include "src/common/read_config.h"
 #include "src/common/reverse_tree.h"
-#include "src/common/select.h"
-#include "src/common/slurm_auth.h"
-#include "src/common/slurm_cred.h"
-#include "src/common/slurm_acct_gather_energy.h"
-#include "src/common/slurm_jobacct_gather.h"
-#include "src/common/slurm_mpi.h"
+#include "src/interfaces/select.h"
+#include "src/interfaces/auth.h"
+#include "src/interfaces/cred.h"
+#include "src/interfaces/acct_gather_energy.h"
+#include "src/interfaces/jobacct_gather.h"
+#include "src/interfaces/mpi.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_interface.h"
 #include "src/common/slurm_protocol_pack.h"
+#include "src/common/spank.h"
 #include "src/common/stepd_api.h"
-#include "src/common/switch.h"
+#include "src/interfaces/switch.h"
 #include "src/common/uid.h"
 #include "src/common/util-net.h"
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
-#include "src/common/cgroup.h"
+#include "src/interfaces/cgroup.h"
 
 #include "src/bcast/file_bcast.h"
 
@@ -107,10 +109,10 @@
 #include "src/slurmd/slurmd/slurmd.h"
 
 #include "src/slurmd/common/fname.h"
-#include "src/slurmd/common/job_container_plugin.h"
-#include "src/slurmd/common/proctrack.h"
+#include "src/interfaces/job_container.h"
+#include "src/interfaces/proctrack.h"
 #include "src/slurmd/common/slurmstepd_init.h"
-#include "src/slurmd/common/task_plugin.h"
+#include "src/interfaces/task.h"
 
 #define _LIMIT_INFO 0
 
@@ -178,6 +180,8 @@ static void _rpc_reattach_tasks(slurm_msg_t *);
 static void _rpc_suspend_job(slurm_msg_t *msg);
 static void _rpc_terminate_job(slurm_msg_t *);
 static void _rpc_shutdown(slurm_msg_t *msg);
+static void _rpc_set_slurmd_debug_flags(slurm_msg_t *msg);
+static void _rpc_set_slurmd_debug(slurm_msg_t *msg);
 static void _rpc_reconfig(slurm_msg_t *msg);
 static void _rpc_reconfig_with_config(slurm_msg_t *msg);
 static void _rpc_reboot(slurm_msg_t *msg);
@@ -289,9 +293,17 @@ slurmd_req(slurm_msg_t *msg)
 		return;
 	}
 
-	if (!msg->auth_uid_set)
-		fatal("%s: received message without previously validated auth",
+	if (!msg->auth_uid_set) {
+		error("%s: received message without previously validated auth",
 		      __func__);
+		return;
+	}
+
+	if (slurm_conf.debug_flags & DEBUG_FLAG_PROTOCOL) {
+		char *p = rpc_num2string(msg->msg_type);
+		info("%s: received opcode %s from %pA uid %u",
+		     __func__, p, &msg->address, msg->auth_uid);
+	}
 
 	debug2("Processing RPC: %s", rpc_num2string(msg->msg_type));
 	switch (msg->msg_type) {
@@ -341,6 +353,12 @@ slurmd_req(slurm_msg_t *msg)
 	case REQUEST_RECONFIGURE:
 		_rpc_reconfig(msg);
 		last_slurmctld_msg = time(NULL);
+		break;
+	case REQUEST_SET_DEBUG_FLAGS:
+		_rpc_set_slurmd_debug_flags(msg);
+		break;
+	case REQUEST_SET_DEBUG_LEVEL:
+		_rpc_set_slurmd_debug(msg);
 		break;
 	case REQUEST_RECONFIGURE_WITH_CONFIG:
 		_rpc_reconfig_with_config(msg);
@@ -397,8 +415,8 @@ slurmd_req(slurm_msg_t *msg)
 		_rpc_network_callerid(msg);
 		break;
 	default:
-		error("slurmd_req: invalid request msg type %d",
-		      msg->msg_type);
+		error("%s: invalid request msg type %d",
+		      __func__, msg->msg_type);
 		slurm_send_rc_msg(msg, EINVAL);
 		break;
 	}
@@ -470,12 +488,8 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	if (send_slurmd_conf_lite(fd, conf) < 0)
 		goto rwfail;
 
-	/* send cgroup conf over to slurmstepd */
-	if (cgroup_write_conf(fd) < 0)
-		goto rwfail;
-
-	/* send acct_gather.conf over to slurmstepd */
-	if (acct_gather_write_conf(fd) < 0)
+	/* send conf_hashtbl */
+	if (read_conf_send_stepd(fd))
 		goto rwfail;
 
 	/* send type over to slurmstepd */
@@ -566,8 +580,7 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	len = get_buf_offset(buffer);
 	safe_write(fd, &len, sizeof(int));
 	safe_write(fd, get_buf_data(buffer), len);
-	free_buf(buffer);
-	buffer = NULL;
+	FREE_NULL_BUFFER(buffer);
 
 	/* send self address over to slurmstepd */
 	if (self) {
@@ -576,8 +589,7 @@ _send_slurmstepd_init(int fd, int type, void *req,
 		len = get_buf_offset(buffer);
 		safe_write(fd, &len, sizeof(int));
 		safe_write(fd, get_buf_data(buffer), len);
-		free_buf(buffer);
-		buffer = NULL;
+		FREE_NULL_BUFFER(buffer);
 
 	} else {
 		len = 0;
@@ -612,8 +624,23 @@ _send_slurmstepd_init(int fd, int type, void *req,
 
 	safe_write(fd, &len, sizeof(int));
 	safe_write(fd, get_buf_data(buffer), len);
-	free_buf(buffer);
-	buffer = NULL;
+	FREE_NULL_BUFFER(buffer);
+
+	/*
+	 * Send all secondary conf files to the stepd.
+	 */
+
+	/* send cgroup conf over to slurmstepd */
+	if (cgroup_write_conf(fd) < 0)
+		goto rwfail;
+
+	/* send acct_gather.conf over to slurmstepd */
+	if (acct_gather_write_conf(fd) < 0)
+		goto rwfail;
+
+	/* Send job_container information to slurmstepd */
+	if (container_g_send_stepd(fd) != SLURM_SUCCESS)
+		goto rwfail;
 
 	/* Send GRES information to slurmstepd */
 	gres_g_send_stepd(fd, &msg);
@@ -636,8 +663,7 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	return 0;
 
 rwfail:
-	if (buffer)
-		free_buf(buffer);
+	FREE_NULL_BUFFER(buffer);
 	error("_send_slurmstepd_init failed");
 	return errno;
 }
@@ -721,9 +747,8 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 			int delta_time = time(NULL) - start_time;
 			int cc;
 			if (delta_time > 5) {
-				info("Warning: slurmstepd startup took %d sec, "
-				     "possible file system problem or full "
-				     "memory", delta_time);
+				warning("slurmstepd startup took %d sec, possible file system problem or full memory",
+					delta_time);
 			}
 			if (rc != SLURM_SUCCESS)
 				error("slurmstepd return code %d: %s",
@@ -959,7 +984,7 @@ static int _check_job_credential(launch_tasks_request_msg_t *req,
 	uint32_t	jobid = req->step_id.job_id;
 	uint32_t	stepid = req->step_id.step_id;
 	int		tasks_to_launch = req->tasks_to_launch[node_id];
-	uint32_t	job_cpus = 0, step_cpus = 0;
+	uint32_t	step_cpus = 0;
 
 	if (req->flags & LAUNCH_NO_ALLOC) {
 		if (super_user) {
@@ -989,13 +1014,33 @@ static int _check_job_credential(launch_tasks_request_msg_t *req,
 		goto fail;
 	}
 
-	if (arg->uid != req->uid) {
+	if (arg->uid == SLURM_AUTH_NOBODY) {
+		error("%s: rejecting job %u credential for invalid user nobody",
+		      __func__, arg->step_id.job_id);
+		goto fail;
+	}
+
+	if (req->uid == SLURM_AUTH_NOBODY) {
+		debug3("%s: setting job %u credential to uid %u",
+		      __func__, arg->step_id.job_id, arg->uid);
+		req->uid = arg->uid;
+	} else if (arg->uid != req->uid) {
 		error("job %u credential created for uid %u, expected %u",
 		      arg->step_id.job_id, arg->uid, req->uid);
 		goto fail;
 	}
 
-	if (arg->gid != req->gid) {
+	if (arg->gid == SLURM_AUTH_NOBODY) {
+		error("%s: rejecting job %u credential for invalid group nobody",
+		      __func__, arg->step_id.job_id);
+		goto fail;
+	}
+
+	if (req->gid == SLURM_AUTH_NOBODY) {
+		debug3("%s: setting job %u credential to group %u",
+		      __func__, arg->step_id.job_id, arg->gid);
+		req->gid = arg->gid;
+	} else if (arg->gid != req->gid) {
 		error("job %u credential created for gid %u, expected %u",
 		      arg->step_id.job_id, arg->gid, req->gid);
 		goto fail;
@@ -1112,7 +1157,6 @@ static int _check_job_credential(launch_tasks_request_msg_t *req,
 		for (i=i_first_bit, j=0; i<i_last_bit; i++, j++) {
 			char *who_has = NULL;
 			if (bit_test(arg->job_core_bitmap, i)) {
-				job_cpus++;
 				who_has = "Job";
 			}
 			if (bit_test(arg->step_core_bitmap, i)) {
@@ -1144,7 +1188,6 @@ static int _check_job_credential(launch_tasks_request_msg_t *req,
 						 i_last_bit,
 						 i_first_bit);
 				step_cpus *= i;
-				job_cpus *= i;
 			}
 		}
 		if (tasks_to_launch > step_cpus) {
@@ -1156,7 +1199,6 @@ static int _check_job_credential(launch_tasks_request_msg_t *req,
 		}
 	} else {
 		step_cpus = 1;
-		job_cpus  = 1;
 	}
 
 	/*
@@ -1204,7 +1246,6 @@ static int _str_to_memset(bitstr_t *mask, char *str)
 		if ((val & 8) && (base < MAX_NUMA_CNT))
 			bit_set(mask, base);
 		base++;
-		len--;
 		ptr--;
 	}
 
@@ -1387,8 +1428,8 @@ static int _set_node_alias(launch_tasks_request_msg_t *req)
 	char *alias_list = NULL;
 
 	if (req->cred &&
-	    (alias_list = slurm_cred_get_arg(req->cred,
-					     CRED_ARG_JOB_ALIAS_LIST)) &&
+	    (alias_list = slurm_cred_get(req->cred,
+					 CRED_DATA_JOB_ALIAS_LIST)) &&
 	    set_nodes_alias(alias_list)) {
 		error("Failed to process alias_list: '%s'", alias_list);
 		return SLURM_ERROR;
@@ -1435,18 +1476,14 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	}
 
 	if ((super_user == false) && (msg->auth_uid != req->uid)) {
-		error("launch task request from uid %u", msg->auth_uid);
+		error("%s: launch task request from uid %u != %u",
+		      __func__, msg->auth_uid, req->uid);
 		errnum = ESLURM_USER_ID_MISSING;	/* or invalid user */
 		goto done;
 	}
 	if (node_id < 0) {
 		info("%s: Invalid node list (%s not in %s)", __func__,
 		     conf->node_name, req->complete_nodelist);
-		errnum = ESLURM_INVALID_NODE_NAME;
-		goto done;
-	}
-
-	if (_set_node_alias(req)) {
 		errnum = ESLURM_INVALID_NODE_NAME;
 		goto done;
 	}
@@ -1491,6 +1528,11 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 		goto done;
 	}
 
+	if (_set_node_alias(req)) {
+		errnum = ESLURM_INVALID_NODE_NAME;
+		goto done;
+	}
+
 	/* Must follow _check_job_credential(), which sets some req fields */
 	if ((errnum = task_g_slurmd_launch_request(req, node_id, &errmsg))) {
 		slurm_mutex_unlock(&prolog_mutex);
@@ -1509,7 +1551,7 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	if (first_job_run) {
 		int rc;
 		job_env_t job_env;
-		List job_gres_list, epi_env_gres_list;
+		List job_gres_list, gres_prep_env_list;
 		uint32_t jobid;
 
 		slurm_cred_insert_jobid(conf->vctx, req->step_id.job_id);
@@ -1528,13 +1570,13 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 			error("container_g_create(%u): %m", req->step_id.job_id);
 
 		memset(&job_env, 0, sizeof(job_env));
-		job_gres_list = (List) slurm_cred_get_arg(req->cred,
-							CRED_ARG_JOB_GRES_LIST);
-		epi_env_gres_list = gres_g_epilog_build_env(
+		job_gres_list = (List) slurm_cred_get(req->cred,
+						      CRED_DATA_JOB_GRES_LIST);
+		gres_prep_env_list = gres_g_prep_build_env(
 			job_gres_list, req->complete_nodelist);
-		gres_g_epilog_set_env(&job_env.gres_job_env,
-				      epi_env_gres_list, node_id);
-		FREE_NULL_LIST(epi_env_gres_list);
+		gres_g_prep_set_env(&job_env.gres_job_env,
+				    gres_prep_env_list, node_id);
+		FREE_NULL_LIST(gres_prep_env_list);
 
 		job_env.jobid = req->step_id.job_id;
 		job_env.step_id = req->step_id.step_id;
@@ -1666,6 +1708,29 @@ done:
 
 }
 
+int _rm_file(const char *fpath, const struct stat *sb, int typeflag,
+	     struct FTW *ftwbuf)
+{
+	if (remove(fpath)) {
+		switch (typeflag) {
+		case FTW_NS:
+			error("%s: stat() call failed on path: %s",
+			      __func__, fpath);
+			break;
+		case FTW_DNR:
+			error("%s: Directory can't be read: %s",
+			      __func__, fpath);
+			break;
+		}
+
+		error("%s: Could not remove path: %s: %s",
+		      __func__, fpath, strerror(errno));
+		return SLURM_ERROR;
+	}
+
+	return SLURM_SUCCESS;
+}
+
 /*
  * Open file based upon permissions of a different user
  * IN path_name - name of file to open
@@ -1675,12 +1740,13 @@ done:
  * IN uid - User ID to use for file access check
  * IN gid - Group ID to use for file access check
  * IN make_dir - if true, create a directory instead of a file
+ * IN force - if true and the library directory already exists, replace it
  * OUT fd - File descriptor
  * RET error or SLURM_SUCCESS
  * */
 static int _open_as_other(char *path_name, int flags, int mode, uint32_t jobid,
 			  uid_t uid, gid_t gid, int ngids, gid_t *gids,
-			  bool make_dir, int *fd)
+			  bool make_dir, bool force, int *fd)
 {
 	pid_t child;
 	int pipe[2];
@@ -1760,6 +1826,13 @@ static int _open_as_other(char *path_name, int flags, int mode, uint32_t jobid,
 	}
 
 	if (make_dir) {
+		if (force &&
+		    (nftw(path_name, _rm_file, 20, FTW_DEPTH | FTW_PHYS) < 0) &&
+		    errno != ENOENT) {
+			error("%s: uid:%u can't delete dir `%s` code %d: %m, %d",
+			      __func__, uid, path_name, errno, errno);
+			_exit(errno);
+		}
 		if (mkdir(path_name, mode) < 0) {
 			error("%s: uid:%u can't create dir `%s` code %d: %m",
 			      __func__, uid, path_name, errno);
@@ -1860,42 +1933,6 @@ static int _connect_as_other(char *sock_name, uid_t uid, gid_t gid, int *fd)
 	send_fd_over_pipe(pipe[0], *fd);
 	close(*fd);
 	_exit(SLURM_SUCCESS);
-}
-
-static void
-_prolog_error(batch_job_launch_msg_t *req, int rc)
-{
-	char *err_name = NULL, *path_name = NULL;
-	int fd, rc2;
-	int flags = (O_CREAT|O_APPEND|O_WRONLY);
-	uint32_t jobid;
-
-#ifdef HAVE_NATIVE_CRAY
-	if (req->het_job_id && (req->het_job_id != NO_VAL))
-		jobid = req->het_job_id;
-	else
-		jobid = req->job_id;
-#else
-	jobid = req->job_id;
-#endif
-
-	path_name = fname_create2(req);
-	rc2 = _open_as_other(path_name, flags, 0644, jobid, req->uid, req->gid,
-			     req->ngids, req->gids, false, &fd);
-	if (rc2 != SLURM_SUCCESS) {
-		error("Unable to open %s: %s", path_name, strerror(rc2));
-		xfree(path_name);
-		return;
-	}
-	xfree(path_name);
-
-	xstrfmtcat(err_name, "Error running slurm prolog: %d\n",
-		   WEXITSTATUS(rc));
-	safe_write(fd, err_name, strlen(err_name));
-
-rwfail:
-	xfree(err_name);
-	close(fd);
 }
 
 /* load the user's environment on this machine if requested
@@ -2283,8 +2320,8 @@ static void _rpc_prolog(slurm_msg_t *msg)
 		slurm_cond_broadcast(&conf->prolog_running_cond);
 		slurm_mutex_unlock(&prolog_mutex);
 		memset(&job_env, 0, sizeof(job_env));
-		gres_g_epilog_set_env(&job_env.gres_job_env,
-				      req->job_gres_info, node_id);
+		gres_g_prep_set_env(&job_env.gres_job_env,
+				    req->job_gres_prep, node_id);
 
 		job_env.jobid = req->job_id;
 		job_env.step_id = 0;	/* not available */
@@ -2460,7 +2497,7 @@ static void _rpc_batch_job(slurm_msg_t *msg)
 	 */
 	if (first_job_run) {
 		job_env_t job_env;
-		List job_gres_list, epi_env_gres_list;
+		List job_gres_list, gres_prep_env_list;
 		uint32_t jobid;
 
 		slurm_cred_insert_jobid(conf->vctx, req->job_id);
@@ -2472,13 +2509,13 @@ static void _rpc_batch_job(slurm_msg_t *msg)
 		node_id = nodelist_find(req->nodes, conf->node_name);
 #endif
 		memset(&job_env, 0, sizeof(job_env));
-		job_gres_list = (List) slurm_cred_get_arg(req->cred,
-							CRED_ARG_JOB_GRES_LIST);
-		epi_env_gres_list = gres_g_epilog_build_env(job_gres_list,
-							    req->nodes);
-		gres_g_epilog_set_env(&job_env.gres_job_env,
-				      epi_env_gres_list, node_id);
-		FREE_NULL_LIST(epi_env_gres_list);
+		job_gres_list = (List) slurm_cred_get(req->cred,
+						      CRED_DATA_JOB_GRES_LIST);
+		gres_prep_env_list = gres_g_prep_build_env(job_gres_list,
+							   req->nodes);
+		gres_g_prep_set_env(&job_env.gres_job_env,
+				    gres_prep_env_list, node_id);
+		FREE_NULL_LIST(gres_prep_env_list);
 		job_env.jobid = req->job_id;
 		job_env.step_id = SLURM_BATCH_SCRIPT;
 		job_env.node_list = req->nodes;
@@ -2516,8 +2553,6 @@ static void _rpc_batch_job(slurm_msg_t *msg)
 				exit_status = WEXITSTATUS(rc);
 			error("[job %u] prolog failed status=%d:%d",
 			      req->job_id, exit_status, term_sig);
-
-			_prolog_error(req, rc);
 			rc = ESLURMD_PROLOG_FAILED;
 			goto done;
 		}
@@ -2688,14 +2723,6 @@ _launch_job_fail(uint32_t job_id, uint32_t slurm_rc)
 	struct requeue_msg req_msg = {0};
 	slurm_msg_t resp_msg;
 	int rc = 0, rpc_rc;
-	static time_t config_update = 0;
-	static bool requeue_no_hold = false;
-
-	if (config_update != slurm_conf.last_update) {
-		requeue_no_hold = (xstrcasestr(slurm_conf.sched_params,
-					       "nohold_on_prolog_fail"));
-		config_update = slurm_conf.last_update;
-	}
 
 	slurm_msg_t_init(&resp_msg);
 
@@ -2705,17 +2732,13 @@ _launch_job_fail(uint32_t job_id, uint32_t slurm_rc)
 	/* Try to requeue the job. If that doesn't work, kill the job. */
 	req_msg.job_id = job_id;
 	req_msg.job_id_str = NULL;
-	if (requeue_no_hold)
-		req_msg.flags = JOB_PENDING;
-	else
-		req_msg.flags = (JOB_REQUEUE_HOLD | JOB_LAUNCH_FAILED);
+	req_msg.flags = JOB_LAUNCH_FAILED;
 	resp_msg.msg_type = REQUEST_JOB_REQUEUE;
 	resp_msg.data = &req_msg;
 	rpc_rc = slurm_send_recv_controller_rc_msg(&resp_msg, &rc,
 						   working_cluster_rec);
 
-	if ((resp_msg.msg_type == REQUEST_JOB_REQUEUE) &&
-	    ((rc == ESLURM_DISABLED) || (rc == ESLURM_BATCH_ONLY))) {
+	if ((rc == ESLURM_DISABLED) || (rc == ESLURM_BATCH_ONLY)) {
 		info("Could not launch job %u and not able to requeue it, "
 		     "cancelling job", job_id);
 
@@ -2750,6 +2773,52 @@ _rpc_reconfig(slurm_msg_t *msg)
 	/* Never return a message, slurmctld does not expect one */
 }
 
+static void _rpc_set_slurmd_debug_flags(slurm_msg_t *msg)
+{
+	int rc = SLURM_SUCCESS;
+
+	if (!_slurm_authorized_user(msg->auth_uid)) {
+		error("Security violation, %s from uid %u",
+		      rpc_num2string(msg->msg_type), msg->auth_uid);
+		rc = ESLURM_USER_ID_MISSING;
+	} else {
+		char *flag_string = NULL;
+		slurm_conf_t *cf = NULL;
+		set_debug_flags_msg_t *request_msg = msg->data;
+
+		cf = slurm_conf_lock();
+		cf->debug_flags &= (~request_msg->debug_flags_minus);
+		cf->debug_flags |= request_msg->debug_flags_plus;
+		flag_string = debug_flags2str(cf->debug_flags);
+		build_conf_buf();
+		slurm_conf_unlock();
+		info("Set DebugFlags to %s",
+		     flag_string ? flag_string : "none");
+		xfree(flag_string);
+	}
+
+	forward_wait(msg);
+	slurm_send_rc_msg(msg, rc);
+}
+
+static void _rpc_set_slurmd_debug(slurm_msg_t *msg)
+{
+	set_debug_level_msg_t *request_msg = msg->data;
+	int rc = SLURM_SUCCESS;
+
+	if (!_slurm_authorized_user(msg->auth_uid)) {
+		error("Security violation, %s from uid %u",
+		      rpc_num2string(msg->msg_type), msg->auth_uid);
+		rc = ESLURM_USER_ID_MISSING;
+	} else {
+		update_slurmd_logging(request_msg->debug_level);
+		build_conf_buf();
+	}
+
+	forward_wait(msg);
+	slurm_send_rc_msg(msg, rc);
+}
+
 static void _rpc_reconfig_with_config(slurm_msg_t *msg)
 {
 	if (!_slurm_authorized_user(msg->auth_uid))
@@ -2761,7 +2830,7 @@ static void _rpc_reconfig_with_config(slurm_msg_t *msg)
 				(config_response_msg_t *) msg->data;
 			/*
 			 * Running in "configless" mode as indicated by the
-			 * cache directory's existance. Update those so
+			 * cache directory's existence. Update those so
 			 * our reconfigure picks up the changes, and so
 			 * client commands see the changes as well.
 			 */
@@ -3309,6 +3378,11 @@ static void _rpc_acct_gather_energy(slurm_msg_t *msg)
 					      ENERGY_DATA_SENSOR_CNT,
 					      &sensor_cnt);
 
+		if (!sensor_cnt) {
+			error("Can't get energy data. No power sensors are available. Try later.");
+			return;
+		}
+
 		/* If we polled later than delta seconds then force a
 		   new poll.
 		*/
@@ -3550,7 +3624,7 @@ static void _rpc_daemon_status(slurm_msg_t *msg)
 	resp->actual_sockets     = conf->actual_sockets;
 	resp->actual_cores       = conf->actual_cores;
 	resp->actual_threads     = conf->actual_threads;
-	resp->actual_real_mem    = conf->real_memory_size;
+	resp->actual_real_mem    = conf->physical_memory_size;
 	resp->actual_tmp_disk    = conf->tmp_disk_space;
 	resp->booted             = startup;
 	resp->hostname           = xstrdup(conf->node_name);
@@ -4159,8 +4233,8 @@ void file_bcast_init(void)
 void file_bcast_purge(void)
 {
 	_fb_wrlock();
-	list_destroy(file_bcast_list);
-	list_destroy(bcast_libdir_list);
+	FREE_NULL_LIST(file_bcast_list);
+	FREE_NULL_LIST(bcast_libdir_list);
 	/* destroying list before exit, no need to unlock */
 }
 
@@ -4332,25 +4406,27 @@ static int _file_bcast_register_file(slurm_msg_t *msg,
 				     file_bcast_info_t *key)
 {
 	file_bcast_msg_t *req = msg->data;
-	int fd, flags, rc;
+	int fd = -1, flags, rc;
 	file_bcast_info_t *file_info;
 	libdir_rec_t *libdir = NULL;
+	bool force_opt = false;
 
 	/* may still be unset in credential */
 	if (!cred_arg->ngids || !cred_arg->gids)
 		cred_arg->ngids = group_cache_lookup(key->uid, key->gid,
 						     cred_arg->user_name,
 						     &cred_arg->gids);
+	force_opt = req->flags & FILE_BCAST_FORCE;
 
 	flags = O_WRONLY | O_CREAT;
-	if (req->flags & FILE_BCAST_FORCE)
+	if (force_opt)
 		flags |= O_TRUNC;
 	else
 		flags |= O_EXCL;
 
 	rc = _open_as_other(req->fname, flags, 0700, key->job_id, key->uid,
 			    key->gid, cred_arg->ngids, cred_arg->gids, false,
-			    &fd);
+			    false, &fd);
 	if (rc != SLURM_SUCCESS) {
 		error("Unable to open %s: %s", req->fname, strerror(rc));
 		return rc;
@@ -4361,10 +4437,18 @@ static int _file_bcast_register_file(slurm_msg_t *msg,
 		char *directory = xstrdup_printf("%s_libs", key->fname);
 		rc = _open_as_other(directory, 0, 0700, key->job_id, key->uid,
 				    key->gid, cred_arg->ngids, cred_arg->gids,
-				    true, &fd_dir);
+				    true, force_opt, &fd_dir);
 		if (rc != SLURM_SUCCESS) {
 			error("Unable to create directory %s: %s",
 			      directory, strerror(rc));
+			/*
+			 * fd might be opened from the previous call to
+			 * _open_as_other() for the file that is being
+			 * transmitted and won't be cleaned up otherwise, so
+			 * close it here.
+			 */
+			if (fd > 0)
+				close(fd);
 			return rc;
 		}
 
@@ -4626,7 +4710,7 @@ _kill_all_active_steps(uint32_t jobid, int sig, int flags, char *details,
 
 /*
  * ume_notify - Notify all jobs and steps on this node that a Uncorrectable
- *	Memory Error (UME) has occured by sending SIG_UME (to log event in
+ *	Memory Error (UME) has occurred by sending SIG_UME (to log event in
  *	stderr)
  * RET count of signaled job steps
  */
@@ -5182,8 +5266,7 @@ _rpc_abort_job(slurm_msg_t *msg)
 	node_id = nodelist_find(req->nodes, conf->node_name);
 #endif
 	memset(&job_env, 0, sizeof(job_env));
-	gres_g_epilog_set_env(&job_env.gres_job_env, req->job_gres_info,
-			      node_id);
+	gres_g_prep_set_env(&job_env.gres_job_env, req->job_gres_prep, node_id);
 	job_env.jobid = req->step_id.job_id;
 	job_env.derived_ec = req->derived_ec;
 	job_env.exit_code = req->exit_code;
@@ -5436,8 +5519,7 @@ _rpc_terminate_job(slurm_msg_t *msg)
 	node_id = nodelist_find(req->nodes, conf->node_name);
 #endif
 	memset(&job_env, 0, sizeof(job_env));
-	gres_g_epilog_set_env(&job_env.gres_job_env, req->job_gres_info,
-			      node_id);
+	gres_g_prep_set_env(&job_env.gres_job_env, req->job_gres_prep, node_id);
 
 	job_env.jobid = req->step_id.job_id;
 	job_env.derived_ec = req->derived_ec;
@@ -6208,13 +6290,13 @@ static void _launch_complete_rm(uint32_t job_id)
 
 static void _launch_complete_wait(uint32_t job_id)
 {
-	int i, j, empty;
+	int j, empty;
 	time_t start = time(NULL);
 	struct timeval now;
 	struct timespec timeout;
 
 	slurm_mutex_lock(&job_state_mutex);
-	for (i = 0; ; i++) {
+	while (true) {
 		empty = -1;
 		for (j = 0; j < JOB_STATE_CNT; j++) {
 			if (job_id == active_job_id[j].job_id)

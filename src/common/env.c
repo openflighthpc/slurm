@@ -59,7 +59,7 @@
 #include "src/common/macros.h"
 #include "src/common/proc_args.h"
 #include "src/common/read_config.h"
-#include "src/common/select.h"
+#include "src/interfaces/select.h"
 #include "src/common/slurm_opt.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
@@ -619,6 +619,14 @@ int setup_env(env_t *env, bool preserve_env)
 		rc = SLURM_ERROR;
 	}
 
+	if (env->job_end_time) {
+		if (setenvf(&env->env, "SLURM_JOB_END_TIME", "%lu",
+			    env->job_end_time)) {
+			error("Unable to set SLURM_JOB_END_TIME environment variable");
+			rc = SLURM_ERROR;
+		}
+	}
+
 	if (env->jobid >= 0) {
 		if (setenvf(&env->env, "SLURM_JOB_ID", "%d", env->jobid)) {
 			error("Unable to set SLURM_JOB_ID environment");
@@ -631,9 +639,25 @@ int setup_env(env_t *env, bool preserve_env)
 		}
 	}
 
+	if (env->job_licenses) {
+		if (setenvf(&env->env, "SLURM_JOB_LICENSES", "%s",
+			    env->job_licenses)) {
+			error("Unable to set SLURM_JOB_LICENSES environment");
+			rc = SLURM_ERROR;
+		}
+	}
+
 	if (env->job_name) {
 		if (setenvf(&env->env, "SLURM_JOB_NAME", "%s", env->job_name)) {
 			error("Unable to set SLURM_JOB_NAME environment");
+			rc = SLURM_ERROR;
+		}
+	}
+
+	if (env->job_start_time) {
+		if (setenvf(&env->env, "SLURM_JOB_START_TIME", "%lu",
+			    env->job_start_time)) {
+			error("Unable to set SLURM_JOB_START_TIME environment");
 			rc = SLURM_ERROR;
 		}
 	}
@@ -758,14 +782,32 @@ int setup_env(env_t *env, bool preserve_env)
 		rc = SLURM_ERROR;
 	}
 
-	if (env->user_name) {
+	if (env->uid != SLURM_AUTH_NOBODY) {
 		if (setenvf(&env->env, "SLURM_JOB_UID", "%u",
 			    (unsigned int) env->uid)) {
 			error("Can't set SLURM_JOB_UID env variable");
 			rc = SLURM_ERROR;
 		}
+	}
+
+	if (env->user_name) {
 		if (setenvf(&env->env, "SLURM_JOB_USER", "%s", env->user_name)){
 			error("Can't set SLURM_JOB_USER env variable");
+			rc = SLURM_ERROR;
+		}
+	}
+
+	if (env->gid != SLURM_AUTH_NOBODY) {
+		if (setenvf(&env->env, "SLURM_JOB_GID", "%u", env->gid)) {
+			error("Can't set SLURM_JOB_GID env variable");
+			rc = SLURM_ERROR;
+		}
+	}
+
+	if (env->group_name) {
+		if (setenvf(&env->env, "SLURM_JOB_GROUP", "%s",
+			    env->group_name)) {
+			error("Can't set SLURM_JOB_GROUP env variable");
 			rc = SLURM_ERROR;
 		}
 	}
@@ -1234,11 +1276,11 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 					cpus_per_task);
 
 	if (step_layout_req.num_tasks) {
-		env_array_append_fmt(dest, "SLURM_NTASKS", "%u",
-				     step_layout_req.num_tasks);
+		env_array_overwrite_fmt(dest, "SLURM_NTASKS", "%u",
+					step_layout_req.num_tasks);
 		/* keep around for old scripts */
-		env_array_append_fmt(dest, "SLURM_NPROCS", "%u",
-				     step_layout_req.num_tasks);
+		env_array_overwrite_fmt(dest, "SLURM_NPROCS", "%u",
+					step_layout_req.num_tasks);
 	} else {
 		/*
 		 * Iterate over all kind of cluster nodes, and accum. the number
@@ -1897,10 +1939,12 @@ char **env_array_from_file(const char *fname)
 	return env;
 }
 
-int env_array_to_file(const char *filename, const char **env_array)
+int env_array_to_file(const char *filename, const char **env_array,
+		      bool newline)
 {
 	int outfd = -1;
 	int rc = SLURM_SUCCESS;
+	const char *terminator = newline ? "\n" : "\0";
 
 	outfd = open(filename, (O_WRONLY | O_CREAT | O_EXCL), 0600);
 	if (outfd < 0) {
@@ -1910,8 +1954,16 @@ int env_array_to_file(const char *filename, const char **env_array)
 	}
 
 	for (const char **p = env_array; p && *p; p++) {
+		/* skip any env variables with a newline in newline mode */
+		if (newline && xstrstr(*p, "\n")) {
+			log_flag_hex(STEPS, *p, strlen(*p),
+				     "%s: skiping environment variable with newline",
+				     __func__);
+			continue;
+		}
+
 		safe_write(outfd, *p, strlen(*p));
-		safe_write(outfd, "\0", 1);
+		safe_write(outfd, terminator, 1);
 	}
 
 	(void) close(outfd);
@@ -2285,6 +2337,11 @@ extern void set_env_from_opts(slurm_opt_t *opt, char ***dest,
 					    het_job_offset, "%"PRIu64,
 					    opt->mem_per_gpu);
 	}
+	if (opt->tres_per_task) {
+		env_array_overwrite_het_fmt(dest, "SLURM_TRES_PER_TASK",
+					    het_job_offset, "%s",
+					    opt->tres_per_task);
+	}
 }
 
 extern char *find_quote_token(char *tmp, char *sep, char **last)
@@ -2377,4 +2434,20 @@ extern void env_merge_filter(slurm_opt_t *opt, job_desc_msg_t *desc)
 		env_array_merge(&desc->environment,
 				(const char **)save_env);
 	}
+}
+
+extern char **env_array_exclude(const char **env, const regex_t *regex)
+{
+	/* alloc with NULL termination */
+	char **purged = xcalloc(1, sizeof(char *));
+
+	/* use regex to skip every matching variable */
+	for (; *env; env++) {
+		if (!regex_quick_match(*env, regex)) {
+			char **e = _extend_env(&purged);
+			*e = xstrdup(*env);
+		}
+	}
+
+	return purged;
 }

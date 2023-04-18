@@ -42,20 +42,22 @@
 
 
 #include "src/common/bitstring.h"
-#include "src/common/cli_filter.h"
+#include "src/interfaces/cli_filter.h"
 #include "src/common/cron.h"
 #include "src/common/env.h"
 #include "src/common/fetch_config.h"
 #include "src/common/log.h"
-#include "src/common/plugstack.h"
 #include "src/common/ref.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_opt.h"
+#include "src/common/spank.h"
 #include "src/common/uid.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
 #include "scrontab.h"
+
+#define OPT_LONG_AUTOCOMP 0x100
 
 static void _usage(void);
 
@@ -90,34 +92,49 @@ static void _usage(void)
 static void _parse_args(int argc, char **argv)
 {
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
-	int c = 0;
+	int c = 0, option_index = 0;
+
+	static struct option long_options[] = {
+		{"autocomplete", required_argument, 0, OPT_LONG_AUTOCOMP},
+		/* invalid option definition; needed for suggest_completion() */
+		{NULL, no_argument, 0, 'e'},
+		{NULL, no_argument, 0, 'l'},
+		{NULL, no_argument, 0, 'r'},
+		{NULL, required_argument, 0, 'u'},
+		{NULL, no_argument, 0, 'v'},
+		{NULL, 0, 0, 0}};
 
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 	uid = getuid();
 	gid = getgid();
 
 	opterr = 0;
-	while ((c = getopt(argc, argv, "elru:v")) != -1) {
+	while ((c = getopt_long(argc, argv, "elru:v",
+				long_options, &option_index)) != -1) {
 		switch (c) {
-		case 'e':
+		case (int)'e':
 			if (!isatty(STDIN_FILENO))
 				fatal("Standard input is not a TTY");
 			edit_only = true;
 			break;
-		case 'l':
+		case (int)'l':
 			list_only = true;
 			break;
-		case 'r':
+		case (int)'r':
 			remove_only = true;
 			break;
-		case 'u':
+		case (int)'u':
 			if (uid_from_string(optarg, &uid))
 				fatal("Could not find user %s", optarg);
 			gid = gid_from_uid(uid);
 			break;
-		case 'v':
+		case (int)'v':
 			logopt.stderr_level++;
 			log_alter(logopt, 0, NULL);
+			break;
+		case OPT_LONG_AUTOCOMP:
+			suggest_completion(long_options, optarg);
+			exit(0);
 			break;
 		default:
 			_usage();
@@ -174,7 +191,7 @@ static void _update_crontab_with_disabled_lines(char **crontab,
 	}
 	xfree(*crontab);
 	*crontab = new_crontab;
-	bit_free(disabled);
+	FREE_NULL_BITMAP(disabled);
 	xfree(lines);
 }
 
@@ -325,10 +342,6 @@ static job_desc_msg_t *_entry_to_job(cron_entry_t *entry, char *script)
 	job->environment = env_array_create();
 	env_array_overwrite(&job->environment, "SLURM_GET_USER_ENV", "1");
 	job->env_size = envcount(job->environment);
-
-	job->argc = 1;
-	job->argv = xmalloc(sizeof(char *));
-	job->argv[0] = xstrdup(entry->command);
 
 	if (!job->name) {
 		char *pos;
@@ -498,13 +511,13 @@ edit:
 			printf("There are errors in your crontab.\n");
 			xfree(badline);
 			xfree(crontab);
-			list_destroy(jobs);
+			FREE_NULL_LIST(jobs);
 			exit(1);
 		}
 
 		char c = '\0';
 
-		list_destroy(jobs);
+		FREE_NULL_LIST(jobs);
 
 		while (tolower(c) != 'y' && tolower(c) != 'n') {
 			printf("There are errors in your crontab.\n"
@@ -535,12 +548,12 @@ edit:
 				response->err_msg);
 			slurm_free_crontab_update_response_msg(response);
 			xfree(crontab);
-			list_destroy(jobs);
+			FREE_NULL_LIST(jobs);
 			exit(1);
 		}
 
 		char c = '\0';
-		list_destroy(jobs);
+		FREE_NULL_LIST(jobs);
 		while (tolower(c) != 'y' && tolower(c) != 'n') {
 			printf("There was an issue with the job submission on lines %s\n"
 			       "The error code return was: %s\n"
@@ -563,12 +576,16 @@ edit:
 		goto edit;
 	}
 
+	if (response->job_submit_user_msg)
+		print_multi_line_string(response->job_submit_user_msg, -1,
+					LOG_LEVEL_INFO);
+
 	for (int i = 0; i < response->jobids_count; i++)
 		cli_filter_g_post_submit(0, response->jobids[i], NO_VAL);
 
 	slurm_free_crontab_update_response_msg(response);
 	xfree(crontab);
-	list_destroy(jobs);
+	FREE_NULL_LIST(jobs);
 }
 
 static void _handle_first_form(char **new_crontab)
@@ -597,7 +614,7 @@ extern int main(int argc, char **argv)
 	int rc;
 	char *crontab = NULL, *disabled_lines = NULL;
 
-	slurm_conf_init(NULL);
+	slurm_init(NULL);
 	_parse_args(argc, argv);
 
 	if (!xstrcasestr(slurm_conf.scron_params, "enable"))

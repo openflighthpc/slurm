@@ -43,7 +43,7 @@
 #include "as_mysql_usage.h"
 #include "as_mysql_wckey.h"
 
-#include "src/common/select.h"
+#include "src/interfaces/select.h"
 #include "src/common/slurm_time.h"
 
 extern int as_mysql_get_fed_cluster_id(mysql_conn_t *mysql_conn,
@@ -450,7 +450,12 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 			assoc->user = xstrdup("root");
 			assoc->acct = xstrdup("root");
 			assoc->is_def = 1;
-
+			/*
+			 * If the cluster is registering then don't add to the
+			 * update_list.
+			 */
+			if (object->flags & CLUSTER_FLAG_REGISTER)
+				assoc->flags |= ASSOC_FLAG_NO_UPDATE;
 			if (as_mysql_add_assocs(mysql_conn, uid, assoc_list)
 			    == SLURM_ERROR) {
 				error("Problem adding root user association");
@@ -1558,6 +1563,7 @@ extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
 	time_t now = time(NULL);
 	char *query = NULL;
 	bool free_it = false;
+	bool affected_rows = false;
 
 	if (check_connection(mysql_conn) != SLURM_SUCCESS)
 		return ESLURM_DB_CONNECTION;
@@ -1580,7 +1586,11 @@ extern int as_mysql_fini_ctld(mysql_conn_t *mysql_conn,
 	if (rc != SLURM_SUCCESS)
 		return SLURM_ERROR;
 
-	if (!last_affected_rows(mysql_conn) || !slurmdbd_conf->track_ctld ||
+	affected_rows = last_affected_rows(mysql_conn);
+	if (affected_rows)
+		as_mysql_add_feds_to_update_list(mysql_conn);
+
+	if (!affected_rows || !slurmdbd_conf->track_ctld ||
 	    (cluster_rec->flags & CLUSTER_FLAG_EXT))
 		return rc;
 
