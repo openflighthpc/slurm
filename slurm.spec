@@ -1,5 +1,5 @@
 Name:		flight-slurm
-Version:	23.02.1
+Version:	23.02.2
 %define rel	1
 %define flrel 1
 Release:	%{rel}.flight%{flrel}%{?dist}
