@@ -1,4 +1,4 @@
-.TH sbatch "1" "Slurm Commands" "April 2023" "Slurm Commands"
+.TH sbatch "1" "Slurm Commands" "June 2023" "Slurm Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to Slurm.
@@ -140,7 +140,7 @@ For example "\-\-array=0\-15%4" will limit the number of simultaneously
 running tasks from this job array to 4.
 The minimum index value is 0.
 the maximum value is one less than the configuration parameter MaxArraySize.
-NOTE: currently, federated job arrays only run on the local cluster.
+\fBNOTE\fR: Currently, federated job arrays only run on the local cluster.
 .IP
 
 .TP
@@ -414,17 +414,19 @@ plugins, both of which can modify the node ordering.
 
 .TP
 \fB\-S\fR, \fB\-\-core\-spec\fR=<\fInum\fR>
-Count of specialized cores per node reserved by the job for system operations
-and not used by the application. The application will not use these cores,
-but will be charged for their allocation.
-Default value is dependent upon the node's configured CoreSpecCount value.
-If a value of zero is designated and the Slurm configuration option
-AllowSpecResourcesUsage is enabled, the job will be allowed to override
-CoreSpecCount and use the specialized resources on nodes it is allocated.
+Count of Specialized Cores per node reserved by the job for system operations
+and not used by the application.
+If AllowSpecResourcesUsage is enabled a job can override the CoreSpecCount of
+all its allocated nodes with this option.
+The overridden Specialized Cores will still be reserved for system processes.
+The job will get an implicit \fB--exclusive\fR allocation for the rest of
+the Cores on the nodes, resulting in the job's processes being able to use (and
+being charged for) all the Cores on the nodes except for the overridden
+Specialized Cores.
 This option can not be used with the \fB\-\-thread\-spec\fR option.
 
 \fBNOTE\fR: Explicitly setting a job's specialized core value implicitly sets
-its --exclusive option, reserving entire nodes for the job.
+the --exclusive option.
 .IP
 
 .TP
@@ -617,7 +619,7 @@ slurm.conf file, otherwise the default value is zero (no delay).
 .TP
 \fB\-d\fR, \fB\-\-dependency\fR=<\fIdependency_list\fR>
 Defer the start of this job until the specified dependencies have been
-satisfied completed.
+satisfied.
 <\fIdependency_list\fR> is of the form
 <\fItype:job_id[:job_id][,type:job_id[:job_id]]\fR> or
 <\fItype:job_id[:job_id][?type:job_id[:job_id]]\fR>.
@@ -706,7 +708,7 @@ job allocation.
 This option controls the distribution of tasks to the nodes on which
 resources have been allocated, and the distribution of those resources
 to tasks for binding (task affinity). The first distribution
-method (before the first ":") controls the distribution of tasks to nodes. 
+method (before the first ":") controls the distribution of tasks to nodes.
 The second distribution method (after the first ":")
 controls the distribution of allocated CPUs across sockets for binding
 to tasks. The third distribution method (after the second ":") controls
@@ -799,7 +801,7 @@ Use the default method for distributing CPUs across sockets (cyclic).
 
 .TP
 .B block
-The block distribution method will distribute allocated CPUs 
+The block distribution method will distribute allocated CPUs
 consecutively from the same socket for binding to tasks, before using
 the next consecutive socket.
 .IP
@@ -808,15 +810,19 @@ the next consecutive socket.
 .B cyclic
 The cyclic distribution method will distribute allocated CPUs for
 binding to a given task consecutively from the same socket, and
-from the next consecutive socket for the next task, in a 
-round\-robin fashion across sockets. 
+from the next consecutive socket for the next task, in a
+round\-robin fashion across sockets.
 Tasks requiring more than one CPU will have all of those CPUs allocated on a
 single socket if possible.
+.br
+\fBNOTE\fR: In nodes with hyper-threading enabled, a task not requesting full
+cores may be distributed across sockets. This can be avoided by specifying
+\fB\-\-ntasks\-per\-core=1\fR, which forces tasks to allocate full cores.
 .IP
 
 .TP
 .B fcyclic
-The fcyclic distribution method will distribute allocated CPUs 
+The fcyclic distribution method will distribute allocated CPUs
 for binding to tasks from consecutive sockets in a
 round\-robin fashion across the sockets.
 Tasks requiring more than one CPU will have each CPUs allocated in a cyclic
@@ -834,7 +840,7 @@ Use the default method for distributing CPUs across cores
 
 .TP
 .B block
-The block distribution method will distribute allocated CPUs 
+The block distribution method will distribute allocated CPUs
 consecutively from the same core for binding to tasks, before using
 the next consecutive core.
 .IP
@@ -843,13 +849,13 @@ the next consecutive core.
 .B cyclic
 The cyclic distribution method will distribute allocated CPUs for
 binding to a given task consecutively from the same core, and
-from the next consecutive core for the next task, in a 
-round\-robin fashion across cores. 
+from the next consecutive core for the next task, in a
+round\-robin fashion across cores.
 .IP
 
 .TP
 .B fcyclic
-The fcyclic distribution method will distribute allocated CPUs 
+The fcyclic distribution method will distribute allocated CPUs
 for binding to tasks from consecutive cores in a
 round\-robin fashion across the cores.
 .IP
@@ -901,15 +907,15 @@ design to support gang scheduling, because suspended jobs still reside in
 memory. To request all the memory on a node, use \fB\-\-mem=0\fR.
 The default shared/exclusive behavior depends on system configuration and the
 partition's \fBOverSubscribe\fR option takes precedence over the job's option.
-NOTE: Since shared GRES (MPS) cannot be allocated at the same time as a sharing
-GRES (GPU) this option only allocates all sharing GRES and no underlying shared
-GRES.
+\fBNOTE\fR: Since shared GRES (MPS) cannot be allocated at the same time as a
+sharing GRES (GPU) this option only allocates all sharing GRES and no underlying
+shared GRES.
 
 \fBNOTE\fR: This option is mutually exclusive with \fB\-\-oversubscribe\fR.
 .IP
 
 .TP
-\fB\-\-export\fR={[ALL,]<\fIenvironment_variables\fR>|ALL|NONE}
+\fB\-\-export\fR={[ALL,]<\fIenvironment_variables\fR>|ALL|NIL|NONE}
 Identify which environment variables from the submission environment are
 propagated to the launched application. Note that SLURM_* variables are
 always propagated.
@@ -923,11 +929,23 @@ if \fI\-\-get\-user\-env\fR is specified).
 .IP
 
 .TP
+\fB\-\-export\fR=NIL
+Only SLURM_* variables from the user environment will be defined. User must use
+absolute path to the binary to be executed that will define the environment.
+User can not specify explicit environment variables with "NIL".
+
+Unlike NONE, NIL will not automatically create a user's environment using the
+\fI\-\-get\-user\-env\fR mechanism.
+.IP
+
+.TP
 \fB\-\-export\fR=NONE
 Only SLURM_* variables from the user environment will be defined. User must use
 absolute path to the binary to be executed that will define the environment.
 User can not specify explicit environment variables with "NONE".
-\fI\-\-get\-user\-env\fR will be ignored.
+However, Slurm will then implicitly attempt to load the user's environment on
+the node where the script is being executed, as if \fI\-\-get\-user\-env\fR was
+specified.
 
 This option is particularly important for jobs that are submitted on one cluster
 and execute on a different cluster (e.g. with different paths).
@@ -1415,13 +1433,13 @@ options are mutually exclusive. If \fB\-\-mem\fR, \fB\-\-mem\-per\-cpu\fR or
 \fB\-\-mem\-per\-gpu\fR are specified as command line arguments, then they will
 take precedence over the environment.
 
-NOTE: A memory size specification of zero is treated as a special case and
+\fBNOTE\fR: A memory size specification of zero is treated as a special case and
 grants the job access to all of the memory on each node.
 
-NOTE: Enforcement of memory limits currently relies upon the task/cgroup plugin
-or enabling of accounting, which samples memory use on a periodic basis (data
-need not be stored, just collected). In both cases memory use is based upon
-the job's Resident Set Size (RSS). A task may exceed the memory limit until
+\fBNOTE\fR: Enforcement of memory limits currently relies upon the task/cgroup
+plugin or enabling of accounting, which samples memory use on a periodic basis
+(data need not be stored, just collected). In both cases memory use is based
+upon the job's Resident Set Size (RSS). A task may exceed the memory limit until
 the next periodic accounting sample.
 .IP
 
@@ -1439,7 +1457,7 @@ any memory. This option is typically used to ensure that each task is bound to
 the memory closest to its assigned CPU. \fBThe use of any type other than
 "none" or "local" is not recommended.\fR
 
-NOTE: To have Slurm always report on the selected memory binding for
+\fBNOTE\fR: To have Slurm always report on the selected memory binding for
 all commands executed in a shell, you can enable verbose mode by
 setting the SLURM_MEM_BIND environment variable value to "verbose".
 
@@ -1564,7 +1582,7 @@ Also see \fB\-\-mem\fR and \fB\-\-mem\-per\-gpu\fR.
 The \fB\-\-mem\fR, \fB\-\-mem\-per\-cpu\fR and \fB\-\-mem\-per\-gpu\fR
 options are mutually exclusive.
 
-NOTE: If the final amount of memory requested by a job
+\fBNOTE\fR: If the final amount of memory requested by a job
 can't be satisfied by any of the nodes configured in the
 partition, the job will be rejected.
 This could happen if \fB\-\-mem\-per\-cpu\fR is used with the
@@ -1999,7 +2017,7 @@ one task per CPU.
 Normally, \fBsrun\fR will not allocate more than one process per CPU.
 By specifying \fB\-\-overcommit\fR you are explicitly allowing more than one
 process per CPU. However no more than \fBMAX_TASKS_PER_NODE\fR tasks are
-permitted to execute per node.  NOTE: \fBMAX_TASKS_PER_NODE\fR is
+permitted to execute per node.  \fBNOTE\fR: \fBMAX_TASKS_PER_NODE\fR is
 defined in the file \fIslurm.h\fR and is not a variable, it is set at
 Slurm build time.
 .IP
@@ -2304,7 +2322,7 @@ its --exclusive option, reserving entire nodes for the job.
 \fB\-\-threads\-per\-core\fR=<\fIthreads\fR>
 Restrict node selection to nodes with at least the specified number of
 threads per core. In task layout, use the specified maximum number of threads
-per core. NOTE: "Threads" refers to the number of processing units on
+per core. \fBNOTE\fR: "Threads" refers to the number of processing units on
 each core rather than the number of application tasks to be launched per core.
 See additional information under \fB\-B\fR option above when task/affinity
 plugin is enabled.

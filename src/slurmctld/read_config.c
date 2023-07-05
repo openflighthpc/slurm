@@ -1497,6 +1497,18 @@ static void _preserve_dynamic_nodes(node_record_t **old_node_table_ptr,
 		    !IS_NODE_DYNAMIC_NORM(node_ptr))
 			continue;
 
+		/*
+		 * reset values that will be set later in
+		 * _sync_nodes_to_jobs()
+		 */
+		node_ptr->comp_job_cnt = 0;
+		node_ptr->no_share_job_cnt = 0;
+		node_ptr->owner = NO_VAL;
+		node_ptr->owner_job_cnt = 0;
+		node_ptr->run_job_cnt = 0;
+		node_ptr->sus_job_cnt = 0;
+		xfree(node_ptr->mcs_label);
+
 		insert_node_record(node_ptr);
 		old_node_table_ptr[i] = NULL;
 
@@ -2625,7 +2637,6 @@ static int _restore_node_state(int recover,
 		node_ptr->weight        = old_node_ptr->weight;
 		node_ptr->tot_cores = node_ptr->tot_sockets * node_ptr->cores;
 		node_ptr->resume_after = old_node_ptr->resume_after;
-		node_ptr->sus_job_cnt   = old_node_ptr->sus_job_cnt;
 
 		FREE_NULL_LIST(node_ptr->gres_list);
 		node_ptr->gres_list = old_node_ptr->gres_list;
@@ -3239,7 +3250,7 @@ static int _sync_nodes_to_active_job(job_record_t *job_ptr)
 	int cnt = 0;
 	uint32_t node_flags;
 	node_record_t *node_ptr;
-	bitstr_t *node_bitmap;
+	bitstr_t *node_bitmap, *orig_job_node_bitmap = NULL;
 
 	if (job_ptr->node_bitmap_cg) /* job completing */
 		node_bitmap = job_ptr->node_bitmap_cg;
@@ -3293,6 +3304,16 @@ static int _sync_nodes_to_active_job(job_record_t *job_ptr)
 			int save_accounting_enforce;
 			info("Removing failed node %s from %pJ",
 			     node_ptr->name, job_ptr);
+
+			/*
+			 * Save the original node bitmap, which is needed for
+			 * rebuild_step_bitmaps below
+			 */
+			if (!orig_job_node_bitmap)
+				orig_job_node_bitmap =
+					bit_copy(job_ptr->job_resrcs->
+						 node_bitmap);
+
 			/*
 			 * Disable accounting here. Accounting reset for all
 			 * jobs in _restore_job_accounting()
@@ -3317,6 +3338,12 @@ static int _sync_nodes_to_active_job(job_record_t *job_ptr)
 					       node_flags;
 		}
 	}
+
+	/* If the job was resized then resize the bitmaps of the job's steps */
+	if (job_ptr->bit_flags & JOB_RESIZED) {
+		rebuild_step_bitmaps(job_ptr, orig_job_node_bitmap);
+	}
+	FREE_NULL_BITMAP(orig_job_node_bitmap);
 
 	if ((IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr)) &&
 	    (job_ptr->front_end_ptr != NULL))

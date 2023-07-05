@@ -97,6 +97,7 @@
 #include "src/interfaces/acct_gather_profile.h"
 #include "src/interfaces/core_spec.h"
 #include "src/interfaces/cred.h"
+#include "src/interfaces/gpu.h"
 #include "src/interfaces/gres.h"
 #include "src/interfaces/job_container.h"
 #include "src/interfaces/jobacct_gather.h"
@@ -164,8 +165,6 @@ static int sig_array[] = {SIGTERM, 0};
 /*
  * step manager related prototypes
  */
-static bool _access(const char *path, int modes, uid_t uid,
-		    int ngids, gid_t *gids);
 static void _send_launch_failure(launch_tasks_request_msg_t *,
 				 slurm_addr_t *, int, uint16_t);
 static int  _fork_all_tasks(stepd_step_rec_t *step, bool *io_initialized);
@@ -274,16 +273,26 @@ _send_srun_resp_msg(slurm_msg_t *resp_msg, uint32_t nnodes)
 static void _local_jobacctinfo_aggregate(
 	jobacctinfo_t *dest, jobacctinfo_t *from)
 {
+	int gpumem_pos = -1, gpuutil_pos = -1;
+
+	gpu_get_tres_pos(&gpumem_pos, &gpuutil_pos);
+
 	/*
 	 * Here to make any sense for some variables we need to move the
-	 * Max to the total (i.e. Mem VMem) since the total might be
-	 * incorrect data, this way the total/ave will be of the Max
+	 * Max to the total (i.e. Mem, VMem, gpumem, gpuutil) since the total
+	 * might be incorrect data, this way the total/ave will be of the Max
 	 * values.
 	 */
 	from->tres_usage_in_tot[TRES_ARRAY_MEM] =
 		from->tres_usage_in_max[TRES_ARRAY_MEM];
 	from->tres_usage_in_tot[TRES_ARRAY_VMEM] =
 		from->tres_usage_in_max[TRES_ARRAY_VMEM];
+	if (gpumem_pos != -1)
+		from->tres_usage_in_tot[gpumem_pos] =
+			from->tres_usage_in_max[gpumem_pos];
+	if (gpuutil_pos != -1)
+		from->tres_usage_in_tot[gpuutil_pos] =
+			from->tres_usage_in_max[gpuutil_pos];
 
 	/*
 	 * Here ave_watts stores the ave of the watts collected so store that
@@ -2854,44 +2863,6 @@ _become_user(stepd_step_rec_t *step, struct priv_state *ps)
 }
 
 /*
- * Check this user's access rights to a file
- * path IN: pathname of file to test
- * modes IN: desired access
- * uid IN: user ID to access the file
- * gid IN: group ID to access the file
- * RET true on success, false on failure
- */
-static bool _access(const char *path, int modes, uid_t uid,
-		    int ngids, gid_t *gids)
-{
-	struct stat buf;
-	int f_mode, i;
-
-	if (!gids)
-		return false;
-
-	if (stat(path, &buf) != 0)
-		return false;
-
-	if (buf.st_uid == uid)
-		f_mode = (buf.st_mode >> 6) & 07;
-	else {
-		for (i=0; i < ngids; i++)
-			if (buf.st_gid == gids[i])
-				break;
-		if (i < ngids)	/* one of the gids matched */
-			f_mode = (buf.st_mode >> 3) & 07;
-		else		/* uid and gid failed, test against all */
-			f_mode = buf.st_mode & 07;
-	}
-
-	if ((f_mode & modes) == modes)
-		return true;
-
-	return false;
-}
-
-/*
  * Run a script as a specific user, with the specified uid, gid, and
  * extended groups.
  *
@@ -2902,7 +2873,7 @@ static bool _access(const char *path, int modes, uid_t uid,
  * env IN: environment variables to use on exec, sets minimal environment
  *	if NULL
  *
- * RET 0 on success, -1 on failure.
+ * RET 0 on success, -1 on early failure, or the return from execve().
  */
 int
 _run_script_as_user(const char *name, const char *path, stepd_step_rec_t *step,
@@ -2918,11 +2889,6 @@ _run_script_as_user(const char *name, const char *path, stepd_step_rec_t *step,
 
 	debug("[job %u] attempting to run %s [%s]",
 	      step->step_id.job_id, name, path);
-
-	if (!_access(path, 5, step->uid, step->ngids, step->gids)) {
-		error("Could not run %s [%s]: access denied", name, path);
-		return -1;
-	}
 
 	if ((ei = _fork_child_with_wait_info(0)) == NULL) {
 		error ("executing %s: fork: %m", name);
@@ -2997,6 +2963,10 @@ _run_script_as_user(const char *name, const char *path, stepd_step_rec_t *step,
 				/* System limit on open files or memory reached,
 				 * retry after short delay */
 				sleep(1);
+			} else if (errno == EACCES) {
+				error("Could not run %s [%s]: access denied",
+				      name, path);
+				break;
 			} else {
 				break;
 			}
@@ -3035,5 +3005,7 @@ _run_script_as_user(const char *name, const char *path, stepd_step_rec_t *step,
 	/* Ensure that all child processes get killed, one last time */
 	killpg(cpid, SIGKILL);
 
+	if (WIFEXITED(status))
+		return WEXITSTATUS(status);
 	return status;
 }

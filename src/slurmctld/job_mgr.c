@@ -4252,6 +4252,7 @@ extern int kill_running_job_by_node_name(char *node_name)
 	ListIterator job_iterator;
 	job_record_t *job_ptr;
 	node_record_t *node_ptr;
+	bitstr_t *orig_job_node_bitmap;
 	int kill_job_cnt = 0;
 	time_t now = time(NULL);
 
@@ -4265,6 +4266,7 @@ extern int kill_running_job_by_node_name(char *node_name)
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = list_next(job_iterator))) {
 		bool suspended = false;
+		job_resources_t *job_resrcs_ptr = job_ptr->job_resrcs;
 		if (!_het_job_on_node(job_ptr, node_ptr->index))
 			continue;	/* job not on this node */
 		if (IS_JOB_SUSPENDED(job_ptr)) {
@@ -4311,7 +4313,13 @@ extern int kill_running_job_by_node_name(char *node_name)
 				      node_name, job_ptr);
 				job_pre_resize_acctg(job_ptr);
 				kill_step_on_node(job_ptr, node_ptr, true);
+				orig_job_node_bitmap =
+					bit_copy(job_resrcs_ptr->node_bitmap);
 				excise_node_from_job(job_ptr, node_ptr);
+				/* Resize the bitmaps of the job's steps */
+				rebuild_step_bitmaps(job_ptr,
+						     orig_job_node_bitmap);
+				FREE_NULL_BITMAP(orig_job_node_bitmap);
 				(void) gs_job_start(job_ptr);
 				gres_ctld_job_build_details(
 					job_ptr->gres_list_alloc,
@@ -12442,6 +12450,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 	job_details_t *detail_ptr;
 	part_record_t *new_part_ptr = NULL, *use_part_ptr = NULL;
 	bitstr_t *exc_bitmap = NULL, *new_req_bitmap = NULL;
+	bitstr_t *orig_job_node_bitmap = NULL;
 	time_t now = time(NULL);
 	multi_core_data_t *mc_ptr = NULL;
 	bool update_accounting = false, new_req_bitmap_given = false;
@@ -12762,11 +12771,85 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 	}
 
 	/*
+	 * Before any action over excluded or required nodes, we are going to
+	 * reset them to their original values.
+	 *
+	 * We will decide later if those values need update, or even if we need
+	 * to merge the negated required list into the excluded one (when
+	 * -N < size required list).
+	 */
+	FREE_NULL_BITMAP(detail_ptr->exc_node_bitmap);
+	if (detail_ptr->exc_nodes) {
+		/* This error should never happen */
+		if (node_name2bitmap(detail_ptr->exc_nodes,
+				     false, &exc_bitmap)) {
+			sched_info("%s: Invalid excluded nodes list in job records: %s",
+				   __func__, detail_ptr->exc_nodes);
+			FREE_NULL_BITMAP(exc_bitmap);
+			error_code = ESLURM_INVALID_NODE_NAME;
+			goto fini;
+		}
+		detail_ptr->exc_node_bitmap = exc_bitmap;
+		exc_bitmap = NULL;
+	}
+	FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
+	if (detail_ptr->req_nodes) {
+		/* This error should never happen */
+		if (node_name2bitmap(detail_ptr->req_nodes,
+				     false, &new_req_bitmap)) {
+			sched_info("%s: Invalid required nodes list in job records: %s",
+				   __func__, detail_ptr->req_nodes);
+			FREE_NULL_BITMAP(new_req_bitmap);
+			error_code = ESLURM_INVALID_NODE_NAME;
+			goto fini;
+		}
+		detail_ptr->req_node_bitmap = new_req_bitmap;
+		new_req_bitmap = NULL;
+	}
+
+	if (job_desc->exc_nodes && detail_ptr &&
+	    !xstrcmp(job_desc->exc_nodes, detail_ptr->exc_nodes)) {
+		sched_debug("%s: new exc_nodes identical to old exc_nodes %s",
+			    __func__, job_desc->exc_nodes);
+	} else if (job_desc->exc_nodes) {
+		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
+			error_code = ESLURM_JOB_NOT_PENDING;
+		else if (job_desc->exc_nodes[0] == '\0') {
+			xfree(detail_ptr->exc_nodes);
+			FREE_NULL_BITMAP(detail_ptr->exc_node_bitmap);
+		} else {
+			if (node_name2bitmap(job_desc->exc_nodes, false,
+					     &exc_bitmap)) {
+				sched_error("%s: Invalid node list for update of %pJ: %s",
+					    __func__, job_ptr,
+					    job_desc->exc_nodes);
+				FREE_NULL_BITMAP(exc_bitmap);
+				error_code = ESLURM_INVALID_NODE_NAME;
+			}
+			if (exc_bitmap) {
+				xfree(detail_ptr->exc_nodes);
+				detail_ptr->exc_nodes =
+					xstrdup(job_desc->exc_nodes);
+				FREE_NULL_BITMAP(detail_ptr->exc_node_bitmap);
+				detail_ptr->exc_node_bitmap = exc_bitmap;
+				sched_info("%s: setting exc_nodes to %s for %pJ",
+					   __func__, job_desc->exc_nodes, job_ptr);
+			}
+		}
+	}
+	if (error_code != SLURM_SUCCESS)
+		goto fini;
+
+	/*
 	 * Must check req_nodes to set the job_ptr->details->req_node_bitmap
 	 * before we validate it later.
 	 */
-	if (job_desc->req_nodes &&
-	    (IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr))) {
+	if (job_desc->req_nodes && detail_ptr &&
+	    !xstrcmp(job_desc->req_nodes, detail_ptr->req_nodes)) {
+		sched_debug("%s: new req_nodes identical to old req_nodes %s",
+			    __func__, job_desc->req_nodes);
+	} else if (job_desc->req_nodes &&
+		   (IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr))) {
 		/*
 		 * Use req_nodes to change the nodes associated with a running
 		 * for lack of other field in the job request to use
@@ -12823,12 +12906,18 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 #ifndef HAVE_FRONT_END
 			abort_job_on_nodes(job_ptr, rem_nodes);
 #endif
+			orig_job_node_bitmap =
+				bit_copy(job_ptr->job_resrcs->node_bitmap);
 			for (int i = 0;
 			     (node_ptr = next_node_bitmap(rem_nodes, &i));
 			     i++) {
 				kill_step_on_node(job_ptr, node_ptr, false);
 				excise_node_from_job(job_ptr, node_ptr);
 			}
+			/* Resize the core bitmaps of the job's steps */
+			rebuild_step_bitmaps(job_ptr, orig_job_node_bitmap);
+
+			FREE_NULL_BITMAP(orig_job_node_bitmap);
 			FREE_NULL_BITMAP(rem_nodes);
 			(void) gs_job_start(job_ptr);
 			gres_ctld_job_build_details(job_ptr->gres_list_alloc,
@@ -12864,6 +12953,17 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
+
+	if (new_req_bitmap_given) {
+		xfree(detail_ptr->req_nodes);
+		if (job_desc->req_nodes[0] != '\0')
+			detail_ptr->req_nodes =	xstrdup(job_desc->req_nodes);
+		FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
+		detail_ptr->req_node_bitmap = new_req_bitmap;
+		new_req_bitmap = NULL;
+		sched_info("%s: setting req_nodes to %s for %pJ",
+			   __func__, job_desc->req_nodes, job_ptr);
+	}
 
 	/* this needs to be after partition and QOS checks */
 	if (job_desc->reservation
@@ -12907,6 +13007,9 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 				    && use_qos_ptr->flags & QOS_FLAG_REQ_RESV)
 					error_code = ESLURM_INVALID_QOS;
 			}
+
+			if (job_ptr->state_reason == WAIT_RESV_INVALID)
+				_release_job(job_ptr, uid);
 
 			xfree(tmp_job_rec.resv_name);
 		}
@@ -13102,38 +13205,6 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
 
-	if (job_desc->exc_nodes && detail_ptr &&
-	    !xstrcmp(job_desc->exc_nodes, detail_ptr->exc_nodes)) {
-		sched_debug("%s: new exc_nodes identical to old exc_nodes %s",
-			    __func__, job_desc->exc_nodes);
-	} else if (job_desc->exc_nodes) {
-		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
-			error_code = ESLURM_JOB_NOT_PENDING;
-		else if (job_desc->exc_nodes[0] == '\0') {
-			xfree(detail_ptr->exc_nodes);
-			FREE_NULL_BITMAP(detail_ptr->exc_node_bitmap);
-		} else {
-			if (node_name2bitmap(job_desc->exc_nodes, false,
-					     &exc_bitmap)) {
-				sched_error("%s: Invalid node list for update of %pJ: %s",
-					    __func__, job_ptr,
-					    job_desc->exc_nodes);
-				FREE_NULL_BITMAP(exc_bitmap);
-				error_code = ESLURM_INVALID_NODE_NAME;
-			}
-			if (exc_bitmap) {
-				xfree(detail_ptr->exc_nodes);
-				detail_ptr->exc_nodes =
-					xstrdup(job_desc->exc_nodes);
-				FREE_NULL_BITMAP(detail_ptr->exc_node_bitmap);
-				detail_ptr->exc_node_bitmap = exc_bitmap;
-				sched_info("%s: setting exc_nodes to %s for %pJ",
-					   __func__, job_desc->exc_nodes, job_ptr);
-			}
-		}
-	}
-	if (error_code != SLURM_SUCCESS)
-		goto fini;
 
 	if (job_desc->min_nodes == INFINITE) {
 		/* Used by scontrol just to get current configuration info */
@@ -13350,37 +13421,10 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		acct_policy_add_job_submit(job_ptr);
 	}
 
-	if (new_req_bitmap_given) {
-		xfree(detail_ptr->req_nodes);
-		if (job_desc->req_nodes[0] != '\0')
-			detail_ptr->req_nodes =	xstrdup(job_desc->req_nodes);
-		FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
-		detail_ptr->req_node_bitmap = new_req_bitmap;
-		new_req_bitmap = NULL;
-		sched_info("%s: setting req_nodes to %s for %pJ",
-			   __func__, job_desc->req_nodes, job_ptr);
-
-		/*
-		 * If a nodelist has been provided with more nodes than are
-		 * required for the job, translate this into an exclusion of
-		 * all nodes except those requested.
-		 */
-		if (detail_ptr->req_node_bitmap &&
-		    (bit_set_count(detail_ptr->req_node_bitmap) >
-		     job_desc->min_nodes)) {
-			if (!detail_ptr->exc_node_bitmap)
-				detail_ptr->exc_node_bitmap =
-					bit_alloc(node_record_count);
-			bit_or_not(detail_ptr->exc_node_bitmap,
-				   detail_ptr->req_node_bitmap);
-			FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
-		}
-	}
-
 	if (new_resv_ptr) {
 		FREE_NULL_LIST(job_ptr->resv_list);
 		xfree(job_ptr->resv_name);
-		job_ptr->resv_name = xstrdup(new_resv_ptr->name);
+		job_ptr->resv_name = xstrdup(job_desc->reservation);
 		job_ptr->resv_list = new_resv_list;
 		job_ptr->resv_id = new_resv_ptr->resv_id;
 		job_ptr->resv_ptr = new_resv_ptr;
@@ -13600,6 +13644,25 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 	}
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
+
+	/*
+	 * If the job records now holds a required nodelist with more nodes than
+	 * are required, translate this list into an exclusion of all nodes
+	 * except those requested.
+	 *
+	 * Merge the resulting negated version into the excluded nodelist of the
+	 * job.
+	 */
+	if (detail_ptr->req_node_bitmap &&
+	    (bit_set_count(detail_ptr->req_node_bitmap) >
+	     detail_ptr->min_nodes)) {
+		if (!detail_ptr->exc_node_bitmap)
+			detail_ptr->exc_node_bitmap =
+				bit_alloc(node_record_count);
+		bit_or_not(detail_ptr->exc_node_bitmap,
+			   detail_ptr->req_node_bitmap);
+		FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
+	}
 
 	if (job_desc->time_limit != NO_VAL) {
 		if (IS_JOB_FINISHED(job_ptr) || job_ptr->preempt_time)
@@ -14416,12 +14479,18 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 #ifndef HAVE_FRONT_END
 			abort_job_on_nodes(job_ptr, rem_nodes);
 #endif
+			orig_job_node_bitmap =
+				bit_copy(job_ptr->job_resrcs->node_bitmap);
 			for (int i = 0;
 			     (node_ptr = next_node_bitmap(rem_nodes, &i));
 			     i++) {
 				kill_step_on_node(job_ptr, node_ptr, false);
 				excise_node_from_job(job_ptr, node_ptr);
 			}
+			/* Resize the core bitmaps of the job's steps */
+			rebuild_step_bitmaps(job_ptr, orig_job_node_bitmap);
+
+			FREE_NULL_BITMAP(orig_job_node_bitmap);
 			FREE_NULL_BITMAP(rem_nodes);
 			FREE_NULL_BITMAP(tmp_nodes);
 			(void) gs_job_start(job_ptr);
@@ -15404,12 +15473,7 @@ extern void job_post_resize_acctg(job_record_t *job_ptr)
 	 */
 	job_ptr->end_time_exp = job_ptr->end_time;
 
-	/*
-	 * If a job is resized, the core bitmap will differ in the step.
-	 * See rebuild_step_bitmaps(). The problem will go away when we have
-	 * per-node core bitmaps. For now just set a flag that the job was
-	 * resized while there were active job steps.
-	 */
+	/* A job was resized with active job steps */
 	if (job_ptr->step_list && (list_count(job_ptr->step_list) > 0))
 		job_ptr->bit_flags |= JOB_RESIZED;
 }
@@ -16687,6 +16751,7 @@ extern bool job_independent(job_record_t *job_ptr)
 	    (job_ptr->state_reason == WAIT_HELD_USER) ||
 	    (job_ptr->state_reason == WAIT_MAX_REQUEUE) ||
 	    (job_ptr->state_reason == WAIT_RESV_DELETED) ||
+	    (job_ptr->state_reason == WAIT_RESV_INVALID) ||
 	    (job_ptr->state_reason == WAIT_DEP_INVALID))
 		return false;
 
@@ -18372,6 +18437,17 @@ extern int update_job_wckey(char *module, job_record_t *job_ptr,
 	return SLURM_SUCCESS;
 }
 
+/*
+ * Currently only sends active and suspsended jobs not already in the datbase.
+ *
+ * On node changes, we opt not to send updated node_inx's due to the heavy cost
+ * of doing so. If we were to update the job's node_inx's, this could be done by
+ * resizing the job which will create a new db record for the job with the
+ * changed node_inx's -- like how reservations are done.
+ * e.g.
+ * job_pre_resize_acctg(job_ptr);
+ * job_post_resize_acctg(job_ptr);
+ */
 extern int send_jobs_to_accounting(void)
 {
 	ListIterator itr = NULL;
