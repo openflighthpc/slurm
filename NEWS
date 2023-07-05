@@ -1,6 +1,99 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 23.02.3
+==========================
+ -- Fix regression in 23.02.2 that ignored the partition DefCpuPerGPU setting
+    on the first pass of scheduling a job requesting --gpus --ntasks.
+ -- openapi/dbv0.0.39/users - If a default account update failed, resulting in a
+    no-op, the query returned success without any warning. Now a warning is sent
+    back to the client that the default account wasn't modified.
+ -- srun - fix issue creating regular and interactive steps because
+    *_PACK_GROUP* environment variables were incorrectly set on non-HetSteps.
+ -- Fix dynamic nodes getting stuck in allocated states when reconfiguring.
+ -- Avoid job write lock when nodes are dynamically added/removed.
+ -- burst_buffer/lua - allow jobs to get scheduled sooner after
+    slurm_bb_data_in completes.
+ -- mpi/pmix - fix regression introduced in 23.02.2 which caused PMIx shmem
+    backed files permissions to be incorrect.
+ -- api/submit - fix memory leaks when submission of batch regular jobs or batch
+    HetJobs fails (response data is a return code).
+ -- openapi/v0.0.39 - fix memory leak in _job_post_het_submit().
+ -- Fix regression in 23.02.2 that set the SLURM_NTASKS environment variable
+    in sbatch jobs from --ntasks-per-node when --ntasks was not requested.
+ -- Fix regression in 23.02 that caused sbatch jobs to set the wrong number
+    of tasks when requesting --ntasks-per-node without --ntasks, and also
+    requesting one of the following options: --sockets-per-node,
+    --cores-per-socket, --threads-per-core (or --hint=nomultithread), or
+    -B,--extra-node-info.
+ -- Fix double counting suspended job counts on nodes when reconfiguring, which
+    prevented nodes with suspended jobs from being powered down or rebooted
+    once the jobs completed.
+ -- Fix backfill not scheduling jobs submitted with --prefer and --constraint
+    properly.
+ -- Avoid possible slurmctld segfault caused by race condition with already
+    completed slurmdbd_conn connections.
+ -- Slurmdbd.conf checks included conf files for 0600 permissions
+ -- slurmrestd - fix regression "oversubscribe" fields were removed from job
+    descriptions and submissions from v0.0.39 end points.
+ -- accounting_storage/mysql - Query for indiviual QOS correctly when you have
+    more than 10.
+ -- Add warning message about ignoring --tres-per-tasks=license when used
+    on a step.
+ -- sshare - Fix command to work when using priority/basic.
+ -- Avoid loading cli_filter plugins outside of salloc/sbatch/scron/srun. This
+    fixes a number of missing symbol problems that can manifest for executables
+    linked against libslurm (and not libslurmfull).
+ -- Allow cloud_reg_addrs to update dynamically registered node's addrs on
+    subsequent registrations.
+ -- switch/hpe_slingshot - Fix hetjob components being assigned different vnis.
+ -- Revert a change in 22.05.5 that prevented tasks from sharing a core if
+    --cpus-per-task > threads per core, but caused incorrect accounting and cpu
+    binding. Instead, --ntasks-per-core=1 may be requested to prevent tasks from
+    sharing a core.
+ -- Correctly send assoc_mgr lock to mcs plugin.
+ -- Fix regression in 23.02 leading to error() messages being sent at INFO
+    instead of ERR in syslog.
+ -- switch/hpe_slingshot - Fix bad instant-on data due to incorrect parsing of
+    data from jackaloped.
+ -- Fix TresUsageIn[Tot|Ave] calculation for gres/gpumem and gres/gpuutil.
+ -- Avoid unnecessary gres/gpumem and gres/gpuutil TRES position lookups.
+ -- Fix issue in the gpu plugins where gpu frequencies would only be set if both
+    gpu memory and gpu frequencies were set, while one or the other suffices.
+ -- Fix reservations group ACL's not working with the root group.
+ -- slurmctld - Fix backup slurmctld crash when it takes control multiple times.
+ -- Fix updating a job with a ReqNodeList greater than the job's node count.
+ -- Fix inadvertent permission denied error for --task-prolog and --task-epilog
+    with filesystems mounted with root_squash.
+ -- switch/hpe_slingshot - remove the unused vni_pids option.
+ -- Fix missing detailed cpu and gres information in json/yaml output from
+    scontrol, squeue and sinfo.
+ -- Fix regression in 23.02 that causes a failure to allocate job steps that
+    request --cpus-per-gpu and gpus with types.
+ -- sacct - when printing PLANNED time, use end time instead of start time for
+    jobs cancelled before they started.
+ -- Fix potentially waiting indefinitely for a defunct process to finish,
+    which affects various scripts including Prolog and Epilog. This could have
+    various symptoms, such as jobs getting stuck in a completing state.
+ -- Hold the job with "(Reservation ... invalid)" state reason if the
+    reservation is not usable by the job.
+ -- Fix losing list of reservations on job when updating job with list of
+    reservations and restarting the controller.
+ -- Fix nodes resuming after down and drain state update requests from
+    clients older than 23.02.
+ -- Fix advanced reservation creation/update when an association that should
+    have access to it is composed with partition(s).
+ -- auth/jwt - Fix memory leak.
+ -- sbatch - Added new --export=NIL option.
+ -- Fix job layout calculations with --ntasks-per-gpu, especially when --nodes
+    has not been explicitly provided.
+ -- Fix X11 forwarding for jobs submitted from the slurmctld host.
+ -- When a job requests --no-kill and one or more nodes fail during the job,
+    fix subsequent job steps unable to use some of the remaining resources
+    allocated to the job.
+ -- Fix shared gres allocation when using --tres-per-task with tasks that span
+    multiple sockets.
+
 * Changes in Slurm 23.02.2
 ==========================
  -- Fix regression introduced with the migration to interfaces which caused

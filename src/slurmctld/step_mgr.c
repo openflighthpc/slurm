@@ -2040,18 +2040,9 @@ static int _pick_step_cores(step_record_t *step_ptr,
 		use_all_cores = false;
 
 		if (step_ptr->cpus_per_task > 0) {
-			if (((ntasks_per_core == INFINITE16) ||
-			     (ntasks_per_core == 1)) &&
-			    (step_ptr->cpus_per_task > cpus_per_core)) {
-				int cores_per_task = step_ptr->cpus_per_task;
-				cores_per_task += (cpus_per_core - 1);
-				cores_per_task /= cpus_per_core;
-				cpu_cnt *= cores_per_task;
-			} else {
-				cpu_cnt *= step_ptr->cpus_per_task;
-				cpu_cnt += (cpus_per_core - 1);
-				cpu_cnt /= cpus_per_core;
-			}
+			cpu_cnt *= step_ptr->cpus_per_task;
+			cpu_cnt += (cpus_per_core - 1);
+			cpu_cnt /= cpus_per_core;
 		}
 
 		log_flag(STEPS, "%s: For step %pS required cores:%u on node: %d available cores: %u",
@@ -2701,12 +2692,12 @@ static void _step_dealloc_lps(step_record_t *step_ptr)
 					    step_ptr->core_bitmap_job);
 		} else if (job_ptr->bit_flags & JOB_RESIZED) {
 			/*
-			 * If a job is resized, the core bitmap will differ in
-			 * the step. See rebuild_step_bitmaps(). The problem
-			 * will go away when we have per-node core bitmaps.
+			 * The step bitmaps should have been resized with
+			 * rebuild_step_bitmaps() to match the job bitmaps, so
+			 * this is an error.
 			 */
-			info("%s: %pS ending, unable to update job's core use information due to job resizing",
-			     __func__, step_ptr);
+			error("%s: %pS ending, unable to update job's core use information due to job resizing",
+			      __func__, step_ptr);
 		} else {
 			error("%s: %pS core_bitmap size mismatch (%d != %d)",
 			      __func__, step_ptr, job_core_size,
@@ -3139,7 +3130,7 @@ extern int step_create(job_step_create_request_msg_t *step_specs,
 				     step_specs->ntasks_per_tres,
 				     step_specs->min_nodes,
 				     &step_gres_list,
-				     job_ptr->gres_list_req, job_ptr->job_id,
+				     job_ptr->job_id,
 				     NO_VAL, &step_specs->num_tasks,
 				     &step_specs->cpu_count, err_msg);
 	if (i != SLURM_SUCCESS) {
@@ -5282,6 +5273,7 @@ static int _rebuild_bitmaps(void *x, void *arg)
 	int i_first, i_last, i_size;
 	int old_core_offset = 0, new_core_offset = 0;
 	bool old_node_set, new_node_set;
+	uint32_t step_id;
 	bitstr_t *orig_step_core_bitmap;
 	step_record_t *step_ptr = (step_record_t *) x;
 	bitstr_t *orig_job_node_bitmap = (bitstr_t *) arg;
@@ -5295,6 +5287,8 @@ static int _rebuild_bitmaps(void *x, void *arg)
 				    job_ptr->job_resrcs->node_bitmap);
 	if (!step_ptr->core_bitmap_job)
 		return 0;
+
+	step_id = step_ptr->step_id.step_id;
 
 	orig_step_core_bitmap = step_ptr->core_bitmap_job;
 	i_size = bit_size(job_ptr->job_resrcs->core_bitmap);
@@ -5316,9 +5310,17 @@ static int _rebuild_bitmaps(void *x, void *arg)
 					continue;
 				bit_set(step_ptr->core_bitmap_job,
 					new_core_offset + j);
-				bit_set(job_ptr->job_resrcs->
-					core_bitmap_used,
-					new_core_offset + j);
+				/*
+				 * Only regular, non-overlapping steps should
+				 * set bits in core_bitmap_used
+				 */
+				if ((step_id != SLURM_INTERACTIVE_STEP) &&
+				    (step_id != SLURM_EXTERN_CONT) &&
+				    (step_id != SLURM_BATCH_SCRIPT) &&
+				    !(step_ptr->flags & SSF_OVERLAP_FORCE))
+					bit_set(job_ptr->job_resrcs->
+						core_bitmap_used,
+						new_core_offset + j);
 			}
 		}
 		if (old_node_set)
@@ -5342,6 +5344,7 @@ extern void rebuild_step_bitmaps(job_record_t *job_ptr,
 	if (job_ptr->step_list == NULL)
 		return;
 
+	log_flag(STEPS, "Resizing steps of %pJ", job_ptr);
 	list_for_each(job_ptr->step_list, _rebuild_bitmaps,
 		      orig_job_node_bitmap);
 

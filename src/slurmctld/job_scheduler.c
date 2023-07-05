@@ -313,6 +313,7 @@ static bool _job_runnable_test1(job_record_t *job_ptr, bool sched_plugin)
 		    (job_ptr->state_reason != WAIT_HELD) &&
 		    (job_ptr->state_reason != WAIT_HELD_USER) &&
 		    (job_ptr->state_reason != WAIT_MAX_REQUEUE) &&
+		    (job_ptr->state_reason != WAIT_RESV_INVALID) &&
 		    (job_ptr->state_reason != WAIT_RESV_DELETED)) {
 			job_ptr->state_reason = WAIT_HELD;
 			xfree(job_ptr->state_desc);
@@ -5253,4 +5254,5 @@ void main_sched_fini(void)
 		return;
 	slurm_cond_broadcast(&sched_cond);
 	pthread_join(thread_id_sched, NULL);
+	thread_id_sched = 0;
 }

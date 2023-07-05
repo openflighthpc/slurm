@@ -857,6 +857,7 @@ test_111_3   /commands/sinfo/test_--json.py
 test_112_#   Testing of slurmrestd options.
 ===========================================
 test_112_1   /commands/slurmrestd/test_options.py
+test_112_2   Test slurmrestd requests
 
 test_113_#   Testing of sprio options.
 ======================================
@@ -940,7 +941,7 @@ test_119_#   Testing of contribs.
 test_119_1   /contribs/openlava/test_lsid.py
 test_119_2   /contribs/torque/qsub/test_basic.py
 
-test_121_#   Testing of gres.
+test_121_#   Testing of mps.
 =============================
 test_121_1   /features/gres/test_mps_options.py
 test_121_2   /features/gres/test_mps--gres=mps_by_job.py
@@ -948,10 +949,12 @@ test_121_2   /features/gres/test_mps--gres=mps_by_job.py
 test_122_#   Testing of job_arrays.
 ===================================
 test_122_1   /features/job_arrays/test_basics.py
+test_122_2   Test job array with gres
 
 test_123_#   Testing of reservations.
 =====================================
 test_123_1   /features/reservations/test_flags.py
+test_123_2   Test RESV_DEL_HOLD
 
 test_124_#   Testing of AccountingStorageEnforce.
 =================================================
@@ -1012,6 +1015,17 @@ test_138_#   Testing stressing cases.
 =====================================
 test_138_1   /stress/test_stdin_broadcast.py
 
+test_140_#   Testing --tres options.
+====================================
+test_140_1   Test --tres-per-task option
+
 test_143_#   Testing --switches.
 ================================
 test_143_1   Test switches with topology/tree + select/cons_tres
+
+test_144_#   Testing of gres.
+================================
+test_144_1   Test --exclusive allocation with gres flagged as explicit
+test_144_2   Test enforce-binding with GPUs that share cores
+test_144_4   Test gres with file or type and --overlap
+test_144_6   Test gres with no_consume flag
