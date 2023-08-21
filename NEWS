@@ -1,6 +1,69 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 23.02.4
+==========================
+ -- Fix sbatch return code when --wait is requested on a job array.
+ -- switch/hpe_slingshot - avoid segfault when running with old libcxi.
+ -- Avoid slurmctld segfault when specifying AccountingStorageExternalHost.
+ -- Fix collected GPUUtilization values for acct_gather_profile plugins.
+ -- Fix slurmrestd handling of job hold/release operations.
+ -- Make spank S_JOB_ARGV item value hold the requested command argv instead of
+    the srun --bcast value when --bcast requested (only in local context).
+ -- Fix step running indefinitely when slurmctld takes more than MessageTimeout
+    to respond. Now, slurmctld will cancel the step when detected, preventing
+    following steps from getting stuck waiting for resources to be released.
+ -- Fix regression to make job_desc.min_cpus accurate again in job_submit when
+    requesting a job with --ntasks-per-node.
+ -- scontrol - Permit changes to StdErr and StdIn for pending jobs.
+ -- scontrol - Reset std{err,in,out} when set to empty string.
+ -- slurmrestd - mark environment as a required field for job submission
+    descriptions.
+ -- slurmrestd - avoid dumping null in OpenAPI schema required fields.
+ -- data_parser/v0.0.39 - avoid rejecting valid memory_per_node formatted as
+    dictionary provided with a job description.
+ -- data_parser/v0.0.39 - avoid rejecting valid memory_per_cpu formatted as
+    dictionary provided with a job description.
+ -- slurmrestd - Return HTTP error code 404 when job query fails.
+ -- slurmrestd - Add return schema to error response to job and license query.
+ -- Fix handling of ArrayTaskThrottle in backfill.
+ -- Fix regression in 23.02.2 when checking gres state on slurmctld startup or
+    reconfigure. Gres changes in the configuration were not updated on slurmctld
+    startup. On startup or reconfigure, these messages were present in the log:
+    "error: Attempt to change gres/gpu Count".
+ -- Fix potential double count of gres when dealing with limits.
+ -- switch/hpe_slingshot - support alternate traffic class names with "TC_"
+    prefix.
+ -- scrontab - Fix cutting off the final character of quoted variables.
+ -- Fix slurmstepd segfault when ContainerPath is not set in oci.conf
+ -- Change the log message warning for rate limited users from debug to verbose.
+ -- Fixed an issue where jobs requesting licenses were incorrectly rejected.
+ -- smail - Fix issues where e-mails at job completion were not being sent.
+ -- scontrol/slurmctld - fix comma parsing when updating a reservation's nodes.
+ -- cgroup/v2 - Avoid capturing log output for ebpf when constraining devices,
+    as this can lead to inadvertent failure if the log buffer is too small.
+ -- Fix --gpu-bind=single binding tasks to wrong gpus, leading to some gpus
+    having more tasks than they should and other gpus being unused.
+ -- Fix main scheduler loop not starting after failover to backup controller.
+ -- Added error message when attempting to use sattach on batch or extern steps.
+ -- Fix regression in 23.02 that causes slurmstepd to crash when srun requests
+    more than TreeWidth nodes in a step and uses the pmi2 or pmix plugin.
+ -- Reject job ArrayTaskThrottle update requests from unprivileged users.
+ -- data_parser/v0.0.39 - populate description fields of property objects in
+    generated OpenAPI specifications where defined.
+ -- slurmstepd - Avoid segfault caused by ContainerPath not being terminated by
+    '/' in oci.conf.
+ -- data_parser/v0.0.39 - Change v0.0.39_job_info response to tag exit_code
+    field as being complex instead of only an unsigned integer.
+ -- job_container/tmpfs - Fix %h and %n substitution in BasePath where %h was
+    substituted as the NodeName instead of the hostname, and %n was substituted
+    as an empty string.
+ -- Fix regression where --cpu-bind=verbose would override TaskPluginParam.
+ -- scancel - Fix --clusters/-M for federations. Only filtered jobs (e.g. -A,
+    -u, -p, etc.) from the specified clusters will be canceled, rather than all
+    jobs in the federation. Specific jobids will still be routed to the origin
+    cluster for cancellation.
+
 * Changes in Slurm 23.02.3
 ==========================
  -- Fix regression in 23.02.2 that ignored the partition DefCpuPerGPU setting
@@ -635,6 +698,9 @@ documents those changes that are of interest to users and administrators.
     preemptable QOS with Flags=NoReserve.
  -- New command scrun has been added. scrun acts as an Open Container Initiative
     (OCI) runtime proxy to run containers seamlessly via Slurm.
+ -- Added support for Linux kernel user namespaces. Process user and group ids
+    are no longer used unless explicitly requested as an argument. They are
+    left as SLURM_AUTH_NOBODY (99) by default.
 
 * Changes in Slurm 22.05.10
 ===========================

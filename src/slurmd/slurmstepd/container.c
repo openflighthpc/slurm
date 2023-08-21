@@ -597,13 +597,13 @@ static char *_generate_spooldir(stepd_step_rec_t *step,
 	char **argv = NULL, *pattern, *path;
 
 	if (oci_conf->container_path) {
-		pattern = oci_conf->container_path;
+		pattern = xstrdup(oci_conf->container_path);
 	} else if (step->step_id.step_id == SLURM_BATCH_SCRIPT) {
-		pattern = "%m/oci-job%j-batch/task-%t/";
+		pattern = xstrdup("%m/oci-job%j-batch/task-%t/");
 	} else if (step->step_id.step_id == SLURM_INTERACTIVE_STEP) {
-		pattern = "%m/oci-job%j-interactive/task-%t/";
+		pattern = xstrdup("%m/oci-job%j-interactive/task-%t/");
 	} else {
-		pattern = "%m/oci-job%j-%s/task-%t/";
+		pattern = xstrdup("%m/oci-job%j-%s/task-%t/");
 	}
 
 	if (task) {
@@ -631,22 +631,24 @@ static char *_generate_spooldir(stepd_step_rec_t *step,
 				next = end + 1;
 			}
 
-			term = end[1];
-			end[1] = '\0';
+			term = *end;
+			*end = '\0';
 
 			if (_pattern_has_taskid(start)) {
 				/* cut pattern at this directory */
 				*start = '\0';
+				*end = term;
 				break;
 			}
 
-			end[1] = term;
+			*end = term;
 		}
 	}
 
 	xassert((id != -1) || !xstrstr(pattern, "%t"));
 	path = _generate_pattern(pattern, step, id, argv);
 	debug3("%s: task:%d pattern:%s path:%s", __func__, id, pattern, path);
+	xfree(pattern);
 
 	return path;
 }
@@ -973,7 +975,7 @@ static void _create_start(stepd_step_rec_t *step,
 	xfree(out);
 
 	/*
-	 * the inital PID is now dead but the container could still be running
+	 * the initial PID is now dead but the container could still be running
 	 * but it likely is running outside of slurmstepd's process group
 	 */
 

@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "Slurm Configuration File" "May 2023" "Slurm Configuration File"
+.TH "slurm.conf" "5" "Slurm Configuration File" "July 2023" "Slurm Configuration File"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -2766,7 +2766,7 @@ lower than this value will be marked as preemptable.
 .TP
 \fBreclaim_licenses\fR
 If set, jobs may be preempted to reclaim licenses. Otherwise jobs requesting
-busy licenses will have to wait even if they have premption priority.
+busy licenses will have to wait even if they have preemption priority.
 The logic to support this option is only available in the select/cons_res and
 select/cons_tres plugins.
 .IP
@@ -4708,7 +4708,7 @@ for all partitions.
 Setting a value for \fBDefMemPerCPU\fR is strongly recommended.
 .IP
 
-.TP
+.LP
 \fBNOTE\fR: If memory isn't configured as a consumable resource (CR_CPU,
 CR_Core or CR_Socket without _Memory) memory can be oversubscribed and will not
 be constrained by task/cgroup even if it is configured in cgroup.conf. In this
@@ -5550,7 +5550,8 @@ This parameter is required.
 \fBtcs\fR=<\fIclass1\fR>[:<\fIclass2\fR>]...
 Set of traffic classes to configure for applications.
 Supported traffic classes are DEDICATED_ACCESS, LOW_LATENCY, BULK_DATA, and
-BEST_EFFORT.
+BEST_EFFORT. The traffic classes may also be specified as TC_DEDICATED_ACCESS,
+TC_LOW_LATENCY, TC_BULK_DATA, and TC_BEST_EFFORT.
 .IP
 
 .TP
@@ -7732,15 +7733,19 @@ will be out of service for an extended period of time, it may be
 desirable to relocate them.
 In order to do so, follow this procedure:
 .LP
-1. Stop the Slurm daemons
+1. Stop the Slurm daemons on the old controller and nodes.
 .br
-2. Modify the slurm.conf file appropriately
+2. Modify the slurm.conf file appropriately.
 .br
-3. Distribute the updated slurm.conf file to all nodes
+3. Copy the files from the StateSaveLocation to the new contoller or ensure
+that they are accessible to the new contoller via a shared drive.
 .br
-4. Restart the Slurm daemons
+4. Distribute the updated slurm.conf file to all nodes.
+.br
+5. Restart the Slurm daemons on the new controller and nodes.
 .LP
-There should be no loss of any running or pending jobs.
+There should be no loss of any pending jobs but the cluster should be drained
+of running jobs before changing hosts for the controller.
 Ensure that any nodes added to the cluster have the current
 slurm.conf file installed.
 .LP

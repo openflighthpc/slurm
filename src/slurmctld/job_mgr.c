@@ -5582,7 +5582,8 @@ extern int job_allocate(job_desc_msg_t *job_desc, int immediate,
 		 (error_code == ESLURM_RESERVATION_NOT_USABLE) ||
 		 (error_code == ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE) ||
 		 (error_code == ESLURM_BURST_BUFFER_WAIT) ||
-		 (error_code == ESLURM_PARTITION_DOWN)) {
+		 (error_code == ESLURM_PARTITION_DOWN) ||
+		 (error_code == ESLURM_LICENSES_UNAVAILABLE)) {
 		/* Not fatal error, but job can't be scheduled right now */
 		if (immediate) {
 			job_ptr->job_state  = JOB_FAILED;
@@ -7790,8 +7791,13 @@ static int _job_create(job_desc_msg_t *job_desc, int allocate, int will_run,
 			job_ptr->state_reason = WAIT_HELD_USER;
 		else
 			job_ptr->state_reason = WAIT_HELD;
-	} else if (job_ptr->priority != NO_VAL) {
+	} else if ((job_ptr->priority != NO_VAL) &&
+		   (job_ptr->priority != INFINITE)) {
 		job_ptr->direct_set_prio = 1;
+	} else if ((job_ptr->priority == INFINITE) &&
+		   (user_submit_priority == INFINITE)) {
+		/* This happens when "hold": false is specified to slurmrestd */
+		job_ptr->priority = NO_VAL;
 	}
 
 	/*
@@ -12490,6 +12496,26 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		return ESLURM_JOB_SETTING_DB_INX;
 
 	operator = validate_operator(uid);
+
+	/* Check authorization for modifying this job */
+	is_coord_oldacc = assoc_mgr_is_user_acct_coord(acct_db_conn, uid,
+						       job_ptr->account);
+	is_coord_newacc = assoc_mgr_is_user_acct_coord(acct_db_conn, uid,
+						       job_desc->account);
+	if ((job_ptr->user_id != uid) && !operator) {
+		/*
+		 * Fail if we are not coordinators of the current account or
+		 * if we are changing an account and  we are not coordinators
+		 * of both src and dest accounts.
+		 */
+		if (!is_coord_oldacc ||
+		    (!is_coord_newacc && job_desc->account)) {
+			error("Security violation, JOB_UPDATE RPC from uid %u",
+			      uid);
+			return ESLURM_USER_ID_MISSING;
+		}
+	}
+
 	if (job_desc->burst_buffer) {
 		/*
 		 * burst_buffer contents are validated at job submit time and
@@ -12573,25 +12599,6 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		acct_policy_limit_set.qos = ADMIN_SET_LIMIT;
 	} else
 		memset(tres, 0, sizeof(tres));
-
-	/* Check authorization for modifying this job */
-	is_coord_oldacc = assoc_mgr_is_user_acct_coord(acct_db_conn, uid,
-						       job_ptr->account);
-	is_coord_newacc = assoc_mgr_is_user_acct_coord(acct_db_conn, uid,
-						       job_desc->account);
-	if ((job_ptr->user_id != uid) && !operator) {
-		/*
-		 * Fail if we are not coordinators of the current account or
-		 * if we are changing an account and  we are not coordinators
-		 * of both src and dest accounts.
-		 */
-		if (!is_coord_oldacc ||
-		    (!is_coord_newacc && job_desc->account)) {
-			error("Security violation, JOB_UPDATE RPC from uid %u",
-			      uid);
-			return ESLURM_USER_ID_MISSING;
-		}
-	}
 
 	detail_ptr = job_ptr->details;
 	if (detail_ptr)
@@ -14309,6 +14316,40 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		}
 	}
 
+	if (job_desc->std_err && detail_ptr &&
+	    !xstrcmp(job_desc->std_err, detail_ptr->std_err)) {
+		sched_debug("%s: new std_err identical to old std_err %s",
+			    __func__, job_desc->std_err);
+	} else if (job_desc->std_err) {
+		if (!IS_JOB_PENDING(job_ptr))
+			error_code = ESLURM_JOB_NOT_PENDING;
+		else if (detail_ptr && job_desc->std_err[0] == '\0')
+			xfree(detail_ptr->std_err);
+		else if (detail_ptr) {
+			xfree(detail_ptr->std_err);
+			detail_ptr->std_err = xstrdup(job_desc->std_err);
+		}
+	}
+	if (error_code != SLURM_SUCCESS)
+		goto fini;
+
+	if (job_desc->std_in && detail_ptr &&
+	    !xstrcmp(job_desc->std_in, detail_ptr->std_in)) {
+		sched_debug("%s: new std_in identical to old std_in %s",
+			    __func__, job_desc->std_in);
+	} else if (job_desc->std_in) {
+		if (!IS_JOB_PENDING(job_ptr))
+			error_code = ESLURM_JOB_NOT_PENDING;
+		else if (detail_ptr && job_desc->std_in[0] == '\0')
+			xfree(detail_ptr->std_in);
+		else if (detail_ptr) {
+			xfree(detail_ptr->std_in);
+			detail_ptr->std_in = xstrdup(job_desc->std_in);
+		}
+	}
+	if (error_code != SLURM_SUCCESS)
+		goto fini;
+
 	if (job_desc->std_out && detail_ptr &&
 	    !xstrcmp(job_desc->std_out, detail_ptr->std_out)) {
 		sched_debug("%s: new std_out identical to old std_out %s",
@@ -14316,6 +14357,8 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 	} else if (job_desc->std_out) {
 		if (!IS_JOB_PENDING(job_ptr))
 			error_code = ESLURM_JOB_NOT_PENDING;
+		else if (detail_ptr && job_desc->std_out[0] == '\0')
+			xfree(detail_ptr->std_out);
 		else if (detail_ptr) {
 			xfree(detail_ptr->std_out);
 			detail_ptr->std_out = xstrdup(job_desc->std_out);
