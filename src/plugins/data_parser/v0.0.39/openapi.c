@@ -227,11 +227,17 @@ static data_t *_set_openapi_parse(data_t *obj, const parser_t *parser,
 				if (pchild->required) {
 					data_set_string(
 						data_list_append(required),
-						pchild->field_name);
+						pchild->key);
 				}
 
 				dchild = _resolve_parser_key(pchild, obj);
 				_set_ref(dchild, pchild, sargs);
+
+				if (pchild->obj_desc && pchild->obj_desc[0])
+					data_set_string(
+						data_key_set(dchild,
+							     "description"),
+						pchild->obj_desc);
 			}
 		} else {
 			fatal("%s: parser %s need to provide openapi specification, array type or pointer type",
