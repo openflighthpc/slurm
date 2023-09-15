@@ -507,7 +507,8 @@ static void _validate_slurmd_addr(void)
 			continue;
 		if (IS_NODE_CLOUD(node_ptr) &&
 		    (IS_NODE_POWERING_DOWN(node_ptr) ||
-		     IS_NODE_POWERED_DOWN(node_ptr)))
+		     IS_NODE_POWERED_DOWN(node_ptr) ||
+		     IS_NODE_POWERING_UP(node_ptr)))
 				continue;
 		if (node_ptr->port == 0)
 			node_ptr->port = slurm_conf.slurmd_port;
@@ -1817,6 +1818,11 @@ int read_slurm_conf(int recover, bool reconfig)
 		load_job_ret = load_all_job_state();
 	}
 
+	/*
+	 * _build_node_config_bitmaps() must be called before
+	 * build_features_list_*() and before restore_node_features()
+	 */
+	_build_node_config_bitmaps();
 	/* _gres_reconfig needs to happen before restore_node_features */
 	_gres_reconfig(reconfig);
 	/* NOTE: Run restore_node_features before _restore_job_accounting */
@@ -1833,11 +1839,6 @@ int read_slurm_conf(int recover, bool reconfig)
 	 * precede build_features_list_*()
 	 */
 	_build_bitmaps();
-	/*
-	 * _build_node_config_bitmaps() must be called before
-	 * build_features_list_*()
-	 */
-	_build_node_config_bitmaps();
 
 	/* Active and available features can be different on -R */
 	if ((node_features_g_count() == 0) && (recover != 2))

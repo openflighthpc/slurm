@@ -1,4 +1,4 @@
-.TH sbatch "1" "Slurm Commands" "June 2023" "Slurm Commands"
+.TH sbatch "1" "Slurm Commands" "August 2023" "Slurm Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to Slurm.
@@ -1436,11 +1436,10 @@ take precedence over the environment.
 \fBNOTE\fR: A memory size specification of zero is treated as a special case and
 grants the job access to all of the memory on each node.
 
-\fBNOTE\fR: Enforcement of memory limits currently relies upon the task/cgroup
-plugin or enabling of accounting, which samples memory use on a periodic basis
-(data need not be stored, just collected). In both cases memory use is based
-upon the job's Resident Set Size (RSS). A task may exceed the memory limit until
-the next periodic accounting sample.
+\fBNOTE\fR: Memory requests will not be strictly enforced unless Slurm is
+configured to use an enforcement mechanism. See \fBConstrainRAMSpace\fR in
+the \fBcgroup.conf\fR(5) man page and \fBOverMemoryKill\fR in the
+\fBslurm.conf\fR(5) man page for more details.
 .IP
 
 .TP
@@ -3220,13 +3219,17 @@ for backwards compatibility.
 
 .TP
 \fBSLURM_NPROCS\fR
-Same as \fB\-n, \-\-ntasks\fR. See \fBSLURM_NTASKS\fR. Included for backwards
-compatibility.
+Set to value of the \fB\-\-ntasks\fR option, if specified. Or, if either of
+the \fB\-\-ntasks\-per\-node\fR or \fB\-\-ntasks\-per\-gpu\fR options are
+specified, set to the number of tasks in the job.
+See \fBSLURM_NTASKS\fR. Included for backwards compatibility.
 .IP
 
 .TP
 \fBSLURM_NTASKS\fR
-Same as \fB\-n, \-\-ntasks\fR
+Set to value of the \fB\-\-ntasks\fR option, if specified. Or, if either of
+the \fB\-\-ntasks\-per\-node\fR or \fB\-\-ntasks\-per\-gpu\fR options are
+specified, set to the number of tasks in the job.
 .IP
 
 .TP
