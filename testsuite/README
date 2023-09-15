@@ -27,8 +27,11 @@ To run the testsuites using the unified test-runner:
   Review and edit testsuite.conf as necessary.
 * pytest (pytest-3) must be installed in order to run the python testsuite.
 * expect must be installed in order to run the expect testsuite.
-* If perldoc is installed, ./run-tests --man can be used to display a man page
-  for the test-runner.
+* Set the SLURM_CLUSTER environment variable to set up a custom directory
+  in the 'results' dir that will hold unique logs and test data.
+  You can name this whatever you'd like, it will be created if needed.
+  This is a useful way to archive results from run-tests with things like
+  different dates, commits, or configs.
 * Execute run-tests with the desired options to run the testsuites.
 
 testsuite.conf:
@@ -787,11 +790,6 @@ test40.5   Increase size of job with allocated MPS
 test40.6   Decrease size of job with allocated MPS
 test40.8   Simple CUDA MPS test
 
-test41.#   Testing of slurmrestd
-=============================================================
-test41.1   Test slurmrestd plugins
-test41.2   Test slurmrestd OpenAPI generation and functionality
-
 
 A summary of each python test is shown below.
 ############################################################################
@@ -810,6 +808,7 @@ test_102_3   /commands/sacctmgr/test_--json.py
 test_103_#   Testing of salloc options.
 =======================================
 test_103_1   /commands/salloc/test_--usage.py
+test_103_2   Test salloc with default command
 
 test_104_#   Testing of sattach options.
 ========================================
@@ -955,6 +954,8 @@ test_123_#   Testing of reservations.
 =====================================
 test_123_1   /features/reservations/test_flags.py
 test_123_2   Test RESV_DEL_HOLD
+test_123_3   Test overlapping reservations.
+test_123_4   Test reservation access
 
 test_124_#   Testing of AccountingStorageEnforce.
 =================================================
@@ -1014,6 +1015,7 @@ test_137_1   /plugins/node_features/helpers/test_plugin.py
 test_138_#   Testing stressing cases.
 =====================================
 test_138_1   /stress/test_stdin_broadcast.py
+test_138_2   Test parallel performance of squeue
 
 test_140_#   Testing --tres options.
 ====================================
@@ -1031,5 +1033,6 @@ test_144_#   Testing of gres.
 ================================
 test_144_1   Test --exclusive allocation with gres flagged as explicit
 test_144_2   Test enforce-binding with GPUs that share cores
+test_144_3   Test --exact with GPUs and multiple steps
 test_144_4   Test gres with file or type and --overlap
 test_144_6   Test gres with no_consume flag

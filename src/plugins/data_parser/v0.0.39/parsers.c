@@ -69,6 +69,8 @@
 
 #include "src/sinfo/sinfo.h" /* provides sinfo_data_t */
 
+#define CPU_FREQ_FLAGS_BUF_SIZE 64
+
 #define MAGIC_FOREACH_CSV_LIST 0x8891be2b
 #define MAGIC_FOREACH_LIST 0xaefa2af3
 #define MAGIC_FOREACH_LIST_FLAG 0xa1d4acd2
@@ -1138,9 +1140,10 @@ static int DUMP_FUNC(JOB_EXIT_CODE)(const parser_t *const parser, void *obj,
 	dsc = data_key_set(dst, "status");
 	drc = data_key_set(dst, "return_code");
 
-	if (*ec == NO_VAL)
+	if (*ec == NO_VAL) {
 		data_set_string(dsc, "PENDING");
-	else if (WIFEXITED(*ec)) {
+		data_set_int(drc, 0);
+	} else if (WIFEXITED(*ec)) {
 		data_set_string(dsc, "SUCCESS");
 		data_set_int(drc, 0);
 	} else if (WIFSIGNALED(*ec)) {
@@ -1150,8 +1153,10 @@ static int DUMP_FUNC(JOB_EXIT_CODE)(const parser_t *const parser, void *obj,
 		data_set_int(data_key_set(sig, "signal_id"), WTERMSIG(*ec));
 		data_set_string(data_key_set(sig, "name"),
 				strsignal(WTERMSIG(*ec)));
+		data_set_int(drc, -127);
 	} else if (WCOREDUMP(*ec)) {
 		data_set_string(dsc, "CORE_DUMPED");
+		data_set_int(drc, -127);
 	} else {
 		data_set_string(dsc, "ERROR");
 		data_set_int(drc, WEXITSTATUS(*ec));
@@ -3823,13 +3828,13 @@ static int DUMP_FUNC(CPU_FREQ_FLAGS)(const parser_t *const parser, void *obj,
 				     data_t *dst, args_t *args)
 {
 	uint32_t *freq_ptr = obj;
-	char *buf = xmalloc(BUF_SIZE);
+	char buf[CPU_FREQ_FLAGS_BUF_SIZE];
 
 	xassert(args->magic == MAGIC_ARGS);
 	xassert(data_get_type(dst) == DATA_TYPE_NULL);
 
-	cpu_freq_to_string(buf, (BUF_SIZE - 1), *freq_ptr);
-	data_set_string_own(dst, buf);
+	cpu_freq_to_string(buf, sizeof(buf), *freq_ptr);
+	data_set_string(dst, buf);
 
 	return SLURM_SUCCESS;
 }
@@ -4728,7 +4733,15 @@ static const parser_t PARSER_ARRAY(JOB)[] = {
 	add_parse_overload(UINT32_NO_VAL, priority, 1, "priority", "Request specific job priority"),
 	add_parse(QOS_ID, qosid, "qos", NULL),
 	add_parse(UINT32, req_cpus, "required/CPUs", NULL),
-	add_parse(UINT64, req_mem, "required/memory", NULL),
+	add_parse_overload(JOB_MEM_PER_CPU, req_mem, 2, "required/memory_per_cpu", NULL),
+	add_parse_overload(JOB_MEM_PER_NODE, req_mem, 2, "required/memory_per_node", NULL),
+
+	/*
+	 * This will give a large negative value instead of the slurm.conf
+	 * DefMemPerCPU. It will be removed in v40.
+	 */
+	add_parse_overload(UINT64, req_mem, 2, "required/memory", NULL),
+
 	add_parse(USER_ID, requid, "kill_request_user", NULL),
 	add_parse(UINT32, resvid, "reservation/id", NULL),
 	add_parse(STRING, resv_name, "reservation/name", NULL),
@@ -4922,7 +4935,7 @@ static const parser_t PARSER_ARRAY(QOS)[] = {
 	add_complex_parser(slurmdb_qos_rec_t, QOS_PREEMPT_LIST, false, "preempt/list", NULL),
 	add_parse_bit_flag_array(slurmdb_qos_rec_t, QOS_PREEMPT_MODES, false, preempt_mode, "preempt/mode", NULL),
 	add_parse(UINT32_NO_VAL, preempt_exempt_time, "preempt/exempt_time", NULL),
-	add_parse(UINT32, priority, "priority", NULL),
+	add_parse(UINT32_NO_VAL, priority, "priority", NULL),
 	add_skip(usage), /* not packed */
 	add_parse(FLOAT64_NO_VAL, usage_factor, "usage_factor", NULL),
 	add_parse(FLOAT64_NO_VAL, usage_thres, "usage_threshold", NULL),
@@ -5725,7 +5738,7 @@ static const parser_t PARSER_ARRAY(ACCT_GATHER_ENERGY)[] = {
 	add_parse(UINT32, ave_watts, "average_watts", NULL),
 	add_parse(UINT64, base_consumed_energy, "base_consumed_energy", NULL),
 	add_parse(UINT64, consumed_energy, "consumed_energy", NULL),
-	add_parse(UINT32, current_watts, "current_watts", NULL),
+	add_parse(UINT32_NO_VAL, current_watts, "current_watts", NULL),
 	add_parse(UINT64, previous_consumed_energy, "previous_consumed_energy", NULL),
 	add_parse(UINT64, poll_time, "last_collected", NULL),
 };
@@ -6348,7 +6361,7 @@ static const parser_t parsers[] = {
 	addps(BOOL16_NO_VAL, uint16_t, NEED_NONE, BOOL, NULL),
 	addps(QOS_NAME, char *, NEED_QOS, STRING, NULL),
 	addps(QOS_ID, uint32_t, NEED_QOS, STRING, NULL),
-	addpsa(QOS_STRING_ID_LIST, STRING, List, NEED_NONE, "List of QOS names"),
+	addpsa(QOS_STRING_ID_LIST, STRING, List, NEED_QOS, "List of QOS names"),
 	addpss(JOB_EXIT_CODE, int32_t, NEED_NONE, OBJECT, NULL),
 	addps(RPC_ID, slurmdbd_msg_type_t, NEED_NONE, STRING, NULL),
 	addps(SELECT_PLUGIN_ID, int, NEED_NONE, STRING, NULL),

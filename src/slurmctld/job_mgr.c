@@ -7196,7 +7196,7 @@ static int _valid_job_part(job_desc_msg_t *job_desc, uid_t submit_uid,
 		}
 		if ((job_desc->time_min) && (job_desc->time_min != NO_VAL) &&
 		    (job_desc->deadline < (earliest_start + min_in_sec))) {
-			info("%s: job's min_time excedes the deadline (%s + %lu > %s)",
+			info("%s: job's min_time exceeds the deadline (%s + %lu > %s)",
 			     __func__, time_str_earliest, min_in_sec,
 			     time_str_deadline);
 			rc = ESLURM_INVALID_TIME_MIN_LIMIT;
@@ -7206,7 +7206,7 @@ static int _valid_job_part(job_desc_msg_t *job_desc, uid_t submit_uid,
 		    (job_desc->time_limit) &&
 		    (job_desc->time_limit != NO_VAL) &&
 		    (job_desc->deadline < (earliest_start + limit_in_sec))) {
-			info("%s: job's time_limit excedes the deadline (%s + %lu > %s)",
+			info("%s: job's time_limit exceeds the deadline (%s + %lu > %s)",
 			     __func__, time_str_earliest, limit_in_sec,
 			     time_str_deadline);
 			rc = ESLURM_INVALID_TIME_LIMIT;
@@ -7413,7 +7413,7 @@ static void _set_tot_license_req(job_desc_msg_t *job_desc,
 		if (!lic_req)
 			lic_req = xstrdup("");
 	} else if (tres_per_task) {
-		char *name, *type, *save_ptr = NULL;
+		char *name = NULL, *type = NULL, *save_ptr = NULL;
 		uint64_t cnt = 0;
 
 		while ((slurm_get_next_tres(tres_type,
@@ -7437,6 +7437,7 @@ static void _set_tot_license_req(job_desc_msg_t *job_desc,
 				cnt *= num_tasks;
 			xstrfmtcatat(lic_req, &lic_req_pos, "%s%s:%"PRIu64,
 				     sep, name, cnt);
+			xfree(name);
 		}
 	}
 
@@ -9112,9 +9113,8 @@ static bool _valid_pn_min_mem(job_desc_msg_t *job_desc_msg,
 			return true;
 		mem_ratio = (job_mem_limit + sys_mem_limit - 1);
 		mem_ratio /= sys_mem_limit;
-		debug("increasing cpus_per_task and decreasing mem_per_cpu by "
-		      "factor of %"PRIu64" based upon mem_per_cpu limits",
-		      mem_ratio);
+		debug("JobId=%u: increasing cpus_per_task and decreasing mem_per_cpu by factor of %"PRIu64" based upon mem_per_cpu limits",
+		      job_desc_msg->job_id, mem_ratio);
 		if (job_desc_msg->cpus_per_task == NO_VAL16)
 			job_desc_msg->cpus_per_task = mem_ratio;
 		else
@@ -9195,8 +9195,8 @@ static bool _valid_pn_min_mem(job_desc_msg_t *job_desc_msg,
 
 		if ((job_desc_msg->pn_min_cpus == NO_VAL16) ||
 		    (job_desc_msg->pn_min_cpus < min_cpus)) {
-			debug("Setting job's pn_min_cpus to %u due to memory "
-			      "limit", min_cpus);
+			debug("JobId=%u: Setting job's pn_min_cpus to %u due to memory limit",
+			      job_desc_msg->job_id, min_cpus);
 			job_desc_msg->pn_min_cpus = min_cpus;
 			cpus_per_node = MAX(cpus_per_node, min_cpus);
 			if (job_desc_msg->ntasks_per_node)
@@ -10412,7 +10412,7 @@ static bool _all_parts_hidden(job_record_t *job_ptr,
 static bool _hide_job_user_rec(job_record_t *job_ptr, slurmdb_user_rec_t *user,
 			       uint16_t show_flags)
 {
-	if (!job_ptr || (!(show_flags & SHOW_ALL) && IS_JOB_REVOKED(job_ptr)))
+	if (!job_ptr)
 		return true;
 
 	if ((slurm_conf.private_data & PRIVATE_DATA_JOBS) &&
@@ -10436,6 +10436,9 @@ static int _pack_job(void *object, void *arg)
 
 	if ((pack_info->filter_uid != NO_VAL) &&
 	    (pack_info->filter_uid != job_ptr->user_id))
+		return SLURM_SUCCESS;
+
+	if (!(pack_info->show_flags & SHOW_ALL) && IS_JOB_REVOKED(job_ptr))
 		return SLURM_SUCCESS;
 
 	if (!pack_info->privileged) {
@@ -10659,6 +10662,9 @@ extern int pack_one_job(char **buffer_ptr, int *buffer_size,
 	if (!(valid_operator = validate_operator_user_rec(&user_rec)))
 		hide_job = _hide_job_user_rec(job_ptr, &user_rec, show_flags);
 
+	if (!(show_flags & SHOW_ALL) && job_ptr && IS_JOB_REVOKED(job_ptr))
+		hide_job = true;
+
 	if (job_ptr && job_ptr->het_job_list) {
 		/* Pack heterogeneous job components */
 		if (!hide_job) {
@@ -10691,6 +10697,13 @@ extern int pack_one_job(char **buffer_ptr, int *buffer_size,
 		while (job_ptr) {
 			if ((job_ptr->job_id == job_id) && packed_head) {
 				;	/* Already packed */
+			} else if (!(show_flags & SHOW_ALL) &&
+				   IS_JOB_REVOKED(job_ptr)) {
+				/*
+				 * Array jobs can't be federated but to be
+				 * consistent and future proof, don't pack
+				 * revoked array jobs.
+				 */
 			} else if (job_ptr->array_job_id == job_id) {
 				if (valid_operator ||
 				    !_hide_job_user_rec(job_ptr, &user_rec,
@@ -16469,6 +16482,7 @@ void batch_requeue_fini(job_record_t *job_ptr)
 	job_ptr->state_reason_prev_db = 0;
 
 	job_ptr->node_cnt = 0;
+	job_ptr->total_nodes = 0;
 	xfree(job_ptr->alias_list);
 	xfree(job_ptr->batch_host);
 	free_job_resources(&job_ptr->job_resrcs);
