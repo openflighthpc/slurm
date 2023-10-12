@@ -118,6 +118,8 @@ static uint32_t rpc_user_id[RPC_USER_SIZE] = { 0 };
 static uint32_t rpc_user_cnt[RPC_USER_SIZE] = { 0 };
 static uint64_t rpc_user_time[RPC_USER_SIZE] = { 0 };
 
+static bool do_post_rpc_node_registration = false;
+
 char *slurmd_config_files[] = {
 	"slurm.conf", "acct_gather.conf", "cgroup.conf",
 	"cli_filter.lua", "ext_sensors.conf", "gres.conf", "helpers.conf",
@@ -2806,6 +2808,14 @@ static void _find_avail_future_node(slurm_msg_t *msg)
 	}
 }
 
+static void _slurm_post_rpc_node_registration()
+{
+	if (do_post_rpc_node_registration)
+		clusteracct_storage_g_cluster_tres(acct_db_conn, NULL, NULL, 0,
+						   SLURM_PROTOCOL_VERSION);
+	do_post_rpc_node_registration = false;
+}
+
 /* _slurm_rpc_node_registration - process RPC to determine if a node's
  *	actual configuration satisfies the configured specification */
 static void _slurm_rpc_node_registration(slurm_msg_t *msg)
@@ -2814,6 +2824,7 @@ static void _slurm_rpc_node_registration(slurm_msg_t *msg)
 	DEF_TIMERS;
 	int error_code = SLURM_SUCCESS;
 	bool newly_up = false;
+	bool already_registered = false;
 	slurm_node_registration_status_msg_t *node_reg_stat_msg =
 		(slurm_node_registration_status_msg_t *) msg->data;
 	slurmctld_lock_t job_write_lock = {
@@ -2873,6 +2884,9 @@ static void _slurm_rpc_node_registration(slurm_msg_t *msg)
 					unlock_slurmctld(job_write_lock);
 
 				goto send_resp;
+			} else if (find_node_record2(
+					node_reg_stat_msg->node_name)) {
+				already_registered = true;
 			} else {
 				error_code = create_dynamic_reg_node(msg);
 			}
@@ -2932,11 +2946,16 @@ send_resp:
 		} else
 			slurm_send_rc_msg(msg, SLURM_SUCCESS);
 
-		if (node_reg_stat_msg->dynamic_type == DYN_NODE_NORM) {
-			/* Must be called outside of locks */
-			clusteracct_storage_g_cluster_tres(
-				acct_db_conn, NULL, NULL, 0,
-				SLURM_PROTOCOL_VERSION);
+		if (!already_registered &&
+		    (node_reg_stat_msg->dynamic_type == DYN_NODE_NORM)) {
+			if (!(msg->flags & CTLD_QUEUE_PROCESSING)) {
+				/* Must be called outside of locks */
+				clusteracct_storage_g_cluster_tres(
+					acct_db_conn, NULL, NULL, 0,
+					SLURM_PROTOCOL_VERSION);
+			} else {
+				do_post_rpc_node_registration = true;
+			}
 		}
 	}
 }
@@ -6420,11 +6439,13 @@ slurmctld_rpc_t slurmctld_rpcs[] =
 	},{
 		.msg_type = MESSAGE_NODE_REGISTRATION_STATUS,
 		.func = _slurm_rpc_node_registration,
+		.post_func = _slurm_post_rpc_node_registration,
 		.queue_enabled = true,
 		.locks = {
 			.conf = READ_LOCK,
 			.job = WRITE_LOCK,
 			.node = WRITE_LOCK,
+			.part = WRITE_LOCK,
 			.fed = READ_LOCK,
 		},
 	},{

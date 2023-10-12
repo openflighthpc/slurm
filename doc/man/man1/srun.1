@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "October 2022" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "December 2022" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -814,7 +814,17 @@ srun within an existing salloc or sbatch allocation) only to job allocations.
 <\fItype:job_id[:job_id][?type:job_id[:job_id]]\fR>.
 All dependencies must be satisfied if the "," separator is used.
 Any dependency may be satisfied if the "?" separator is used.
-Only one separator may be used.
+Only one separator may be used. For instance:
+.nf
+-d afterok:20:21,afterany:23
+.fi
+means that the job can run only after a 0 return code of jobs 20 and 21
+AND the completion of job 23. However:
+.nf
+-d afterok:20:21?afterany:23
+.fi
+means that any of the conditions (afterok:20 OR afterok:21 OR afterany:23)
+will be enough to release the job.
 Many jobs can share the same dependency and these jobs may even belong to
 different  users. The  value may be changed after job submission using the
 scontrol command.
@@ -837,6 +847,7 @@ start or cancellation.
 .TP
 \fBafterany:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have terminated.
+This is the default dependency type.
 .IP
 
 .TP
@@ -2138,7 +2149,7 @@ allocations.
 Do not automatically terminate a job if one of the nodes it has been
 allocated fails. This option applies to job and step allocations.
 The job will assume all responsibilities for fault\-tolerance.
-Tasks launch using this option will not be considered terminated
+Tasks launched using this option will not be considered terminated
 (e.g. \fB\-K\fR, \fB\-\-kill\-on\-bad\-exit\fR and
 \fB\-W\fR, \fB\-\-wait\fR options will have no effect upon the job step).
 The active job step (MPI job) will likely suffer a fatal error,
@@ -3240,13 +3251,6 @@ Same as \fB\-c, \-\-cpus\-per\-task\fR
 \fBSLURM_DEBUG\fR
 Same as \fB\-v, \-\-verbose\fR. Must be set to 0 or 1 to disable or enable
 the option.
-.IP
-
-.TP
-\fBSLURM_DEBUG_FLAGS\fR
-Specify debug flags for srun to use. See DebugFlags in the
-\fBslurm.conf\fR(5) man page for a full list of flags. The environment
-variable takes precedence over the setting in the slurm.conf.
 .IP
 
 .TP

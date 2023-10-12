@@ -214,7 +214,7 @@ static int _enable_subtree_control(char *path, bitstr_t *ctl_bitmap)
 
 		xstrfmtcat(content, "+%s", ctl_names[i]);
 		rc = common_file_write_content(file_path, content,
-					       sizeof(content));
+					       strlen(content));
 		xfree(content);
 		if (rc != SLURM_SUCCESS) {
 			error("Cannot enable %s in %s",
@@ -455,6 +455,7 @@ static int _find_pid_task(void *x, void *key)
 		}
 	}
 
+	xfree(pids);
 	return found;
 }
 
@@ -1119,8 +1120,6 @@ extern int cgroup_p_step_create(cgroup_ctl_type_t ctl, stepd_step_rec_t *job)
 		rc = SLURM_ERROR;
 	}
 
-	/* Use slurmstepd pid as the identifier of the container. */
-	job->cont_id = (uint64_t)job->jmgr_pid;
 endit:
 	xfree(new_path);
 	if (rc != SLURM_SUCCESS)
@@ -1339,10 +1338,13 @@ extern bool cgroup_p_has_pid(pid_t pid)
 		return false;
 
 	for (i = 0; i < npids_slurm; i++) {
-		if (pids_slurm[i] == pid)
+		if (pids_slurm[i] == pid) {
+			xfree(pids_slurm);
 			return true;
+		}
 	}
 
+	xfree(pids_slurm);
 	return false;
 }
 
@@ -1352,7 +1354,7 @@ extern int cgroup_p_constrain_set(cgroup_ctl_type_t ctl, cgroup_level_t level,
 	int rc = SLURM_SUCCESS;
 	bpf_program_t *program = NULL;
 	task_cg_info_t *task_cg_info;
-	char *dev_id_str = gres_device_id2str(&limits->device);
+	char *dev_id_str = NULL;
 	uint32_t bpf_dev_type = NO_VAL;
 
 	/*
@@ -1457,12 +1459,14 @@ extern int cgroup_p_constrain_set(cgroup_ctl_type_t ctl, cgroup_level_t level,
 			return SLURM_ERROR;
 		}
 
+		dev_id_str = gres_device_id2str(&limits->device);
 		if (limits->allow_device)
 			log_flag(CGROUP, "Allowing access to device (%s)",
 				 dev_id_str);
 		else
 			log_flag(CGROUP, "Denying access to device (%s)",
 				 dev_id_str);
+		xfree(dev_id_str);
 
 		/* Determine the correct BPF device type. */
 		if (limits->device.type == DEV_TYPE_BLOCK)
@@ -1481,7 +1485,6 @@ extern int cgroup_p_constrain_set(cgroup_ctl_type_t ctl, cgroup_level_t level,
 		break;
 	}
 
-	xfree(dev_id_str);
 	return rc;
 }
 

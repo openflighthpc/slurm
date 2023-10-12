@@ -1,4 +1,4 @@
-.TH "slurm.conf" "5" "Slurm Configuration File" "October 2022" "Slurm Configuration File"
+.TH "slurm.conf" "5" "Slurm Configuration File" "January 2023" "Slurm Configuration File"
 
 .SH "NAME"
 slurm.conf \- Slurm configuration file
@@ -645,7 +645,8 @@ accounting database.  This is needed distinguish accounting records
 when multiple clusters report to the same database. Because of limitations
 in some databases, any upper case letters in the name will be silently mapped
 to lower case. In order to avoid confusion, it is recommended that the name
-be lower case.
+be lower case. The cluster name must be 40 characters or less in order to
+comply with the limit on the maximum length for table names in MySQL/MariaDB.
 .IP
 
 .TP
@@ -858,11 +859,6 @@ Defines specific subsystems which should provide more detailed event logging.
 Multiple subsystems can be specified with comma separators.
 Most DebugFlags will result in verbose\-level logging for the identified
 subsystems, and could impact performance.
-
-\fBNOTE\fR: You can also set debug flags by having the \fBSLURM_DEBUG_FLAGS\fR
-environment variable defined with the desired flags when the process (client
-command, daemon, etc.) is started.
-The environment variable takes precedence over the setting in the slurm.conf.
 
 Valid subsystems available include:
 .IP
@@ -4263,9 +4259,9 @@ Enable the use of scrontab to submit and manage periodic repeating jobs.
 .TP
 \fBSelectType\fR
 Identifies the type of resource selection algorithm to be used.
-A restart of slurmctld is required for changes to this parameter to take effect.
-When changed, all job information (running and pending) will be lost,
-since the job state save format used by each plugin is different.
+A restart of slurmctld and slurmd is required for changes to this parameter to
+take effect. When changed, all job information (running and pending) will be
+lost, since the job state save format used by each plugin is different.
 The only exception to this is when changing from cons_res to cons_tres or from
 cons_tres to cons_res. However, if a job contains cons_tres\-specific features
 and then SelectType is changed to cons_res, the job will be canceled, since
@@ -6993,8 +6989,10 @@ power save mode by \fBSuspendProgram\fR.
 For nodes that are in multiple partitions with this option set,
 the highest time will take effect. If not set on any partition, the node will
 use the \fBSuspendTime\fR value set for the entire cluster.
-Setting \fBSuspendTime\fR to anything but "INFINITE" will enable power save
-mode.
+Setting \fBSuspendTime\fR to INFINITE will disable suspending of nodes in this
+partition.
+Setting \fBSuspendTime\fR to anything but INFINITE (or \-1) will enable power
+save mode.
 .IP
 
 .TP
@@ -7503,7 +7501,8 @@ A distinct file must exist on each compute node.
 
 .TP
 \fBSlurmdSpoolDir\fR
-Must be writable by user root.
+Must be writable by user root. Permissions must be set to 755 so that
+job scripts can be executed from this directory.
 A distinct file must exist on each compute node.
 .IP
 
@@ -7545,7 +7544,7 @@ The file must exist on every compute node.
 
 .TP
 \fBUnkillableStepProgram\fR
-Must be executable by user \fBSlurmUser\fR.
+Must be executable by user \fBSlurmdUser\fR.
 The file must be accessible by the primary and backup control machines.
 .IP
 

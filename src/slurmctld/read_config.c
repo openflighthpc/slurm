@@ -307,7 +307,9 @@ static void _add_nodes_with_feature(hostlist_t hl, char *feature)
 	}
 }
 
-extern hostlist_t nodespec_to_hostlist(const char *nodes, char **nodesets)
+extern hostlist_t nodespec_to_hostlist(const char *nodes,
+				       bool uniq,
+				       char **nodesets)
 {
 	int count;
 	slurm_conf_nodeset_t *ptr, **ptr_array;
@@ -349,12 +351,18 @@ extern hostlist_t nodespec_to_hostlist(const char *nodes, char **nodesets)
 			if (ptr->feature)
 				_add_nodes_with_feature(hl, ptr->feature);
 
-			if (ptr->nodes)
+			/* Handle keywords for Nodes= in a NodeSet */
+			if (!xstrcasecmp(ptr->nodes, "ALL")) {
+				for (int i = 0; (node_ptr = next_node(&i)); i++)
+					hostlist_push_host(hl, node_ptr->name);
+			} else if (ptr->nodes) {
 				hostlist_push(hl, ptr->nodes);
+			}
 		}
 	}
 
-	hostlist_uniq(hl);
+	if (uniq)
+		hostlist_uniq(hl);
 	return hl;
 }
 
@@ -2996,9 +3004,24 @@ static int _sync_nodes_to_active_job(job_record_t *job_ptr)
 
 		node_flags = node_ptr->node_state & NODE_STATE_FLAGS;
 
-		node_ptr->run_job_cnt++; /* NOTE:
-				* This counter moved to comp_job_cnt
-				* by _sync_nodes_to_comp_job() */
+		if (IS_JOB_COMPLETING(job_ptr) && job_ptr->epilog_running) {
+			/*
+			 * _sync_nodes_to_comp_job() won't call
+			 * deallocate_nodes()/make_node_comp() if the
+			 * EpilogSlurmctld is still running to decrement
+			 * run_job_cnt and increment comp_job_cnt, so just
+			 * increment comp_job_cnt now.
+			 */
+			node_ptr->comp_job_cnt++;
+		} else {
+			/*
+			 * run_job_cnt will be decremented by
+			 * deallocate_nodes()/make_node_comp() in
+			 * _sync_nodes_to_comp_job().
+			 */
+			node_ptr->run_job_cnt++;
+		}
+
 		if ((job_ptr->details) && (job_ptr->details->share_res == 0))
 			node_ptr->no_share_job_cnt++;
 
