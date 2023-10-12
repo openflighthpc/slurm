@@ -6115,9 +6115,18 @@ extern int job_str_signal(char *job_id_str, uint16_t signal, uint16_t flags,
 		}
 		if (job_ptr && job_ptr->het_job_id && IS_JOB_PENDING(job_ptr))
 			return ESLURM_NOT_WHOLE_HET_JOB;/* Hetjob child */
-		if (job_ptr && (job_ptr->array_task_id == NO_VAL) &&
-		    (job_ptr->array_recs == NULL)) {
-			/* This is a regular job, not a job array */
+
+		if (job_ptr &&
+		    (((job_ptr->array_task_id == NO_VAL) &&
+		      (job_ptr->array_recs == NULL)) ||
+		     ((job_ptr->array_task_id != NO_VAL) &&
+		      ((job_ptr->array_job_id != job_id) ||
+		       (flags & KILL_ARRAY_TASK))))) {
+			/*
+			 * This is a regular job or a single task of a job
+			 * array. KILL_ARRAY_TASK indicates that the meta job
+			 * should be treated as a single task.
+			 */
 			return job_signal_id(job_id, signal, flags, uid, preempt);
 		}
 
@@ -13049,7 +13058,24 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			error_code = ESLURM_JOB_NOT_PENDING;
 			goto fini;
 		}
-
+		if (!job_desc->cpus_per_tres)
+			job_desc->cpus_per_tres =
+				xstrdup(job_ptr->cpus_per_tres);
+		if (!job_desc->tres_freq)
+			job_desc->tres_freq = xstrdup(job_ptr->tres_freq);
+		if (!job_desc->tres_per_job)
+			job_desc->tres_per_job = xstrdup(job_ptr->tres_per_job);
+		if (!job_desc->tres_per_node)
+			job_desc->tres_per_node =
+				xstrdup(job_ptr->tres_per_node);
+		if (!job_desc->tres_per_socket)
+			job_desc->tres_per_socket =
+				xstrdup(job_ptr->tres_per_socket);
+		if (!job_desc->tres_per_task)
+			job_desc->tres_per_task =
+				xstrdup(job_ptr->tres_per_task);
+		if (!job_desc->mem_per_tres)
+			job_desc->mem_per_tres = xstrdup(job_ptr->mem_per_tres);
 		if (job_desc->num_tasks == NO_VAL)
 			job_desc->num_tasks = detail_ptr->num_tasks;
 		if (job_desc->min_nodes == NO_VAL)
@@ -13065,10 +13091,15 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 				mc_ptr->ntasks_per_socket;
 			orig_ntasks_per_socket = job_desc->ntasks_per_socket;
 		}
+		if (job_desc->sockets_per_node == NO_VAL16)
+			job_desc->sockets_per_node =
+				detail_ptr->mc_ptr->sockets_per_node;
 		if (job_desc->cpus_per_task == NO_VAL16)
 			job_desc->cpus_per_task =
 				detail_ptr->orig_cpus_per_task;
-		gres_list = gres_job_state_list_dup(job_ptr->gres_list_req);
+		if (!job_desc->ntasks_per_tres)
+			job_desc->ntasks_per_tres = detail_ptr->ntasks_per_tres;
+
 		if ((error_code = gres_job_state_validate(
 			     job_desc->cpus_per_tres,
 			     job_desc->tres_freq,
@@ -13100,8 +13131,29 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			job_desc->ntasks_per_node = NO_VAL16;	/* Unchanged */
 		if (job_desc->ntasks_per_socket == orig_ntasks_per_socket)
 			job_desc->ntasks_per_socket = NO_VAL16; /* Unchanged */
+		if (job_desc->sockets_per_node ==
+		    detail_ptr->mc_ptr->sockets_per_node)
+			job_desc->sockets_per_node = NO_VAL16;
 		if (job_desc->cpus_per_task == detail_ptr->cpus_per_task)
 			job_desc->cpus_per_task = NO_VAL16;	/* Unchanged */
+		if (job_desc->ntasks_per_tres == detail_ptr->ntasks_per_tres)
+			job_desc->ntasks_per_tres = 0;
+		if (!xstrcmp(job_desc->cpus_per_tres, job_ptr->cpus_per_tres))
+			xfree(job_desc->cpus_per_tres);
+		if (!xstrcmp(job_desc->tres_freq, job_ptr->tres_freq))
+			xfree(job_desc->tres_freq);
+		if (!xstrcmp(job_desc->tres_per_job, job_ptr->tres_per_job))
+			xfree(job_desc->tres_per_job);
+		if (!xstrcmp(job_desc->tres_per_node, job_ptr->tres_per_node))
+			xfree(job_desc->tres_per_node);
+		if (!xstrcmp(job_desc->tres_per_socket,
+			     job_ptr->tres_per_socket))
+			xfree(job_desc->tres_per_socket);
+		if (!xstrcmp(job_desc->tres_per_task, job_ptr->tres_per_task))
+			xfree(job_desc->tres_per_task);
+		if (!xstrcmp(job_desc->mem_per_tres, job_ptr->mem_per_tres))
+			xfree(job_desc->mem_per_tres);
+
 	}
 
 	if ((job_desc->min_nodes != NO_VAL) &&
@@ -16766,16 +16818,15 @@ extern void job_completion_logger(job_record_t *job_ptr, bool requeue)
 			    (base_state >= JOB_FAILED) &&
 			    ((base_state != JOB_PREEMPTED) || !requeue))
 				mail_job_info(job_ptr, MAIL_JOB_FAIL);
+			else if ((job_ptr->mail_type & MAIL_JOB_END) &&
+				 (base_state >= JOB_COMPLETE))
+				mail_job_info(job_ptr, MAIL_JOB_END);
 
 			if (requeue &&
 			    (job_ptr->mail_type & MAIL_JOB_REQUEUE))
 				mail_job_info(job_ptr,
 					      MAIL_JOB_REQUEUE);
 
-			if ((job_ptr->mail_type & MAIL_JOB_END) &&
-			    ((base_state == JOB_COMPLETE) ||
-			     (base_state == JOB_CANCELLED)))
-				mail_job_info(job_ptr, MAIL_JOB_END);
 		}
 	}
 

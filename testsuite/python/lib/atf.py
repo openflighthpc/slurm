@@ -28,6 +28,7 @@ default_command_timeout = 60
 default_polling_timeout = 15
 default_sql_cmd_timeout = 120
 
+PERIODIC_TIMEOUT = 30
 
 def node_range_to_list(node_expression):
     """Converts a node range expression into a list of node names.
@@ -1804,6 +1805,26 @@ def wait_for_node_state(nodename, desired_node_state, timeout=default_polling_ti
         condition, timeout=timeout, poll_interval=poll_interval, fatal=fatal)
 
     return (desired_node_state in get_node_parameter(nodename, "State").split("+")) != reverse
+
+
+def wait_for_step(job_id, step_id, **repeat_until_kwargs):
+    """Waits for the specified step to be running.
+
+    Args:
+        job_id (integer): The job id.
+        step_id (integer): The step id (eg, 0, 1..).
+
+    * This function also accepts auxilliary arguments from repeat_until, viz.:
+        timeout (integer): Number of seconds to poll before timing out.
+        poll_interval (float): Number of seconds to wait between polls
+        fatal (boolean): If True, a timeout will result in the test failing.
+    """
+
+    step_str = f"{job_id}.{step_id}"
+    return repeat_until(
+            lambda : run_command_output(f"scontrol -o show step {step_str}"),
+            lambda out : re.search(f"StepId={step_str}", out) is not None,
+            **repeat_until_kwargs)
 
 
 def wait_for_job_state(job_id, desired_job_state, timeout=default_polling_timeout, poll_interval=None, fatal=False, quiet=False):

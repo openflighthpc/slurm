@@ -3765,6 +3765,8 @@ static int _node_config_validate(char *node_name, char *orig_config,
 		_gres_bit_alloc_resize(gres_ns, gres_bits);
 	}
 
+	gres_validate_node_cores(gres_ns, core_cnt, node_name);
+
 	if ((slurmd_conf_tot.config_type_cnt > 1) &&
 	    !_valid_gres_types(gres_ctx->gres_type, gres_ns, reason_down)){
 		rc = EINVAL;
@@ -6158,11 +6160,6 @@ extern int gres_job_state_validate(char *cpus_per_tres,
 			break;
 		}
 
-		/* Delete from list, since no GRES was actually added */
-		if (!gres_js->total_gres) {
-			list_delete_item(iter);
-			continue;
-		}
 		if (_set_over_list(gres_state_job, over_list, &over_count, 1))
 			overlap_merge = true;
 	}

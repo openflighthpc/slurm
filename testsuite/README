@@ -110,7 +110,6 @@ test1.36   Test parallel launch of srun (e.g. "srun srun hostname")
 test1.37   Test of srun --ntasks-per-node option.
 test1.38   Test srun handling of SIGINT to get task status or kill the job
 	   (--quit-on-interrupt option).
-test1.39   Test of linux light-weight core files.
 test1.40   Test of job account (--account option).
 test1.41   Validate Slurm debugger infrastructure (--debugger-test option).
 test1.43   Test of slurm_job_will_run API, (srun --test-only option).
@@ -172,7 +171,6 @@ test1.94   Test of PMI2 task spawn logic
 test1.95   Basic UPC (Unified Parallel C) test via srun.
 test1.96   Basic SHMEM test via srun.
 test1.97   Test that --ntask-per-node and -c options are enforced
-test1.99   Validate that SrunPortRange is enforced when using srun
 test1.100  Test of pack/nopack task distribution.
 test1.101  Test of --bcast option.
 test1.102  Test of --deadline option too late
@@ -923,6 +921,7 @@ test_116_44  /commands/srun/test_task-prolog_and_epilog.py
 test_116_45  /commands/srun/test_-t.py
 test_116_46  /commands/srun/test_--wait.py
 test_116_47  /commands/srun/test_identity.py
+test_116_48  Test SrunPortRange
 
 test_117_#   Testing of sstat options.
 ======================================
