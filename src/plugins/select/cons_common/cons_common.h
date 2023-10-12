@@ -52,6 +52,8 @@ typedef struct avail_res {	/* Per-node resource availability */
 	uint16_t avail_gpus;	/* Count of available GPUs */
 	uint16_t avail_res_cnt;	/* Count of available CPUs + GPUs */
 	uint16_t *avail_cores_per_sock;	/* Per-socket available core count */
+	uint32_t gres_min_cores; /* Minimum number of cores to satisfy GRES
+				    constraints */
 	uint16_t max_cpus;	/* Maximum available CPUs on the node */
 	uint16_t min_cpus;	/* Minimum allocated CPUs */
 	uint16_t sock_cnt;	/* Number of sockets on this node */
@@ -86,7 +88,8 @@ typedef struct {
 			    bool prefer_alloc_nodes,
 			    gres_mc_data_t *tres_mc_ptr);
 	int (*dist_tasks_compute_c_b)(job_record_t *job_ptr,
-				      uint32_t *gres_task_limit);
+				      uint32_t *gres_task_limit,
+				      uint32_t *gres_min_cpus);
 	bitstr_t **(*mark_avail_cores)(bitstr_t *node_map, uint16_t core_spec);
 	bitstr_t *(*pick_first_cores)(bitstr_t *avail_node_bitmap,
 				      uint32_t node_cnt,

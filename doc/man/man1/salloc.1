@@ -1,4 +1,4 @@
-.TH salloc "1" "Slurm Commands" "September 2022" "Slurm Commands"
+.TH salloc "1" "Slurm Commands" "December 2022" "Slurm Commands"
 
 .SH "NAME"
 salloc \- Obtain a Slurm job allocation (a set of nodes), execute a command,
@@ -549,7 +549,17 @@ satisfied completed.
 <\fItype:job_id[:job_id][?type:job_id[:job_id]]\fR>.
 All dependencies must be satisfied if the "," separator is used.
 Any dependency may be satisfied if the "?" separator is used.
-Only one separator may be used.
+Only one separator may be used. For instance:
+.nf
+-d afterok:20:21,afterany:23
+.fi
+means that the job can run only after a 0 return code of jobs 20 and 21
+AND completion of job 23. However:
+.nf
+-d afterok:20:21?afterany:23
+.fi
+means that any of the conditions (afterok:20 OR afterok:21 OR afterany:23)
+will be enough to release the job.
 Many jobs can share the same dependency and these jobs may even belong to
 different  users. The  value may be changed after job submission using the
 scontrol command.
@@ -571,6 +581,7 @@ start or cancellation.
 .TP
 \fBafterany:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have terminated.
+This is the default dependency type.
 .IP
 
 .TP
@@ -1520,12 +1531,15 @@ Silence salloc's use of the terminal bell. Also see the option \fB\-\-bell\fR.
 \fB\-k\fR, \fB\-\-no\-kill\fR[=off]
 Do not automatically terminate a job if one of the nodes it has been
 allocated fails.  The user will assume the responsibilities for fault\-tolerance
-should a node fail.  When there is a node failure, any active job steps (usually
-MPI jobs) on that node will almost certainly suffer a fatal error, but with
-\fB\-\-no\-kill\fR, the job allocation will not be revoked so the user may
-launch new job steps on the remaining nodes in their allocation.
+should a node fail.
+The job allocation will not be revoked so the user may launch new
+job steps on the remaining nodes in their allocation.
+This option does not set the \fBSLURM_NO_KILL\fR environment variable.
+Therefore, when a node fails, steps running on that node will be killed unless
+the \fBSLURM_NO_KILL\fR environment variable was explicitly set or srun calls
+within the job allocation explicitly requested \-\-no\-kill.
 
-Specify an optional argument of "off" disable the effect of the
+Specify an optional argument of "off" to disable the effect of the
 \fBSALLOC_NO_KILL\fR environment variable.
 
 By default Slurm terminates the entire job allocation if any node fails in its
@@ -2261,13 +2275,6 @@ Same as \fB\-\-wckey\fR
 .TP
 \fBSLURM_CONF\fR
 The location of the Slurm configuration file.
-.IP
-
-.TP
-\fBSLURM_DEBUG_FLAGS\fR
-Specify debug flags for salloc to use. See DebugFlags in the
-\fBslurm.conf\fR(5) man page for a full list of flags. The environment
-variable takes precedence over the setting in the slurm.conf.
 .IP
 
 .TP
