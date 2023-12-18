@@ -69,6 +69,7 @@ typedef struct {
 	void *dst; /* already has offset applied */
 	data_t *parent_path;
 	ssize_t index;
+	uint64_t set;
 } foreach_flag_parser_args_t;
 
 typedef struct {
@@ -181,12 +182,13 @@ static data_for_each_cmd_t _foreach_flag_parser(data_t *src, void *arg)
 	void *dst = args->dst;
 	const parser_t *const parser = args->parser;
 	char *path = NULL;
-	uint64_t set = 0;
 	bool matched_any = false;
 
 	xassert(args->magic == MAGIC_FOREACH_LIST_FLAG);
 	xassert(args->args->magic == MAGIC_ARGS);
 	xassert(parser->magic == MAGIC_PARSER);
+
+	path = _flag_parent_path(&path, args);
 
 	for (int8_t i = 0; (i < parser->flag_bit_array_count); i++) {
 		const flag_bit_t *bit = &parser->flag_bit_array[i];
@@ -195,27 +197,27 @@ static data_for_each_cmd_t _foreach_flag_parser(data_t *src, void *arg)
 		if (matched)
 			matched_any = true;
 
-		if (bit->type == FLAG_BIT_TYPE_BIT)
-			_set_flag_bit(parser, dst, bit, matched,
-				      _flag_parent_path(&path, args), src);
-		else if (bit->type == FLAG_BIT_TYPE_EQUAL) {
-			if (matched || ((~set & bit->mask) == bit->mask))
+		if (bit->type == FLAG_BIT_TYPE_BIT) {
+			uint64_t value = (bit->mask & bit->value);
+
+			if (matched || (~args->set & value) == value)
+				_set_flag_bit(parser, dst, bit, matched, path, src);
+			args->set |= value;
+		} else if (bit->type == FLAG_BIT_TYPE_EQUAL) {
+			if (matched || ((~args->set & bit->mask) == bit->mask))
 				_set_flag_bit_equal(parser, dst, bit, matched,
-						    _flag_parent_path(&path,
-								      args),
-						    src);
-			set |= bit->mask;
-		}
-		else
+						    path, src);
+			args->set |= bit->mask;
+		} else
 			fatal_abort("%s: invalid bit_flag_t", __func__);
 
-		args->index++;
 	}
+
+	args->index++;
 
 	if (!matched_any) {
 		on_error(PARSING, parser->type, args->args,
-			 ESLURM_DATA_FLAGS_INVALID,
-			 _flag_parent_path(&path, args), __func__,
+			 ESLURM_DATA_FLAGS_INVALID, path, __func__,
 			 "Unknown flag \"%s\"", data_get_string(src));
 		xfree(path);
 		return DATA_FOR_EACH_FAIL;
@@ -783,9 +785,12 @@ cleanup:
 }
 
 static bool _match_flag_bit(const parser_t *const parser, void *src,
-			    const flag_bit_t *bit)
+			    const flag_bit_t *bit, uint64_t used_equal_bits)
 {
 	const uint64_t v = bit->mask & bit->value;
+
+	if (used_equal_bits & bit->mask)
+		return false;
 
 	/* C allows complier to choose a size for the enum */
 	if (parser->size == sizeof(uint64_t)) {
@@ -806,32 +811,40 @@ static bool _match_flag_bit(const parser_t *const parser, void *src,
 }
 
 static bool _match_flag_equal(const parser_t *const parser, void *src,
-			      const flag_bit_t *bit)
+			      const flag_bit_t *bit,
+			      uint64_t *used_equal_bits_ptr)
 {
+	bool found;
 	const uint64_t v = bit->mask & bit->value;
 
 	/* C allows complier to choose a size for the enum */
 	if (parser->size == sizeof(uint64_t)) {
 		uint64_t *flags = src;
-		return ((*flags & bit->mask) == v);
+		found = ((*flags & bit->mask) == v);
 	} else if (parser->size == sizeof(uint32_t)) {
 		uint32_t *flags = src;
-		return ((*flags & bit->mask) == v);
+		found = ((*flags & bit->mask) == v);
 	} else if (parser->size == sizeof(uint16_t)) {
 		uint16_t *flags = src;
-		return ((*flags & bit->mask) == v);
+		found = ((*flags & bit->mask) == v);
 	} else if (parser->size == sizeof(uint8_t)) {
 		uint8_t *flags = src;
-		return ((*flags & bit->mask) == v);
+		found = ((*flags & bit->mask) == v);
+	} else {
+		fatal("%s: unexpected enum size: %zu", __func__, parser->size);
 	}
 
-	fatal("%s: unexpected enum size: %zu", __func__, parser->size);
+	if (found)
+		*used_equal_bits_ptr |= bit->mask;
+
+	return found;
 }
 
 static int _dump_flag_bit_array(args_t *args, void *src, data_t *dst,
 				const parser_t *const parser)
 {
 	int rc = SLURM_SUCCESS;
+	uint64_t used_equal_bits = 0;
 
 	xassert(args->magic == MAGIC_ARGS);
 	check_parser(parser);
@@ -846,9 +859,11 @@ static int _dump_flag_bit_array(args_t *args, void *src, data_t *dst,
 		const flag_bit_t *bit = &parser->flag_bit_array[i];
 
 		if (bit->type == FLAG_BIT_TYPE_BIT)
-			found = _match_flag_bit(parser, src, bit);
+			found = _match_flag_bit(parser, src, bit,
+						used_equal_bits);
 		else if (bit->type == FLAG_BIT_TYPE_EQUAL)
-			found = _match_flag_equal(parser, src, bit);
+			found = _match_flag_equal(parser, src, bit,
+						  &used_equal_bits);
 		else
 			fatal_abort("%s: invalid bit_flag_t", __func__);
 

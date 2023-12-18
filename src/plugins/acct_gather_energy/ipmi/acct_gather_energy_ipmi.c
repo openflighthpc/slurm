@@ -244,6 +244,16 @@ static int _open_dcmi_context(ipmi_ctx_t *ipmi_dcmi_ctx)
 	return SLURM_SUCCESS;
 }
 
+static void _close_dcmi_context(void)
+{
+	if (!ipmi_dcmi_ctx)
+		return;
+
+	ipmi_ctx_close(ipmi_dcmi_ctx);
+	ipmi_ctx_destroy(ipmi_dcmi_ctx);
+	ipmi_dcmi_ctx = NULL;
+}
+
 /*
  * _init_ipmi_config initializes parameters for freeipmi library
  */
@@ -479,6 +489,7 @@ static int _get_dcmi_power_reading(uint16_t dcmi_mode)
 	uint64_t current_power;
 	fiid_obj_t dcmi_rs;
 	int ret;
+	static uint8_t read_err_cnt = 0;
 
         ipmi_ctx_t ipmi_dcmi_ctx = NULL;
 
@@ -507,7 +518,16 @@ static int _get_dcmi_power_reading(uint16_t dcmi_mode)
 	ipmi_ctx_destroy(ipmi_dcmi_ctx);
 	ipmi_dcmi_ctx = NULL;
 	if (ret < 0) {
-		error("%s: get DCMI power reading failed", __func__);
+		if (read_err_cnt < MAX_LOG_ERRORS) {
+			error("%s: get DCMI power reading failed: %s",
+			      __func__, ipmi_ctx_errormsg(ipmi_dcmi_ctx));
+			read_err_cnt++;
+		} else if (read_err_cnt == MAX_LOG_ERRORS) {
+			error("%s: get DCMI power reading failed: %s. Stop logging these errors after %d attempts",
+			      __func__, ipmi_ctx_errormsg(ipmi_dcmi_ctx),
+			      MAX_LOG_ERRORS);
+			read_err_cnt++;
+		}
 		fiid_obj_destroy(dcmi_rs);
 		return SLURM_ERROR;
 	}
@@ -905,6 +925,7 @@ static void *_thread_ipmi_run(void *no_data)
 		slurm_mutex_unlock(&ipmi_mutex);
 	}
 
+	_close_dcmi_context();
 	log_flag(ENERGY, "ipmi-thread: ended");
 
 	return NULL;
@@ -1101,6 +1122,8 @@ extern int fini(void)
 		ipmi_ctx = NULL;
 	}
 
+	_close_dcmi_context();
+
 	reset_slurm_ipmi_conf(&slurm_ipmi_conf);
 
 	slurm_mutex_unlock(&ipmi_mutex);
@@ -1203,6 +1226,13 @@ extern int acct_gather_energy_p_get_data(enum acct_energy_type data_type,
 		rc = SLURM_ERROR;
 		break;
 	}
+
+	/*
+	 * Close the dcmi context, since it has __thread on the variable each
+	 * thread will get a different pointer.
+	 */
+	_close_dcmi_context();
+
 	return rc;
 }
 
