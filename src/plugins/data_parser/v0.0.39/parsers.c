@@ -71,7 +71,7 @@
 
 #define CPU_FREQ_FLAGS_BUF_SIZE 64
 
-#define MAGIC_FOREACH_CSV_LIST 0x8891be2b
+#define MAGIC_FOREACH_CSV_STRING 0xb891be2b
 #define MAGIC_FOREACH_LIST 0xaefa2af3
 #define MAGIC_FOREACH_LIST_FLAG 0xa1d4acd2
 #define MAGIC_FOREACH_POPULATE_GLOBAL_TRES_LIST 0x31b8aad2
@@ -81,11 +81,11 @@
 #define MAGIC_FOREACH_HOSTLIST 0xae71b92b
 #define MAGIC_LIST_PER_TRES_TYPE_NCT 0xb1d8acd2
 
-#define PARSER_ARRAY(type) _parser_array_##type
-#define PARSER_FLAG_ARRAY(type) _parser_flag_array_##type
-#define PARSE_FUNC(type) _parse_##type
-#define DUMP_FUNC(type) _dump_##type
-#define SPEC_FUNC(type) _openapi_spec_##type
+#define PARSER_ARRAY(type) _v39_parser_array_##type
+#define PARSER_FLAG_ARRAY(type) _v39_parser_flag_array_##type
+#define PARSE_FUNC(type) _v39_parse_##type
+#define DUMP_FUNC(type) _v39_dump_##type
+#define SPEC_FUNC(type) _v39_openapi_spec_##type
 #define PARSE_DISABLED(type)                                                 \
 	static int PARSE_FUNC(type)(const parser_t *const parser, void *src, \
 				    data_t *dst, args_t *args,               \
@@ -122,7 +122,7 @@ typedef struct {
 	tres_explode_type_t type;
 	slurmdb_tres_nct_rec_t *tres_nct;
 	int tres_nct_count;
-	hostlist_t host_list;
+	hostlist_t *host_list;
 	args_t *args;
 	const parser_t *const parser;
 } foreach_list_per_tres_type_nct_t;
@@ -157,7 +157,7 @@ typedef struct {
 	int magic; /* MAGIC_FOREACH_HOSTLIST */
 	const parser_t *const parser;
 	args_t *args;
-	hostlist_t host_list;
+	hostlist_t *host_list;
 	data_t *parent_path;
 } foreach_hostlist_parse_t;
 
@@ -518,9 +518,8 @@ static int PARSE_FUNC(QOS_NAME)(const parser_t *const parser, void *obj,
 	if (rc) {
 		char *name = NULL, *path = NULL;
 		if (data_get_string_converted(src, &name))
-			name = xstrdup_printf(
-				"of type %s",
-				data_type_to_string(data_get_type(src)));
+			name = xstrdup_printf("of type %s",
+					      data_get_type_string(src));
 		on_error(PARSING, parser->type, args, rc,
 			 set_source_path(&path, parent_path),
 			 __func__, "Unable to resolve QOS %s", name);
@@ -788,8 +787,9 @@ static int DUMP_FUNC(QOS_PREEMPT_LIST)(const parser_t *const parser, void *obj,
 	return SLURM_SUCCESS;
 }
 
-static int PARSE_FUNC(ASSOC_ID)(const parser_t *const parser, void *obj,
-				data_t *src, args_t *args, data_t *parent_path)
+static int PARSE_FUNC(JOB_ASSOC_ID)(const parser_t *const parser, void *obj,
+				    data_t *src, args_t *args,
+				    data_t *parent_path)
 {
 	int rc = SLURM_SUCCESS;
 	slurmdb_job_rec_t *job = obj;
@@ -817,8 +817,8 @@ static int PARSE_FUNC(ASSOC_ID)(const parser_t *const parser, void *obj,
 	return rc;
 }
 
-static int DUMP_FUNC(ASSOC_ID)(const parser_t *const parser, void *obj,
-			       data_t *dst, args_t *args)
+static int DUMP_FUNC(JOB_ASSOC_ID)(const parser_t *const parser, void *obj,
+				   data_t *dst, args_t *args)
 {
 	slurmdb_job_rec_t *job = obj;
 	slurmdb_assoc_rec_t *assoc = NULL;
@@ -841,7 +841,7 @@ static int DUMP_FUNC(ASSOC_ID)(const parser_t *const parser, void *obj,
 		 * data.
 		 */
 		on_warn(DUMPING, parser->type, args, NULL, __func__,
-			"unknown association with id#%u. Unable to dump assocation.",
+			"Unknown association with id#%u. Unable to dump association.",
 			job->associd);
 		data_set_dict(dst);
 		return SLURM_SUCCESS;
@@ -913,7 +913,7 @@ static int PARSE_FUNC(TRES_STR)(const parser_t *const parser, void *obj,
 			      ESLURM_REST_FAIL_PARSING,
 			      set_source_path(&path, parent_path), __func__,
 			      "TRES should be LIST but is type %s",
-			      data_type_to_string(data_get_type(src)));
+			      data_get_type_string(src));
 		goto cleanup;
 	}
 
@@ -1708,7 +1708,7 @@ static int PARSE_FUNC(FLOAT64_NO_VAL)(const parser_t *const parser, void *obj,
 			      ESLURM_DATA_EXPECTED_DICT,
 			      set_source_path(&path, parent_path),
 			      __func__, "Expected dictionary but got %s",
-			      data_type_to_string(data_get_type(str)));
+			      data_get_type_string(str));
 		goto cleanup;
 	}
 
@@ -1719,7 +1719,7 @@ static int PARSE_FUNC(FLOAT64_NO_VAL)(const parser_t *const parser, void *obj,
 				      set_source_path(&path, parent_path),
 				      __func__,
 				      "Expected bool for \"set\" field but got %s",
-				      data_type_to_string(data_get_type(str)));
+				      data_get_type_string(str));
 			goto cleanup;
 		}
 
@@ -1732,7 +1732,7 @@ static int PARSE_FUNC(FLOAT64_NO_VAL)(const parser_t *const parser, void *obj,
 				      set_source_path(&path, parent_path),
 				      __func__,
 				      "Expected bool for \"infinite\" field but got %s",
-				      data_type_to_string(data_get_type(str)));
+				      data_get_type_string(str));
 			goto cleanup;
 		}
 
@@ -1746,7 +1746,7 @@ static int PARSE_FUNC(FLOAT64_NO_VAL)(const parser_t *const parser, void *obj,
 				      set_source_path(&path, parent_path),
 				      __func__,
 				      "Expected floating point number for \"number\" field but got %s",
-				      data_type_to_string(data_get_type(str)));
+				      data_get_type_string(str));
 			goto cleanup;
 		}
 
@@ -1842,7 +1842,7 @@ static int PARSE_FUNC(INT64)(const parser_t *const parser, void *obj,
 			      ESLURM_DATA_CONV_FAILED,
 			      set_source_path(&path, parent_path),
 			      __func__, "Expected integer but got %s",
-			      data_type_to_string(data_get_type(str)));
+			      data_get_type_string(str));
 
 	xfree(path);
 	return rc;
@@ -2011,7 +2011,7 @@ static int PARSE_FUNC(UINT64_NO_VAL)(const parser_t *const parser, void *obj,
 			      ESLURM_DATA_EXPECTED_DICT,
 			      set_source_path(&path, parent_path),
 			      __func__, "Expected dictionary but got %s",
-			      data_type_to_string(data_get_type(str)));
+			      data_get_type_string(str));
 		goto cleanup;
 	}
 
@@ -2022,7 +2022,7 @@ static int PARSE_FUNC(UINT64_NO_VAL)(const parser_t *const parser, void *obj,
 				      set_source_path(&path, parent_path),
 				      __func__,
 				      "Expected bool for \"set\" field but got %s",
-				      data_type_to_string(data_get_type(str)));
+				      data_get_type_string(str));
 			goto cleanup;
 		}
 
@@ -2035,7 +2035,7 @@ static int PARSE_FUNC(UINT64_NO_VAL)(const parser_t *const parser, void *obj,
 				      set_source_path(&path, parent_path),
 				      __func__,
 				      "Expected bool for \"infinite\" field but got %s",
-				      data_type_to_string(data_get_type(str)));
+				      data_get_type_string(str));
 			goto cleanup;
 		}
 
@@ -2049,7 +2049,7 @@ static int PARSE_FUNC(UINT64_NO_VAL)(const parser_t *const parser, void *obj,
 				      set_source_path(&path, parent_path),
 				      __func__,
 				      "Expected integer number for \"number\" field but got %s",
-				      data_type_to_string(data_get_type(str)));
+				      data_get_type_string(str));
 			goto cleanup;
 		}
 
@@ -2273,7 +2273,7 @@ static int DUMP_FUNC(STEP_NODES)(const parser_t *const parser, void *src,
 {
 	int rc;
 	slurmdb_step_rec_t *step = src;
-	hostlist_t host_list;
+	hostlist_t *host_list;
 
 	xassert(data_get_type(dst) == DATA_TYPE_NULL);
 	xassert(args->magic == MAGIC_ARGS);
@@ -2766,24 +2766,25 @@ void SPEC_FUNC(STATS_MSG_RPCS_BY_USER)(const parser_t *const parser,
 }
 
 typedef struct {
-	int magic; /* MAGIC_FOREACH_CSV_LIST */
+	int magic; /* MAGIC_FOREACH_CSV_STRING */
 	int rc;
 	char *dst;
 	char *pos;
 	const parser_t *const parser;
 	args_t *args;
 	data_t *parent_path;
-} parse_foreach_CSV_LIST_t;
+} parse_foreach_CSV_STRING_t;
 
-static data_for_each_cmd_t _parse_foreach_CSV_LIST_list(data_t *data, void *arg)
+static data_for_each_cmd_t _parse_foreach_CSV_STRING_list(data_t *data,
+							  void *arg)
 {
-	parse_foreach_CSV_LIST_t *args = arg;
+	parse_foreach_CSV_STRING_t *args = arg;
 
 	if (data_convert_type(data, DATA_TYPE_STRING) != DATA_TYPE_STRING) {
 		args->rc = on_error(PARSING, args->parser->type, args->args,
 				    ESLURM_DATA_CONV_FAILED, NULL, __func__,
 				    "unable to convert csv entry %s to string",
-				    data_type_to_string(data_get_type(data)));
+				    data_get_type_string(data));
 		return DATA_FOR_EACH_FAIL;
 	}
 
@@ -2793,16 +2794,17 @@ static data_for_each_cmd_t _parse_foreach_CSV_LIST_list(data_t *data, void *arg)
 	return DATA_FOR_EACH_CONT;
 }
 
-static data_for_each_cmd_t _parse_foreach_CSV_LIST_dict(const char *key,
-							data_t *data, void *arg)
+static data_for_each_cmd_t _parse_foreach_CSV_STRING_dict(const char *key,
+							  data_t *data,
+							  void *arg)
 {
-	parse_foreach_CSV_LIST_t *args = arg;
+	parse_foreach_CSV_STRING_t *args = arg;
 
 	if (data_convert_type(data, DATA_TYPE_STRING) != DATA_TYPE_STRING) {
 		args->rc = on_error(PARSING, args->parser->type, args->args,
 				    ESLURM_DATA_CONV_FAILED, NULL, __func__,
 				    "unable to convert csv entry %s to string",
-				    data_type_to_string(data_get_type(data)));
+				    data_get_type_string(data));
 		return DATA_FOR_EACH_FAIL;
 	}
 
@@ -2812,12 +2814,13 @@ static data_for_each_cmd_t _parse_foreach_CSV_LIST_dict(const char *key,
 	return DATA_FOR_EACH_CONT;
 }
 
-static int PARSE_FUNC(CSV_LIST)(const parser_t *const parser, void *obj,
-				data_t *src, args_t *args, data_t *parent_path)
+static int PARSE_FUNC(CSV_STRING)(const parser_t *const parser, void *obj,
+				  data_t *src, args_t *args,
+				  data_t *parent_path)
 {
 	char **dst = obj;
-	parse_foreach_CSV_LIST_t pargs = {
-		.magic = MAGIC_FOREACH_CSV_LIST,
+	parse_foreach_CSV_STRING_t pargs = {
+		.magic = MAGIC_FOREACH_CSV_STRING,
 		.parser = parser,
 		.args = args,
 		.parent_path = parent_path,
@@ -2829,10 +2832,10 @@ static int PARSE_FUNC(CSV_LIST)(const parser_t *const parser, void *obj,
 	xfree(*dst);
 
 	if (data_get_type(src) == DATA_TYPE_LIST) {
-		(void) data_list_for_each(src, _parse_foreach_CSV_LIST_list,
+		(void) data_list_for_each(src, _parse_foreach_CSV_STRING_list,
 					  &pargs);
 	} else if (data_get_type(src) == DATA_TYPE_DICT) {
-		(void) data_dict_for_each(src, _parse_foreach_CSV_LIST_dict,
+		(void) data_dict_for_each(src, _parse_foreach_CSV_STRING_dict,
 					  &pargs);
 	} else if (data_convert_type(src, DATA_TYPE_STRING) ==
 		   DATA_TYPE_STRING) {
@@ -2842,7 +2845,7 @@ static int PARSE_FUNC(CSV_LIST)(const parser_t *const parser, void *obj,
 		return on_error(PARSING, parser->type, args, ESLURM_DATA_CONV_FAILED,
 				NULL, __func__,
 				"Expected dictionary or list or string for comma delimited list but got %s",
-				data_type_to_string(data_get_type(src)));
+				data_get_type_string(src));
 	}
 
 	if (!pargs.rc)
@@ -2853,8 +2856,8 @@ static int PARSE_FUNC(CSV_LIST)(const parser_t *const parser, void *obj,
 	return pargs.rc;
 }
 
-static int DUMP_FUNC(CSV_LIST)(const parser_t *const parser, void *obj,
-			       data_t *dst, args_t *args)
+static int DUMP_FUNC(CSV_STRING)(const parser_t *const parser, void *obj,
+				 data_t *dst, args_t *args)
 {
 	char **src_ptr = obj;
 	char *src = *src_ptr;
@@ -3089,7 +3092,7 @@ static int PARSE_FUNC(CORE_SPEC)(const parser_t *const parser, void *obj,
 		return on_error(PARSING, parser->type, args, ESLURM_DATA_CONV_FAILED,
 				NULL, __func__,
 				"Expected integer for core specification but got %s",
-				data_type_to_string(data_get_type(src)));
+				data_get_type_string(src));
 
 	if (data_get_int(src) >= CORE_SPEC_THREAD)
 		return on_error(PARSING, parser->type, args,
@@ -3133,7 +3136,7 @@ static int PARSE_FUNC(THREAD_SPEC)(const parser_t *const parser, void *obj,
 		return on_error(PARSING, parser->type, args, ESLURM_DATA_CONV_FAILED,
 				NULL, __func__,
 				"Expected integer for thread specification but got %s",
-				data_type_to_string(data_get_type(src)));
+				data_get_type_string(src));
 
 	if (data_get_int(src) >= CORE_SPEC_THREAD)
 		return on_error(PARSING, parser->type, args,
@@ -3205,9 +3208,9 @@ static int DUMP_FUNC(NICE)(const parser_t *const parser, void *obj, data_t *dst,
 	return SLURM_SUCCESS;
 }
 
-static int PARSE_FUNC(JOB_MEM_PER_CPU)(const parser_t *const parser, void *obj,
-				       data_t *src, args_t *args,
-				       data_t *parent_path)
+static int PARSE_FUNC(MEM_PER_CPUS)(const parser_t *const parser, void *obj,
+				    data_t *src, args_t *args,
+				    data_t *parent_path)
 {
 	int rc;
 	uint64_t *mem = obj;
@@ -3233,7 +3236,7 @@ static int PARSE_FUNC(JOB_MEM_PER_CPU)(const parser_t *const parser, void *obj,
 			rc = on_error(PARSING, parser->type, args, rc,
 				      set_source_path(&path, parent_path),
 				      __func__, "string expected but got %s",
-				      data_type_to_string(data_get_type(src)));
+				      data_get_type_string(src));
 			xfree(path);
 			return rc;
 		}
@@ -3274,8 +3277,8 @@ static int PARSE_FUNC(JOB_MEM_PER_CPU)(const parser_t *const parser, void *obj,
 	return rc;
 }
 
-static int DUMP_FUNC(JOB_MEM_PER_CPU)(const parser_t *const parser, void *obj,
-				      data_t *dst, args_t *args)
+static int DUMP_FUNC(MEM_PER_CPUS)(const parser_t *const parser, void *obj,
+				   data_t *dst, args_t *args)
 {
 	uint64_t *mem = obj;
 	uint64_t cpu_mem = NO_VAL64;
@@ -3289,9 +3292,9 @@ static int DUMP_FUNC(JOB_MEM_PER_CPU)(const parser_t *const parser, void *obj,
 	return DUMP(UINT64_NO_VAL, cpu_mem, dst, args);
 }
 
-static int PARSE_FUNC(JOB_MEM_PER_NODE)(const parser_t *const parser, void *obj,
-					data_t *src, args_t *args,
-					data_t *parent_path)
+static int PARSE_FUNC(MEM_PER_NODE)(const parser_t *const parser, void *obj,
+				    data_t *src, args_t *args,
+				    data_t *parent_path)
 {
 	int rc;
 	uint64_t *mem = obj;
@@ -3317,7 +3320,7 @@ static int PARSE_FUNC(JOB_MEM_PER_NODE)(const parser_t *const parser, void *obj,
 			rc = on_error(PARSING, parser->type, args, rc,
 				      set_source_path(&path, parent_path),
 				      __func__, "string expected but got %s",
-				      data_type_to_string(data_get_type(src)));
+				      data_get_type_string(src));
 			xfree(path);
 			return rc;
 		}
@@ -3358,8 +3361,8 @@ static int PARSE_FUNC(JOB_MEM_PER_NODE)(const parser_t *const parser, void *obj,
 	return rc;
 }
 
-static int DUMP_FUNC(JOB_MEM_PER_NODE)(const parser_t *const parser, void *obj,
-				       data_t *dst, args_t *args)
+static int DUMP_FUNC(MEM_PER_NODE)(const parser_t *const parser, void *obj,
+				   data_t *dst, args_t *args)
 {
 	uint64_t *mem = obj;
 	uint64_t node_mem = NO_VAL64;
@@ -3414,7 +3417,7 @@ static void _dump_node_res(data_t *dnodes, job_resources_t *j,
 			   const size_t sock_inx, size_t *bit_inx,
 			   const size_t array_size)
 {
-	size_t bit_reps;
+	size_t bit_reps, spn, cps;
 	data_t *dnode = data_set_dict(data_list_append(dnodes));
 	data_t *dsockets = data_set_dict(data_key_set(dnode, "sockets"));
 	data_t **sockets;
@@ -3432,9 +3435,9 @@ static void _dump_node_res(data_t *dnodes, job_resources_t *j,
 		     j->memory_allocated[node_inx]);
 
 	/* set the used cores as found */
-
-	bit_reps =
-		j->sockets_per_node[sock_inx] * j->cores_per_socket[sock_inx];
+	spn = j->sockets_per_node[sock_inx];
+	cps = j->cores_per_socket[sock_inx];
+	bit_reps = spn * cps;
 	for (size_t i = 0; i < bit_reps; i++) {
 		size_t socket_inx = i / j->cores_per_socket[sock_inx];
 		size_t core_inx = i % j->cores_per_socket[sock_inx];
@@ -3483,7 +3486,7 @@ static int DUMP_FUNC(JOB_RES_NODES)(const parser_t *const parser, void *obj,
 				    data_t *dst, args_t *args)
 {
 	job_resources_t *j = obj;
-	hostlist_t hl = NULL;
+	hostlist_t *hl = NULL;
 	size_t bit_inx = 0;
 	size_t array_size;
 	size_t sock_inx = 0, sock_reps = 0;
@@ -3602,22 +3605,22 @@ static int DUMP_FUNC(STEP_INFO_MSG)(const parser_t *const parser, void *obj,
 				    data_t *dst, args_t *args)
 {
 	int rc = SLURM_SUCCESS;
-	job_step_info_response_msg_t **msg = obj;
+	job_step_info_response_msg_t *msg = obj;
 
 	xassert(args->magic == MAGIC_ARGS);
 	xassert(data_get_type(dst) == DATA_TYPE_NULL);
 
 	data_set_list(dst);
 
-	if (!*msg || !(*msg)->job_step_count) {
+	if (!msg || !msg->job_step_count) {
 		on_warn(DUMPING, parser->type, args, NULL, __func__,
 			"Zero steps to dump");
 		return SLURM_SUCCESS;
 	}
 
-	for (size_t i = 0; !rc && (i < (*msg)->job_step_count); ++i)
-		rc = DUMP(STEP_INFO, (*msg)->job_steps[i],
-			  data_list_append(dst), args);
+	for (size_t i = 0; !rc && (i < msg->job_step_count); ++i)
+		rc = DUMP(STEP_INFO, msg->job_steps[i], data_list_append(dst),
+			  args);
 
 	return rc;
 }
@@ -3634,7 +3637,7 @@ static data_for_each_cmd_t _foreach_hostlist_parse(data_t *data, void *arg)
 			 ESLURM_DATA_CONV_FAILED,
 			 set_source_path(&path, args->parent_path), __func__,
 			 "string expected but got %s",
-			 data_type_to_string(data_get_type(data)));
+			 data_get_type_string(data));
 		xfree(path);
 		return DATA_FOR_EACH_FAIL;
 	}
@@ -3692,8 +3695,8 @@ static int PARSE_FUNC(HOSTLIST)(const parser_t *const parser, void *obj,
 				data_t *src, args_t *args, data_t *parent_path)
 {
 	int rc = SLURM_SUCCESS;
-	hostlist_t *host_list_ptr = obj;
-	hostlist_t host_list = NULL;
+	hostlist_t **host_list_ptr = obj;
+	hostlist_t *host_list = NULL;
 	char *path = NULL;
 
 	xassert(args->magic == MAGIC_ARGS);
@@ -3735,7 +3738,7 @@ static int PARSE_FUNC(HOSTLIST)(const parser_t *const parser, void *obj,
 			      ESLURM_DATA_CONV_FAILED,
 			      set_source_path(&path, parent_path), __func__,
 			      "string expected but got %s",
-			      data_type_to_string(data_get_type(src)));
+			      data_get_type_string(src));
 		goto cleanup;
 	}
 
@@ -3753,8 +3756,8 @@ static int DUMP_FUNC(HOSTLIST)(const parser_t *const parser, void *obj,
 			       data_t *dst, args_t *args)
 {
 	int rc = SLURM_SUCCESS;
-	hostlist_t *host_list_ptr = obj;
-	hostlist_t host_list = *host_list_ptr;
+	hostlist_t **host_list_ptr = obj;
+	hostlist_t *host_list = *host_list_ptr;
 
 	xassert(args->magic == MAGIC_ARGS);
 	xassert(data_get_type(dst) == DATA_TYPE_NULL);
@@ -3763,7 +3766,7 @@ static int DUMP_FUNC(HOSTLIST)(const parser_t *const parser, void *obj,
 
 	if (hostlist_count(host_list)) {
 		char *host;
-		hostlist_iterator_t itr = hostlist_iterator_create(host_list);
+		hostlist_iterator_t *itr = hostlist_iterator_create(host_list);
 
 		while ((host = hostlist_next(itr))) {
 			data_set_string(data_list_append(dst), host);
@@ -3782,7 +3785,7 @@ static int PARSE_FUNC(HOSTLIST_STRING)(const parser_t *const parser, void *obj,
 {
 	int rc;
 	char **host_list_str = obj;
-	hostlist_t host_list = NULL;
+	hostlist_t *host_list = NULL;
 
 	xassert(args->magic == MAGIC_ARGS);
 
@@ -3803,7 +3806,7 @@ static int DUMP_FUNC(HOSTLIST_STRING)(const parser_t *const parser, void *obj,
 	int rc;
 	char **host_list_ptr = obj;
 	char *host_list_str = *host_list_ptr;
-	hostlist_t host_list;
+	hostlist_t *host_list;
 
 	xassert(args->magic == MAGIC_ARGS);
 	xassert(data_get_type(dst) == DATA_TYPE_NULL);
@@ -3986,7 +3989,9 @@ static int PARSE_FUNC(JOB_DESC_MSG_ARGV)(const parser_t *const parser,
 	}
 
 	rc = PARSE(STRING_ARRAY, job->argv, src, parent_path, args);
-	job->argc = envcount(job->argv);
+
+	for (job->argc = 0; job->argv && job->argv[job->argc]; job->argc++)
+		; /* no-op */
 
 	return rc;
 }
@@ -4026,7 +4031,7 @@ static int PARSE_FUNC(JOB_DESC_MSG_CPU_FREQ)(const parser_t *const parser,
 		return on_error(PARSING, parser->type, args, rc,
 				"data_get_string_converted()", __func__,
 				"string expected but got %s",
-				data_type_to_string(data_get_type(src)));
+				data_get_type_string(src));
 
 	if ((rc = cpu_freq_verify_cmdline(str, &job->cpu_freq_min,
 					  &job->cpu_freq_max,
@@ -4146,7 +4151,7 @@ static data_for_each_cmd_t _foreach_string_array_list(const data_t *data,
 		on_error(PARSING, args->parser->type, args->args, rc,
 			 "data_get_string_converted()", __func__,
 			 "expected string but got %s",
-			 data_type_to_string(data_get_type(data)));
+			 data_get_type_string(data));
 		return DATA_FOR_EACH_FAIL;
 	}
 
@@ -4170,7 +4175,7 @@ static data_for_each_cmd_t _foreach_string_array_dict(const char *key,
 		on_error(PARSING, args->parser->type, args->args, rc,
 			 "data_get_string_converted()", __func__,
 			 "expected string but got %s",
-			 data_type_to_string(data_get_type(data)));
+			 data_get_type_string(data));
 		return DATA_FOR_EACH_FAIL;
 	}
 
@@ -4215,7 +4220,7 @@ static int PARSE_FUNC(STRING_ARRAY)(const parser_t *const parser, void *obj,
 		on_error(PARSING, parser->type, args, ESLURM_DATA_EXPECTED_LIST,
 			 NULL, __func__,
 			 "expected a list of strings but got %s",
-			 data_type_to_string(data_get_type(src)));
+			 data_get_type_string(src));
 		goto cleanup;
 	}
 
@@ -4267,7 +4272,7 @@ static int PARSE_FUNC(SIGNAL)(const parser_t *const parser, void *obj,
 		return on_error(PARSING, parser->type, args, rc,
 				"data_get_string_converted()", __func__,
 				"expected string but got %s",
-				data_type_to_string(data_get_type(src)));
+				data_get_type_string(src));
 	}
 
 	if (!(*sig = sig_name2num(str))) {
@@ -4290,8 +4295,9 @@ static int DUMP_FUNC(SIGNAL)(const parser_t *const parser, void *obj,
 			     data_t *dst, args_t *args)
 {
 	uint16_t *sig = obj;
+	char *str = sig_num2name(*sig);
 
-	data_set_string_own(dst, sig_num2name(*sig));
+	data_set_string_own(dst, str);
 
 	return SLURM_SUCCESS;
 }
@@ -4308,7 +4314,7 @@ static int PARSE_FUNC(BITSTR)(const parser_t *const parser, void *obj,
 		return on_error(PARSING, parser->type, args,
 				ESLURM_DATA_CONV_FAILED, NULL, __func__,
 				"Expecting string but got %s",
-				data_type_to_string(data_get_type(src)));
+				data_get_type_string(src));
 
 	rc = bit_unfmt(b, data_get_string(src));
 
@@ -4319,11 +4325,13 @@ static int DUMP_FUNC(BITSTR)(const parser_t *const parser, void *obj,
 			     data_t *dst, args_t *args)
 {
 	bitstr_t *b = obj;
+	char *str;
 
 	if (!b)
 		return SLURM_SUCCESS;
 
-	data_set_string_own(dst, bit_fmt_full(b));
+	str = bit_fmt_full(b);
+	data_set_string_own(dst, str);
 
 	return SLURM_SUCCESS;
 }
@@ -4352,12 +4360,12 @@ static int PARSE_FUNC(JOB_DESC_MSG_NODES)(const parser_t *const parser, void *ob
 			return on_error(PARSING, parser->type, args,
 				      ESLURM_DATA_CONV_FAILED, NULL, __func__,
 				      "Minimum nodes must be an integer instead of %s",
-				      data_type_to_string(data_get_type(min)));
+				      data_get_type_string(min));
 		if (max && (data_convert_type(max, DATA_TYPE_INT_64) != DATA_TYPE_INT_64))
 			return on_error(PARSING, parser->type, args,
 				      ESLURM_DATA_CONV_FAILED, NULL, __func__,
 				      "Maximum nodes must be an integer instead of %s",
-				      data_type_to_string(data_get_type(max)));
+				      data_get_type_string(max));
 
 		job->max_nodes = data_get_int(max);
 		if (min)
@@ -4370,7 +4378,7 @@ static int PARSE_FUNC(JOB_DESC_MSG_NODES)(const parser_t *const parser, void *ob
 			return on_error(PARSING, parser->type, args,
 					ESLURM_DATA_CONV_FAILED, NULL, __func__,
 					"Expected string instead of %s for node counts",
-					data_type_to_string(data_get_type(src)));
+					data_get_type_string(src));
 
 		if (!verify_node_count(data_get_string(src), &min, &max,
 				       &job_size_str)) {
@@ -4401,11 +4409,11 @@ static int DUMP_FUNC(JOB_DESC_MSG_NODES)(const parser_t *const parser, void *obj
 	if (job->job_size_str) {
 		data_set_string(dst, job->job_size_str);
 	} else if (job->min_nodes != job->max_nodes)
-		data_set_string_own(dst,
-				    xstrdup_printf("%d-%d", job->min_nodes,
-						   job->max_nodes));
-	else
-		data_set_string_own(dst, xstrdup_printf("%d", job->min_nodes));
+		data_set_string_fmt(dst, "%d-%d", job->min_nodes,
+				    job->max_nodes);
+	else {
+		data_set_string_fmt(dst, "%d", job->min_nodes);
+	}
 
 	return SLURM_SUCCESS;
 }
@@ -4416,10 +4424,10 @@ static int DUMP_FUNC(JOB_INFO_STDIN)(const parser_t *const parser, void *obj,
 			    data_t *dst, args_t *args)
 {
 	slurm_job_info_t *job = obj;
-	char *str = xmalloc(PATH_MAX + 1);
+	char path[PATH_MAX];
 
-	slurm_get_job_stdin(str, PATH_MAX, job);
-	data_set_string_own(dst, str);
+	slurm_get_job_stdin(path, sizeof(path), job);
+	data_set_string(dst, path);
 
 	return SLURM_SUCCESS;
 }
@@ -4430,10 +4438,10 @@ static int DUMP_FUNC(JOB_INFO_STDOUT)(const parser_t *const parser, void *obj,
 			    data_t *dst, args_t *args)
 {
 	slurm_job_info_t *job = obj;
-	char *str = xmalloc(PATH_MAX + 1);
+	char path[PATH_MAX];
 
-	slurm_get_job_stdout(str, PATH_MAX, job);
-	data_set_string_own(dst, str);
+	slurm_get_job_stdout(path, sizeof(path), job);
+	data_set_string(dst, path);
 
 	return SLURM_SUCCESS;
 }
@@ -4444,10 +4452,10 @@ static int DUMP_FUNC(JOB_INFO_STDERR)(const parser_t *const parser, void *obj,
 			    data_t *dst, args_t *args)
 {
 	slurm_job_info_t *job = obj;
-	char *str = xmalloc(PATH_MAX + 1);
+	char path[PATH_MAX];
 
-	slurm_get_job_stderr(str, PATH_MAX, job);
-	data_set_string_own(dst, str);
+	slurm_get_job_stderr(path, sizeof(path), job);
+	data_set_string(dst, path);
 
 	return SLURM_SUCCESS;
 }
@@ -4690,6 +4698,7 @@ static const flag_bit_t PARSER_FLAG_ARRAY(SLURMDB_JOB_FLAGS)[] = {
 	add_flag_bit(SLURMDB_JOB_FLAG_SUBMIT, "STARTED_ON_SUBMIT"),
 	add_flag_bit(SLURMDB_JOB_FLAG_SCHED, "STARTED_ON_SCHEDULE"),
 	add_flag_bit(SLURMDB_JOB_FLAG_BACKFILL, "STARTED_ON_BACKFILL"),
+	add_flag_bit(SLURMDB_JOB_FLAG_START_R, "START_RECEIVED"),
 };
 
 #define add_skip(field) \
@@ -4707,7 +4716,7 @@ static const parser_t PARSER_ARRAY(JOB)[] = {
 	add_parse(UINT32, array_max_tasks, "array/limits/max/running/tasks", NULL),
 	add_parse(UINT32_NO_VAL, array_task_id, "array/task_id", NULL),
 	add_parse(STRING, array_task_str, "array/task", NULL),
-	add_complex_parser(slurmdb_job_rec_t, ASSOC_ID, false, "association", NULL),
+	add_complex_parser(slurmdb_job_rec_t, JOB_ASSOC_ID, false, "association", NULL),
 	add_parse(STRING, blockid, "block", NULL),
 	add_parse(STRING, cluster, "cluster", NULL),
 	add_parse(STRING, constraints, "constraints", NULL),
@@ -4738,8 +4747,8 @@ static const parser_t PARSER_ARRAY(JOB)[] = {
 	add_parse_overload(UINT32_NO_VAL, priority, 1, "priority", "Request specific job priority"),
 	add_parse(QOS_ID, qosid, "qos", NULL),
 	add_parse(UINT32, req_cpus, "required/CPUs", NULL),
-	add_parse_overload(JOB_MEM_PER_CPU, req_mem, 2, "required/memory_per_cpu", NULL),
-	add_parse_overload(JOB_MEM_PER_NODE, req_mem, 2, "required/memory_per_node", NULL),
+	add_parse_overload(MEM_PER_CPUS, req_mem, 2, "required/memory_per_cpu", NULL),
+	add_parse_overload(MEM_PER_NODE, req_mem, 2, "required/memory_per_node", NULL),
 
 	/*
 	 * This will give a large negative value instead of the slurm.conf
@@ -5259,8 +5268,8 @@ static const parser_t PARSER_ARRAY(NODE)[] = {
 	add_parse(EXT_SENSORS_DATA_PTR, ext_sensors, "external_sensors", NULL),
 	add_parse(STRING, extra, "extra", NULL),
 	add_parse(POWER_MGMT_DATA_PTR, power, "power", NULL),
-	add_parse(CSV_LIST, features, "features", NULL),
-	add_parse(CSV_LIST, features_act, "active_features", NULL),
+	add_parse(CSV_STRING, features, "features", NULL),
+	add_parse(CSV_STRING, features_act, "active_features", NULL),
 	add_parse(STRING, gres, "gres", NULL),
 	add_parse(STRING, gres_drain, "gres_drained", NULL),
 	add_parse(STRING, gres_used, "gres_used", NULL),
@@ -5274,7 +5283,7 @@ static const parser_t PARSER_ARRAY(NODE)[] = {
 	add_parse_bit_flag_array(node_info_t, NODE_STATES, false, node_state, "state", NULL),
 	add_parse(STRING, os, "operating_system", NULL),
 	add_parse(USER_ID, owner, "owner", NULL),
-	add_parse(CSV_LIST, partitions, "partitions", NULL),
+	add_parse(CSV_STRING, partitions, "partitions", NULL),
 	add_parse(UINT16, port, "port", NULL),
 	add_parse(UINT64, real_memory, "real_memory", NULL),
 	add_parse(STRING, comment, "comment", NULL),
@@ -5338,7 +5347,6 @@ static const flag_bit_t PARSER_FLAG_ARRAY(JOB_FLAGS)[] = {
 	add_flag_bit(RESET_ACCRUE_TIME, "JOB_ACCRUE_TIME_RESET"),
 	add_flag_bit(CRON_JOB, "CRON_JOB"),
 	add_flag_bit(JOB_MEM_SET, "EXACT_MEMORY_REQUESTED"),
-	add_flag_bit(JOB_RESIZED, "JOB_RESIZED"),
 	add_flag_bit(USE_DEFAULT_ACCT, "USING_DEFAULT_ACCOUNT"),
 	add_flag_bit(USE_DEFAULT_PART, "USING_DEFAULT_PARTITION"),
 	add_flag_bit(USE_DEFAULT_QOS, "USING_DEFAULT_QOS"),
@@ -5473,7 +5481,7 @@ static const parser_t PARSER_ARRAY(JOB_INFO)[] = {
 	add_parse(UINT32_NO_VAL, het_job_offset, "het_job_offset", NULL),
 	add_parse(UINT32, job_id, "job_id", NULL),
 	add_parse(JOB_RES_PTR, job_resrcs, "job_resources", NULL),
-	add_parse(CSV_LIST, job_size_str, "job_size_str", NULL),
+	add_parse(CSV_STRING, job_size_str, "job_size_str", NULL),
 	add_parse(JOB_STATE, job_state, "job_state", NULL),
 	add_parse(UINT64, last_sched_eval, "last_sched_evaluation", NULL),
 	add_parse(STRING, licenses, "licenses", NULL),
@@ -5497,8 +5505,8 @@ static const parser_t PARSER_ARRAY(JOB_INFO)[] = {
 	add_parse(UINT32_NO_VAL, num_tasks, "tasks", NULL),
 	add_parse(STRING, partition, "partition", NULL),
 	add_parse(STRING, prefer, "prefer", NULL),
-	add_parse_overload(JOB_MEM_PER_CPU, pn_min_memory, 1, "memory_per_cpu", NULL),
-	add_parse_overload(JOB_MEM_PER_NODE, pn_min_memory, 1, "memory_per_node", NULL),
+	add_parse_overload(MEM_PER_CPUS, pn_min_memory, 1, "memory_per_cpu", NULL),
+	add_parse_overload(MEM_PER_NODE, pn_min_memory, 1, "memory_per_node", NULL),
 	add_parse(UINT16_NO_VAL, pn_min_cpus, "minimum_cpus_per_node", NULL),
 	add_parse(UINT32_NO_VAL, pn_min_tmp_disk, "minimum_tmp_disk_per_node", NULL),
 	add_parse_bit_flag_array(slurm_job_info_t, POWER_FLAGS, false, power_flags, "power/flags", NULL),
@@ -5790,7 +5798,6 @@ static const flag_bit_t PARSER_FLAG_ARRAY(RESERVATION_FLAGS)[] = {
 	add_flag_bit(RESERVE_FLAG_NO_PART_NODES, "NO_PART_NODES"),
 	add_flag_bit(RESERVE_FLAG_OVERLAP, "OVERLAP"),
 	add_flag_bit(RESERVE_FLAG_SPEC_NODES, "SPEC_NODES"),
-	add_flag_bit(RESERVE_FLAG_FIRST_CORES, "FIRST_CORES"),
 	add_flag_bit(RESERVE_FLAG_TIME_FLOAT, "TIME_FLOAT"),
 	add_flag_bit(RESERVE_FLAG_REPLACE, "REPLACE"),
 	add_flag_bit(RESERVE_FLAG_ALL_NODES, "ALL_NODES"),
@@ -6002,7 +6009,7 @@ static const parser_t PARSER_ARRAY(JOB_DESC_MSG)[] = {
 	add_skip(environment),
 	add_skip(env_hash),
 	add_skip(env_size),
-	add_parse(CSV_LIST, exc_nodes, "excluded_nodes", NULL),
+	add_parse(CSV_STRING, exc_nodes, "excluded_nodes", NULL),
 	add_parse(STRING, extra, "extra", NULL),
 	add_parse(STRING, features, "constraints", NULL),
 	add_skip(fed_siblings_active),
@@ -6040,7 +6047,7 @@ static const parser_t PARSER_ARRAY(JOB_DESC_MSG)[] = {
 	add_parse(BOOL16, reboot, "reboot", NULL),
 	add_skip(resp_host),
 	add_skip(restart_cnt),
-	add_parse(CSV_LIST, req_nodes, "required_nodes", NULL),
+	add_parse(CSV_STRING, req_nodes, "required_nodes", NULL),
 	add_parse(BOOL16, requeue, "requeue", NULL),
 	add_parse(STRING, reservation, "reservation", NULL),
 	add_parse(STRING, script, "script", NULL),
@@ -6085,8 +6092,8 @@ static const parser_t PARSER_ARRAY(JOB_DESC_MSG)[] = {
 	add_parse(UINT16, ntasks_per_board, "tasks_per_board", NULL),
 	add_parse(UINT16, ntasks_per_tres, "ntasks_per_tres", NULL),
 	add_parse(UINT16, pn_min_cpus, "minimum_cpus_per_node", NULL),
-	add_parse_overload(JOB_MEM_PER_CPU, pn_min_memory, 1, "memory_per_cpu", NULL),
-	add_parse_overload(JOB_MEM_PER_NODE, pn_min_memory, 1, "memory_per_node", NULL),
+	add_parse_overload(MEM_PER_CPUS, pn_min_memory, 1, "memory_per_cpu", NULL),
+	add_parse_overload(MEM_PER_NODE, pn_min_memory, 1, "memory_per_node", NULL),
 	add_parse(UINT32, pn_min_tmp_disk, "temporary_disk_per_node", NULL),
 	add_parse(STRING, req_context, "selinux_context", NULL),
 	add_parse(UINT32_NO_VAL, req_switch, "required_switches", NULL),
@@ -6115,8 +6122,8 @@ static const parser_t PARSER_ARRAY(UPDATE_NODE_MSG)[] = {
 	add_parse(STRING, comment, "comment", "arbitrary comment"),
 	add_parse(UINT32, cpu_bind, "cpu_bind", "default CPU binding type"),
 	add_parse(STRING, extra, "extra", "arbitrary string"),
-	add_parse(CSV_LIST, features, "features", "new available feature for node"),
-	add_parse(CSV_LIST, features_act, "features_act", "new active feature for node"),
+	add_parse(CSV_STRING, features, "features", "new available feature for node"),
+	add_parse(CSV_STRING, features_act, "features_act", "new active feature for node"),
 	add_parse(STRING, gres, "gres", "new generic resources for node"),
 	add_parse(HOSTLIST_STRING, node_addr, "address", "communication name"),
 	add_parse(HOSTLIST_STRING, node_hostname, "hostname", "node's hostname"),
@@ -6379,18 +6386,18 @@ static const parser_t parsers[] = {
 	addps(JOB_STATE, uint32_t, NEED_NONE, STRING, NULL),
 	addps(USER_ID, uid_t, NEED_NONE, STRING, NULL),
 	addpsp(TRES_STR, TRES_LIST, char *, NEED_TRES, NULL),
-	addpsa(CSV_LIST, STRING, char *, NEED_NONE, NULL),
+	addpsa(CSV_STRING, STRING, char *, NEED_NONE, NULL),
 	addpsa(LICENSES, LICENSE, license_info_msg_t, NEED_NONE, NULL),
 	addps(CORE_SPEC, uint16_t, NEED_NONE, INT32, NULL),
 	addps(THREAD_SPEC, uint16_t, NEED_NONE, INT32, NULL),
 	addps(NICE, uint32_t, NEED_NONE, INT32, NULL),
-	addpsp(JOB_MEM_PER_CPU, UINT64_NO_VAL, uint64_t, NEED_NONE, NULL),
-	addpsp(JOB_MEM_PER_NODE, UINT64_NO_VAL, uint64_t, NEED_NONE, NULL),
+	addpsp(MEM_PER_CPUS, UINT64_NO_VAL, uint64_t, NEED_NONE, NULL),
+	addpsp(MEM_PER_NODE, UINT64_NO_VAL, uint64_t, NEED_NONE, NULL),
 	addps(ALLOCATED_CORES, uint32_t, NEED_NONE, INT32, NULL),
 	addps(ALLOCATED_CPUS, uint32_t, NEED_NONE, INT32, NULL),
 	addps(CONTROLLER_PING_MODE, int, NEED_NONE, STRING, NULL),
 	addps(CONTROLLER_PING_RESULT, bool, NEED_NONE, STRING, NULL),
-	addpsa(HOSTLIST, STRING, hostlist_t, NEED_NONE, NULL),
+	addpsa(HOSTLIST, STRING, hostlist_t *, NEED_NONE, NULL),
 	addpsa(HOSTLIST_STRING, STRING, char *, NEED_NONE, NULL),
 	addps(CPU_FREQ_FLAGS, uint32_t, NEED_NONE, STRING, NULL),
 	addps(ERROR, int, NEED_NONE, STRING, NULL),
@@ -6404,7 +6411,7 @@ static const parser_t parsers[] = {
 	addps(HOLD, uint32_t, NEED_NONE, BOOL, "Job held"),
 
 	/* Complex type parsers */
-	addpcp(ASSOC_ID, ASSOC_SHORT_PTR, slurmdb_job_rec_t, NEED_ASSOC, NULL),
+	addpcp(JOB_ASSOC_ID, ASSOC_SHORT_PTR, slurmdb_job_rec_t, NEED_ASSOC, NULL),
 	addpca(QOS_PREEMPT_LIST, STRING, slurmdb_qos_rec_t, NEED_QOS, NULL),
 	addpcp(STEP_NODES, HOSTLIST, slurmdb_step_rec_t, NEED_TRES, NULL),
 	addpca(STEP_TRES_REQ_MAX, TRES, slurmdb_step_rec_t, NEED_TRES, NULL),
@@ -6430,7 +6437,7 @@ static const parser_t parsers[] = {
 	addpca(NODES, NODE, node_info_msg_t, NEED_NONE, NULL),
 	addpca(JOB_INFO_GRES_DETAIL, STRING, slurm_job_info_t, NEED_NONE, NULL),
 	addpcs(JOB_RES_NODES, job_resources_t, NEED_NONE, ARRAY, NULL),
-	addpca(STEP_INFO_MSG, STEP_INFO, job_step_info_response_msg_t *, NEED_TRES, NULL),
+	addpca(STEP_INFO_MSG, STEP_INFO, job_step_info_response_msg_t, NEED_TRES, NULL),
 	addpca(PARTITION_INFO_MSG, PARTITION_INFO, partition_info_msg_t, NEED_TRES, NULL),
 	addpca(RESERVATION_INFO_MSG, RESERVATION_INFO, reserve_info_msg_t, NEED_NONE, NULL),
 	addpca(RESERVATION_INFO_CORE_SPEC, RESERVATION_CORE_SPEC, reserve_info_t, NEED_NONE, NULL),
@@ -6465,6 +6472,7 @@ static const parser_t parsers[] = {
 	addpp(CRON_ENTRY_PTR, cron_entry_t *, CRON_ENTRY),
 	addpp(JOB_ARRAY_RESPONSE_MSG_PTR, job_array_resp_msg_t *, JOB_ARRAY_RESPONSE_MSG),
 	addpp(NODES_PTR, node_info_msg_t *, NODES),
+	addpp(STEP_INFO_MSG_PTR, job_step_info_response_msg_t *, STEP_INFO_MSG),
 
 	/* Array of parsers */
 	addpa(ASSOC_SHORT, slurmdb_assoc_rec_t),
@@ -6571,10 +6579,10 @@ extern const parser_t *const find_parser_by_type(type_t type)
 		if (parsers[i].type == type)
 			return &parsers[i];
 
-	fatal_abort("%s: failed to find parser with type %u", __func__, type);
+	return NULL;
 }
 
-extern void parsers_init()
+extern void parsers_init(void)
 {
 #ifndef NDEBUG
 	/* sanity check the parsers */

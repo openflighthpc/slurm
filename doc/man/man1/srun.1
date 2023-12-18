@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "October 2023" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "November 2023" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -48,32 +48,6 @@ directory.
 
 .SH "OPTIONS"
 .LP
-
-.TP
-\fB\-\-accel\-bind\fR=<\fIoptions\fR>
-Control how tasks are bound to generic resources of type gpu and nic.
-Multiple options may be specified. Supported options include:
-.IP
-.RS
-.TP
-\fBg\fR
-Bind each task to GPUs which are closest to the allocated CPUs.
-.IP
-
-.TP
-\fBn\fR
-Bind each task to NICs which are closest to the allocated CPUs.
-.IP
-
-.TP
-\fBv\fR
-Verbose mode. Log how tasks are bound to GPU and NIC devices.
-.IP
-
-.TP
-This option applies to job allocations.
-.RE
-.IP
 
 .TP
 \fB\-A\fR, \fB\-\-account\fR=<\fIaccount\fR>
@@ -431,7 +405,7 @@ Unique name for OCI container.
 \fB\-\-contiguous\fR
 If set, then the allocated nodes must form a contiguous set.
 
-\fBNOTE\fR: If SelectPlugin=cons_res this option won't be honored
+\fBNOTE\fR: If the SelectType is cons_tres this option won't be honored
 with the \fBtopology/tree\fR or \fBtopology/3d_torus\fR
 plugins, both of which can modify the node ordering. This option applies to job
 allocations.
@@ -647,7 +621,7 @@ This option applies to job and step allocations.
 .IP
 
 .TP
-\fB\-\-cpu\-freq\fR=<\fIp1\fR>[\-\fIp2\fR[:\fIp3\fR]]
+\fB\-\-cpu\-freq\fR=<\fIp1\fR>[\-\fIp2\fR][:\fIp3\fR]
 
 Request that the job step initiated by this srun command be run at some
 requested frequency if possible, on the CPUs selected for the step on
@@ -661,22 +635,29 @@ scaling_governor to UserSpace. See below for definition of the values.
 will set the scaling_governor to the corresponding value. The governor has to be
 in the list set by the slurm.conf option CpuFreqGovernors.
 
-When \fBp2\fR is present, p1 will be the minimum scaling frequency and
-p2 will be the maximum scaling frequency.
+When \fBp2\fR is present, \fBp1\fR will be the minimum scaling frequency and
+\fBp2\fR will be the maximum scaling frequency. In that case the governor
+\fBp3\fR or CpuFreqDef cannot be UserSpace since it doesn't support a range.
 
-\fBp2\fR can be  [#### | medium | high | highm1] p2 must be greater than p1.
+\fBp2\fR can be  [#### | medium | high | highm1]. p2 must be greater than p1 and
+is incompatible with UserSpace governor.
 
 \fBp3\fR can be [Conservative | OnDemand | Performance | PowerSave | SchedUtil |
 UserSpace]
 which will set the governor to the corresponding value.
 
-If \fBp3\fR is UserSpace, the frequency scaling_speed will be set by a power
-or energy aware scheduling strategy to a value between p1 and p2 that lets the
-job run within the site's power goal. The job may be delayed if p1 is higher
-than a frequency that allows the job to run within the goal.
+If \fBp3\fR is UserSpace, the frequency scaling_speed, scaling_max_freq and
+scaling_min_freq will be statically set to the value defined by \fBp1\fR.
 
-If the current frequency is < min, it will be set to min. Likewise,
-if the current frequency is > max, it will be set to max.
+Any requested frequency below the minimum available frequency will be rounded
+to the minimum available frequency. In the same way, any requested frequency
+above the maximum available frequency will be rounded to the maximum available
+frequency.
+
+The \fBCpuFreqDef\fR parameter in slurm.conf will be used to set the governor
+in absence of \fBp3\fR. If there's no \fBCpuFreqDef\fR, the default governor
+will be to use the system current governor set in each cpu. Specifying a
+range without \fBCpuFreqDef\fR or a specific governor is therefore not allowed.
 
 Acceptable values at present include:
 .IP
@@ -772,9 +753,11 @@ This option applies to job and step allocations.
 
 .TP
 \fB\-\-cpus\-per\-gpu\fR=<\fIncpus\fR>
-Advise Slurm that ensuing job steps will require \fIncpus\fR processors per
-allocated GPU.
+Request that \fIncpus\fR processors be allocated per allocated GPU.
+This option implies \-\-exact.
 Not compatible with the \fB\-\-cpus\-per\-task\fR option.
+
+This option applies to job and step allocations.
 .IP
 
 .TP
@@ -941,8 +924,8 @@ job allocations.
 Specify alternate distribution methods for remote processes.
 For job allocation, this sets environment variables that will be used by
 subsequent srun requests. Task distribution affects job allocation at the
-last stage of the evaluation of available resources by the cons_res and
-cons_tres plugins. Consequently, other options (e.g. \-\-ntasks\-per\-node,
+last stage of the evaluation of available resources by the
+cons_tres plugin. Consequently, other options (e.g. \-\-ntasks\-per\-node,
 \-\-cpus\-per\-task) may affect resource selection prior to task distribution.
 To ensure a specific task distribution, jobs should have access to entire
 nodes, which can be accomplished by using the \fB\-\-exclusive\fR flag
@@ -960,7 +943,7 @@ The second and third distributions apply only if task affinity is enabled.
 The third distribution is supported only if the task/cgroup plugin is
 configured. The default value for each distribution type is specified by *.
 
-Note that with select/cons_res and select/cons_tres, the number of CPUs
+Note that with select/cons_tres, the number of CPUs
 allocated to each socket and node may be different. Refer to
 https://slurm.schedmd.com/mc_support.html
 for more information on resource allocation, distribution of tasks to
@@ -993,7 +976,7 @@ nodes each with two cpus. A four\-task cyclic distribution request
 will distribute those tasks to the nodes with tasks one and four on
 the first node, task two on the second node, and task three on the
 third node.
-Note that when SelectType is select/cons_res, the same number of CPUs
+Note that when SelectType is select/cons_tres, the same number of CPUs
 may not be allocated on each node. Task distribution will be
 round\-robin among all the nodes with CPUs yet to be assigned to tasks.
 Cyclic distribution is the default behavior if the number
@@ -1260,9 +1243,31 @@ environment will use the value given by \fB\-\-export\fR.
 .IP
 
 .TP
+\fB\-\-external\-launcher\fR
+Create a special step on one or more allocated nodes which won't consume any
+resources, but will have access to all of the job's allocated resources on the
+nodes.
+
+Options like --ntasks-per-*, --mem*, --cpus*, --tres*, --gres*, will be ignored.
+
+This is meant for use MPI implementations that require their own launcher.
+This launches a step with access to all the resources and which will later
+spawn any number of user processes with access to all these resources.
+
+The resource usage within this special step will still be accounted for if the
+accounting plugins are enabled. This special step can be overlapped with any
+other step.
+
+\fBNOTE\fR: This option is not intended to be used directly.
+.IP
+
+.TP
 \fB\-\-extra\fR=<\fIstring\fR>
-An arbitrary string enclosed in double quotes if using spaces or some
+An arbitrary string enclosed in single or double quotes if using spaces or some
 special characters.
+
+If \fBSchedulerParameters=extra_constraints\fR is enabled, this string is used
+for node filtering based on the \fIExtra\fR field in each node.
 .IP
 
 .TP
@@ -1286,7 +1291,7 @@ If task/affinity plugin is enabled, then specifying an allocation in this
 manner also sets a default \fB\-\-cpu\-bind\fR option of \fIthreads\fR
 if the \fB\-B\fR option specifies a thread count, otherwise an option of
 \fIcores\fR if a core count is specified, otherwise an option of \fIsockets\fR.
-If SelectType is configured to select/cons_res, it must have a parameter of
+If SelectType is configured to select/cons_tres, it must have a parameter of
 CR_Core, CR_Core_Memory, CR_Socket, or CR_Socket_Memory for this option
 to be honored.
 If not specified, the scontrol show job will display 'ReqS:C:T=*:*:*'. This
@@ -1303,77 +1308,8 @@ of tasks as one task per thread.
 
 .TP
 \fB\-\-gpu\-bind\fR=[verbose,]<\fItype\fR>
-Bind tasks to specific GPUs.
-By default every spawned task can access every GPU allocated to the step.
-If "verbose," is specified before <\fItype\fR>, then print out GPU binding
-debug information to the stderr of the tasks. GPU binding is ignored if there is
-only one task.
-
-Supported \fItype\fR options:
-.IP
-.RS
-.TP 10
-\fBclosest\fR
-Bind each task to all GPU(s) with matching cores. See
-https://slurm.schedmd.com/gres.conf.html#OPT_Cores.
-In a NUMA environment, each task may be bound to more than one GPU (i.e.
-all GPUs in that NUMA environment).
-.IP
-
-.TP
-\fBmap_gpu:<list>\fR
-Bind by setting GPU masks on tasks (or ranks) as specified where <list> is
-<gpu_id_for_task_0>,<gpu_id_for_task_1>,... GPU IDs are interpreted as decimal
-values. If the number of tasks (or ranks) exceeds the number of elements in this
-list, elements in the list will be reused as needed starting from the beginning
-of the list. To simplify support for large task counts, the lists may follow a
-map with an asterisk and repetition count. For example "map_gpu:0*4,1*4".
-If the task/cgroup plugin is used and ConstrainDevices is set in cgroup.conf,
-then the GPU IDs are zero\-based indexes relative to the GPUs allocated to the
-job (e.g. the first GPU is 0, even if the global ID is 3). Otherwise, the GPU
-IDs are global IDs, and all GPUs on each node in the job should be allocated for
-predictable binding results.
-.IP
-
-.TP
-\fBmask_gpu:<list>\fR
-Bind by setting GPU masks on tasks (or ranks) as specified where <list> is
-<gpu_mask_for_task_0>,<gpu_mask_for_task_1>,... The mapping is specified for
-a node and identical mapping is applied to the tasks on every node (i.e. the
-lowest task ID on each node is mapped to the first mask specified in the list,
-etc.). GPU masks are always interpreted as hexadecimal values but can be
-preceded with an optional '0x'. To simplify support for large task counts, the
-lists may follow a map with an asterisk and repetition count.
-For example "mask_gpu:0x0f*4,0xf0*4".
-If the task/cgroup plugin is used and ConstrainDevices is set in cgroup.conf,
-then the GPU IDs are zero\-based indexes relative to the GPUs allocated to the
-job (e.g. the first GPU is 0, even if the global ID is 3). Otherwise, the GPU
-IDs are global IDs, and all GPUs on each node in the job should be allocated for
-predictable binding results.
-.IP
-
-.TP
-\fBnone\fR
-Do not bind tasks to GPUs (turns off binding if \-\-gpus\-per\-task is
-requested).
-.IP
-
-.TP
-\fBper_task:<gpus_per_task>\fR
-Each task will be bound to the number of gpus specified in
-\fI<gpus_per_task>\fR. Gpus are assigned in order to tasks. The first task will
-be assigned the first x number of gpus on the node etc.
-.IP
-
-.TP
-\fBsingle:<tasks_per_gpu>\fR
-Like \fI\-\-gpu\-bind=closest\fR, except that each task can only be bound to a
-single GPU, even when it can be bound to multiple GPUs that are equally close.
-Each task is bound to the first GPU available to that task, excluding gpus that
-have filled their \fI<tasks_per_gpu>\fR quota with lower index tasks.
-The available GPUs are determined by the socket affinity of the task and the
-socket affinity of the GPUs as specified in gres.conf's \fICores\fR parameter.
-.RE
+Equivalent to \-\-tres\-bind=gres/gpu:[verbose,]<\fItype\fR>
+See \fB\-\-tres\-bind\fR for all options and documentation.
 .IP
 
 .TP
@@ -1466,8 +1402,9 @@ requested in a comma separated list, for example:
 \fB\-\-gpus\-per\-socket\fR and \fB\-\-gpus\-per\-node\fR options.
 This option requires an explicit task count, e.g. \-n, \-\-ntasks or "\-\-gpus=X
 \-\-gpus\-per\-task=Y" rather than an ambiguous range of nodes with \-N, \-\-nodes.
-This option will implicitly set \-\-gpu\-bind=per_task:<gpus_per_task>, but that
-can be overridden with an explicit \-\-gpu\-bind specification.
+This option will implicitly set \-\-tres\-bind=gres/gpu:per_task:<gpus_per_task>,
+but that can be overridden with an explicit \-\-tres\-bind=gres/gpu
+specification.
 .IP
 
 .TP
@@ -1514,7 +1451,7 @@ This option may permit a job to be allocated resources sooner than otherwise
 possible, but may result in lower job performance.
 This option applies to job allocations.
 .br
-\fBNOTE\fR: This option is specific to \fBSelectType=cons_res\fR.
+\fBNOTE\fR: This option is specific to \fBSelectType=cons_tres\fR.
 .IP
 
 .TP
@@ -1887,7 +1824,7 @@ per task; \fB\-\-mem\-per\-cpu\fR will be reduced to a value no larger than
 value will equal the original \fB\-\-mem\-per\-cpu\fR value specified by
 the user.
 This parameter would generally be used if individual processors
-are allocated to jobs (\fBSelectType=select/cons_res\fR).
+are allocated to jobs (\fBSelectType=select/cons_tres\fR).
 If resources are allocated by core, socket, or whole nodes, then the number
 of CPUs allocated to a job may be higher than the task count and the value
 of \fB\-\-mem\-per\-cpu\fR should be adjusted accordingly.
@@ -2138,6 +2075,12 @@ will ensure that.
 .IP
 
 .TP
+\fBdisable_rdzv_get\fR
+Disable rendezvous gets in Slingshot NICs, which can improve performance for
+certain applications.
+.IP
+
+.TP
 \fBdef_<rsrc>\fR=<\fIval\fR>
 Per-CPU reserved allocation for this resource.
 .IP
@@ -2308,6 +2251,8 @@ of tasks.
 The node count specification may include a numeric value followed by a suffix
 of "k" (multiplies numeric value by 1,024) or "m" (multiplies numeric value by
 1,048,576). This option applies to job and step allocations.
+
+\fBNOTE\fR: This option cannot be used in with arbitrary distribution.
 .IP
 
 .TP
@@ -2329,6 +2274,8 @@ instead of the node level. If set to 1, it will imply \fB\-\-cpu\-bind=cores\fR.
 Otherwise, if set to a value greater than 1, it will imply
 \fB\-\-cpu\-bind=threads\fR. Automatic binding behavior can be avoided by also
 specifying \fB\-\-cpu\-bind=none\fR.
+Slurm may allocate more cpus than what was requested in order to respect this
+option.
 .br
 \fBNOTE\fR: This option is not supported when using
 \fISelectType=select/linear\fR. This value can not be greater than
@@ -2345,8 +2292,9 @@ determined to satisfy \fB\-\-ntasks\-per\-gpu\fR, or 2) specify the GPUs wanted
 and the total task count will be automatically determined.
 The number of CPUs needed will be automatically increased if necessary to allow
 for any calculated task count.
-This option will implicitly set \fB\-\-gpu\-bind=single:<ntasks>\fR, but that
-can be overridden with an explicit \fB\-\-gpu\-bind\fR specification.
+This option will implicitly set \fB\-\-tres\-bind=gres/gpu:single:<ntasks>\fR,
+but that can be overridden with an explicit \fB\-\-tres\-bind=gres/gpu\fR
+specification.
 This option is not compatible with a node range
 (i.e. \-N<\fIminnodes\fR\-\fImaxnodes\fR>).
 This option is not compatible with \fB\-\-gpus\-per\-task\fR,
@@ -2490,7 +2438,7 @@ Users can specify which of these \fBfeatures\fR are desired but not required by
 their job using the prefer option.
 This option operates independently from \fB\-\-constraint\fR and will override
 whatever is set there if possible.
-When scheduling the features in \fB\-\-prefer\fR are tried first if a node set
+When scheduling, the features in \fB\-\-prefer\fR are tried first. If a node set
 isn't available with those features then \fB\-\-constraint\fR is attempted.
 See \fB\-\-constraint\fR for more information, this option behaves the same
 way.
@@ -2879,7 +2827,7 @@ thread per allocated node up to a maximum of 60 concurrent
 threads. Specifying this option limits the number of
 concurrent threads to \fInthreads\fR (less than or equal to 60).
 This should only be used to set a low thread count for testing on
-very small memory computers. This option applies to job allocations.
+very small memory computers.
 .IP
 
 .TP
@@ -2939,10 +2887,102 @@ This option applies to job allocations.
 .IP
 
 .TP
+\fB\-\-treewidth\fR=<\fIsize\fR>
+Specify the width of the fanout. Default is the \fITreeWidth\fR specified in
+the \fBslurm.conf\fR. The value may not exceed 65533. A value of "off" disables
+the fanout.
+.IP
+
+.TP
+\fB\-\-tres\-bind\fR=<\fItres\fR>:[verbose,]<\fItype\fR>[+<\fItres\fR>:
+[verbose,]<\fItype\fR>...]
+Specify a list of tres with their task binding options. Currently gres are the
+only supported tres for this options. Specify gres as "gres/<gres_name>"
+(e.g. gres/gpu)
+
+Example: \-\-tres\-bind=gres/gpu:verbose,map:0,1,2,3+gres/nic:closest
+
+By default, most tres are not bound to individual tasks
+
+Supported binding \fItype\fR options for \fBgres\fR:
+.IP
+.RS
+.TP 10
+\fBclosest\fR
+Bind each task to the gres(s) which are closest.
+In a NUMA environment, each task may be bound to more than one gres (i.e.
+all gres in that NUMA environment).
+.IP
+
+.TP
+\fBmap:<list>\fR
+Bind by setting gres masks on tasks (or ranks) as specified where <list> is
+<gres_id_for_task_0>,<gres_id_for_task_1>,... gres IDs are interpreted as decimal
+values. If the number of tasks (or ranks) exceeds the number of elements in this
+list, elements in the list will be reused as needed starting from the beginning
+of the list. To simplify support for large task counts, the lists may follow a
+map with an asterisk and repetition count. For example "map:0*4,1*4".
+If the task/cgroup plugin is used and ConstrainDevices is set in cgroup.conf,
+then the gres IDs are zero\-based indexes relative to the gress allocated to the
+job (e.g. the first gres is 0, even if the global ID is 3). Otherwise, the gres
+IDs are global IDs, and all gres on each node in the job should be allocated for
+predictable binding results.
+.IP
+
+.TP
+\fBmask:<list>\fR
+Bind by setting gres masks on tasks (or ranks) as specified where <list> is
+<gres_mask_for_task_0>,<gres_mask_for_task_1>,... The mapping is specified for
+a node and identical mapping is applied to the tasks on every node (i.e. the
+lowest task ID on each node is mapped to the first mask specified in the list,
+etc.). gres masks are always interpreted as hexadecimal values but can be
+preceded with an optional '0x'. To simplify support for large task counts, the
+lists may follow a map with an asterisk and repetition count.
+For example "mask:0x0f*4,0xf0*4".
+If the task/cgroup plugin is used and ConstrainDevices is set in cgroup.conf,
+then the gres IDs are zero\-based indexes relative to the gres allocated to the
+job (e.g. the first gres is 0, even if the global ID is 3). Otherwise, the gres
+IDs are global IDs, and all gres on each node in the job should be allocated for
+predictable binding results.
+.IP
+
+.TP
+\fBnone\fR
+Do not bind tasks to this gres (turns off implicit binding from
+\-\-tres\-per\-task and \-\-gpus\-per\-task).
+.IP
+
+.TP
+\fBper_task:<gres_per_task>\fR
+Each task will be bound to the number of gres specified in
+\fI<gres_per_task>\fR. Tasks are preferentially assigned gres with affinity to
+cores in their allocation like in \fIclosest\fR, though they will
+take any gres if they are unavailable. If no affinity exists, the first task
+will be assigned the first x number of gres on the node etc.
+Shared gres will prefer to bind one sharing device per task if possible.
+.IP
+
+.TP
+\fBsingle:<tasks_per_gres>\fR
+Like \fIclosest\fR, except that each task can only be bound to a
+single gres, even when it can be bound to multiple gres that are equally close.
+The gres to bind to is determined by \fI<tasks_per_gres>\fR, where the
+first \fI<tasks_per_gres>\fR tasks are bound to the first gres available, the
+second \fI<tasks_per_gres>\fR tasks are bound to the second gres available, etc.
+This is basically a block distribution of tasks onto available gres, where the
+available gres are determined by the socket affinity of the task and the socket
+affinity of the gres as specified in gres.conf's \fICores\fR parameter.
+.IP
+
+\fBNOTE\fR: Shared gres binding is currently limited to per_task or none
+.RE
+.IP
+
+.TP
 \fB\-\-tres\-per\-task\fR=<\fIlist\fR>
 Specifies a comma\-delimited list of trackable resources required for the job on
 each task to be spawned in the job's resource allocation.
-The format for each entry in the list is "trestype:[tresname:]count".
+The format for each entry in the list is "trestype/[tresname:]count".
 The \fItrestype\fR is the type of trackable resource requested (e.g. cpu, gres,
 license, etc).
 The \fItresname\fR is the name of the trackable resource, as can be seen with
@@ -2965,13 +3005,17 @@ The count can have a suffix of
 Examples:
 .nf
 \-\-tres\-per\-task=cpu:4
-\-\-tres\-per\-task=cpu:8,license:ansys:1
-\-\-tres\-per\-task=gres:gpu:1
-\-\-tres\-per\-task=gres:gpu:a100:2
+\-\-tres\-per\-task=cpu:8,license/ansys:1
+\-\-tres\-per\-task=gres/gpu:1
+\-\-tres\-per\-task=gres/gpu:a100:2
 .fi
 The specified resources will be allocated to the job on each node.
 The available trackable resources are configurable by the system
 administrator.
+.br
+\fBNOTE\fR: This option with gres/gpu or gres/shard will implicitly set
+\-\-tres\-bind=per_task:(gpu or shard)<tres_per_task>, Thic can be overridden with
+an explicit \-\-tres\-bind specification.
 .br
 \fBNOTE\fR: Invalid TRES for \-\-tres\-per\-task include
 bb,billing,energy,fs,mem,node,pages,vmem.
@@ -3368,8 +3412,8 @@ Same as \fB\-\-cpus\-per\-gpu\fR
 .IP
 
 .TP
-\fBSRUN_CPUS_PER_TASK\fR
-Same as \fB\-c, \-\-cpus\-per\-task\fR
+\fBSLURM_CPUS_PER_TASK\fR
+Same as \fB\-c, \-\-cpus\-per\-task\fR or \fB\-\-tres\-per\-task=cpu:#\fR
 .IP
 
 .TP
@@ -3752,6 +3796,19 @@ Same as \fB\-t, \-\-time\fR
 .IP
 
 .TP
+\fBSLURM_TRES_BIND\fR
+Same as \fB\-\-tres\-bind\fR If \fB\-\-gpu\-bind\fR is specified, it is also set
+in \fBSLURM_TRES_BIND\fR as if it were specified in \fB\-\-tres\-bind\fR.
+.IP
+
+.TP
+\fBSLURM_TRES_PER_TASK\fR
+Set to the value of \fB\-\-tres\-per\-task\fR. If \fB\-\-cpus\-per\-task\fR or
+\fB\-\-gpus\-per\-task\fR is specified, it is also set in
+\fBSLURM_TRES_PER_TASK\fR as if it were specified in \fB\-\-tres\-per\-task\fR.
+.IP
+
+.TP
 \fBSLURM_UMASK\fR
 If defined, Slurm will use the defined \fIumask\fR to set permissions when
 creating the output/error files for the job.
@@ -3857,14 +3914,15 @@ See the description of the \fB\-\-cpu\-freq\fR option or the
 Number of CPUs available to the step on this node.
 \fBNOTE\fR: The \fBselect/linear\fR plugin allocates entire nodes to
 jobs, so the value indicates the total count of CPUs on the node.
-For the \fBselect/cons_res\fR and \fBcons/tres\fR plugins, this number
+For the \fBcons/tres\fR plugin, this number
 indicates the number of CPUs on this node allocated to the step.
 .IP
 
 .TP
 \fBSLURM_CPUS_PER_TASK\fR
 Number of cpus requested per task.
-Only set if the \fB\-\-cpus\-per\-task\fR option is specified.
+Only set if either the \fB\-\-cpus\-per\-task\fR option or the
+\fB\-\-tres\-per\-task=cpu:#\fR option is specified.
 .IP
 
 .TP
@@ -3908,7 +3966,7 @@ first and second nodes (as listed by SLURM_JOB_NODELIST) the allocation
 has 72 CPUs, while the third node has 36 CPUs.
 \fBNOTE\fR: The \fBselect/linear\fR plugin allocates entire nodes to jobs, so
 the value indicates the total count of CPUs on allocated nodes. The
-\fBselect/cons_res\fR and \fBselect/cons_tres\fR plugins allocate individual
+\fBselect/cons_tres\fR plugin allocates individual
 CPUs to jobs, so this number indicates the number of CPUs allocated to the job.
 .IP
 
@@ -4011,16 +4069,6 @@ Sort free cache pages (run zonesort on Intel KNL nodes).
 .TP
 \fBSLURM_MEM_BIND_VERBOSE\fR
 \fB\-\-mem\-bind\fR verbosity (quiet,verbose).
-.IP
-
-.TP
-\fBSLURM_NODE_ALIASES\fR
-Sets of node name, communication address and hostname for nodes allocated to
-the job from the cloud. Each element in the set if colon separated and each
-set is comma separated. For example:
-.na
-SLURM_NODE_ALIASES\:=\:ec0:1.2.3.4:foo,ec1:1.2.3.5:bar
-.ad
 .IP
 
 .TP
@@ -4166,6 +4214,11 @@ This is set only if the system has the topology/tree plugin configured.
 The value will be set component types listed in \fBSLURM_TOPOLOGY_ADDR\fR.
 Each component will be identified as either "switch" or "node".
 A period is used to separate each hardware component type.
+.IP
+
+.TP
+\fBSLURM_TRES_PER_TASK\fR
+Set to the value of \fB\-\-tres\-per\-task\fR.
 .IP
 
 .TP

@@ -85,7 +85,7 @@ static int _load_config(void)
 	tbl = s_p_hashtbl_create(options);
 	if (stat(conf, &statbuf) || !statbuf.st_size) {
 		/* No file, continue below to set defaults */
-	} else if (s_p_parse_file(tbl, NULL, conf, false, NULL, false)) {
+	} else if (s_p_parse_file(tbl, NULL, conf, 0, NULL)) {
 		/* could not load or parse file */
 		return (config_loaded = SLURM_ERROR);
 	}
@@ -133,8 +133,8 @@ error:
 
 static struct hostent *_host_internal(int mode, const char *nodename)
 {
-	List steps = NULL;
-	ListIterator itr = NULL;
+	list_t *steps = NULL;
+	list_itr_t *itr = NULL;
 	step_loc_t *stepd;
 	int fd;
 	struct hostent *host = NULL;
@@ -248,8 +248,8 @@ enum nss_status _nss_slurm_gethostbyname2_r(const char *name, int af,
 
 static struct passwd *_pw_internal(int mode, uid_t uid, const char *name)
 {
-	List steps = NULL;
-	ListIterator itr = NULL;
+	list_t *steps = NULL;
+	list_itr_t *itr = NULL;
 	step_loc_t *stepd;
 	int fd;
 	struct passwd *pwd = NULL;
@@ -378,8 +378,8 @@ enum nss_status _nss_slurm_endpwent(void)
 
 static struct group **_gr_internal(int mode, gid_t gid, const char *name)
 {
-	List steps = NULL;
-	ListIterator itr = NULL;
+	list_t *steps = NULL;
+	list_itr_t *itr = NULL;
 	step_loc_t *stepd;
 	int fd;
 	struct group **grps = NULL;

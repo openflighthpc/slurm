@@ -76,6 +76,7 @@ int verbosity = 0;	/* count of "-v" options */
 uint32_t cluster_flags; /* what type of cluster are we talking to */
 uint32_t euid = SLURM_AUTH_NOBODY; /* proxy request as user */
 const char *mime_type = NULL; /* mimetype if we are using data_parser */
+const char *data_parser = NULL; /* data_parser args */
 
 front_end_info_msg_t *old_front_end_info_ptr = NULL;
 job_info_msg_t *old_job_info_ptr = NULL;
@@ -120,7 +121,7 @@ int main(int argc, char **argv)
 		{"future",   0, 0, 'F'},
 		{"help",     0, 0, 'h'},
 		{"hide",     0, 0, OPT_LONG_HIDE},
-		{"json", 0, 0, OPT_LONG_JSON},
+		{"json", optional_argument, 0, OPT_LONG_JSON},
 		{"local",    0, 0, OPT_LONG_LOCAL},
 		{"oneliner", 0, 0, 'o'},
 		{"quiet",    0, 0, 'Q'},
@@ -129,7 +130,7 @@ int main(int argc, char **argv)
 		{"usage",    0, 0, 'h'},
 		{"verbose",  0, 0, 'v'},
 		{"version",  0, 0, 'V'},
-		{"yaml", 0, 0, OPT_LONG_YAML},
+		{"yaml", optional_argument, 0, OPT_LONG_YAML},
 		{NULL,       0, 0, 0}
 	};
 
@@ -235,17 +236,15 @@ int main(int argc, char **argv)
 			exit(0);
 		case OPT_LONG_JSON :
 			mime_type = MIME_TYPE_JSON;
+			data_parser = optarg;
 			detail_flag = 1;
-			if (data_init())
-				fatal("data_init() failed");
 			if (serializer_g_init(MIME_TYPE_JSON_PLUGIN, NULL))
 				fatal("JSON plugin load failure");
 			break;
 		case OPT_LONG_YAML :
 			mime_type = MIME_TYPE_YAML;
+			data_parser = optarg;
 			detail_flag = 1;
-			if (data_init())
-				fatal("data_init() failed");
 			if (serializer_g_init(MIME_TYPE_YAML_PLUGIN, NULL))
 				fatal("YAML plugin load failure");
 			break;
@@ -267,9 +266,19 @@ int main(int argc, char **argv)
 	}
 
 	/* We are only running a single command and exiting */
-	if (optind < argc)
+	if (optind < argc) {
 		error_code = _process_command(argc - optind, argv + optind);
-	else {
+	} else if ((argc == 2) && (optind == argc) && mime_type &&
+		   !xstrcmp(data_parser, "list")) {
+		/*
+		 * We are only listing the available data parser plugins.
+		 * Calling DATA_DUMP_CLI_SINGLE() with a dummy type to get to
+		 * "list".
+		 * TODO: After Bug 18109 is fixed, replace this logic:
+		 */
+		DATA_DUMP_CLI_SINGLE(OPENAPI_PING_ARRAY_RESP, NULL, argc, argv,
+				     NULL, mime_type, data_parser, exit_code);
+	} else {
 		/* We are running interactively multiple commands */
 		int input_field_count = 0;
 		char **input_fields = xcalloc(MAX_INPUT_FIELDS, sizeof(char *));
@@ -293,7 +302,6 @@ int main(int argc, char **argv)
 	FREE_NULL_LIST(clusters);
 	slurm_conf_destroy();
 	serializer_g_fini();
-	data_fini();
 #endif /* MEMORY_LEAK_DEBUG */
 
 	exit(exit_code);
@@ -561,8 +569,8 @@ static void _print_ping(int argc, char **argv)
 	controller_ping_t *pings = ping_all_controllers();
 
 	if (mime_type) {
-		exit_code = DATA_DUMP_CLI(CONTROLLER_PING_ARRAY, pings, "pings",
-					  argc, argv, NULL, mime_type);
+		DATA_DUMP_CLI_SINGLE(OPENAPI_PING_ARRAY_RESP, pings, argc, argv,
+				     NULL, mime_type, data_parser, exit_code);
 		xfree(pings);
 		return;
 	}
@@ -1082,6 +1090,15 @@ static int _process_command (int argc, char **argv)
 				 tag);
 		}
 		exit_flag = 1;
+	} else if (!xstrncasecmp(tag, "getaddrs", MAX(tag_len, 8))) {
+		if (argc == 2)
+			scontrol_getaddrs(argv[1]);
+		else {
+			exit_code = 1;
+			fprintf(stderr,
+				"one argument required for keyword:%s\n",
+				tag);
+		}
 	} else if (!xstrncasecmp(tag, "gethost", MAX(tag_len, 7))) {
 		if (argc == 3)
 			scontrol_gethost(argv[1], argv[2]);
@@ -1664,7 +1681,8 @@ static void _delete_it(int argc, char **argv)
 
 	/* First identify the entity type to delete */
 	if (xstrncasecmp(tag, "NodeName", MAX(tag_len, 3)) == 0) {
-		update_node_msg_t node_msg = {0};
+		update_node_msg_t node_msg;
+		slurm_init_update_node_msg(&node_msg);
 		node_msg.node_names = val;
 		if (slurm_delete_node(&node_msg)) {
 			char errmsg[64];

@@ -57,6 +57,8 @@ slurmctld_SOURCES =     \
 	reservation.h	\
 	rpc_queue.c	\
 	rpc_queue.h	\
+	sackd_mgr.c	\
+	sackd_mgr.h	\
 	slurmctld.h	\
 	slurmscriptd.c \
 	slurmscriptd.h \
@@ -80,6 +82,12 @@ slurmctld_LDADD = $(LIB_SLURM) $(SLURMCTLD_INTERFACES)
 slurmctld_LDFLAGS = $(CMD_LDFLAGS)
 
 slurmctld_DEPENDENCIES = $(LIB_SLURM_BUILD) $(SLURMCTLD_INTERFACES)
+
+REF = usage.txt
+include $(top_srcdir)/make_ref.include
+noinst_LTLIBRARIES = $(LIB_REF)
+EXTRA_slurmctld_DEPENDENCIES = $(LIB_REF)
+slurmctld_LDADD += $(LIB_REF)
 
 force:
 $(slurmctld_DEPENDENCIES) : force

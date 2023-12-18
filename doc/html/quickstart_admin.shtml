@@ -13,6 +13,8 @@
 <li><a href="#manual_build">Building Manually</a></li>
 <li><a href="#rpmbuild">Building RPMs</a></li>
 <li><a href="#rpms">Installing RPMs</a></li>
+<li><a href="#debuild">Building Debian Packages</a></li>
+<li><a href="#debinstall">Installing Debian Packages</a></li>
 </ul>
 </li>
 <li><a href="#daemons">Daemons</a></li>
@@ -123,7 +125,9 @@ plugins and what is required to build them.</p>
 		</li>
 <li> <b>IPMI Energy Consumption</b> The <i>acct_gather_energy/ipmi</i>
 		accounting plugin will be built if the <i>freeipmi</i>
-		development library is present.</li>
+		development library is present. When building the RPM,
+		<code>rpmbuild ... --with freeipmi</code> can be
+		specified to explicitly check for these dependencies.</li>
 <li> <b>Lua Support</b> The lua API will be available in various plugins if the
 		<i>lua</i> development library is present.</li>
 <li> <b>MUNGE</b> The auth/munge plugin will be built if the MUNGE
@@ -255,6 +259,69 @@ by configuration, but here is a suggested starting point:
 </li>
 </ul>
 
+<h3 id="debuild">Building Debian Packages
+<a class="slurm_link" href="#debuild"></a>
+</h3>
+
+<p>Beginning with Slurm 23.11.0, Slurm includes the files required to build
+Debian packages. These packages conflict with the packages shipped with Debian
+based distributions, and are named distinctly to differentiate them. After
+downloading the desired version of Slurm, the following can be done to build
+the packages:</p>
+
+<ul>
+<li>Install basic Debian package build requirements:<br>
+<code>apt-get install build-essential fakeroot devscripts</code>
+</li>
+<li>Unpack the distributed tarball:<br>
+<code>tar -xaf slurm*tar.bz2</code>
+</li>
+<li><code>cd</code> to the directory containing the Slurm source</li>
+<li>Install the Slurm package dependencies:<br>
+<code>mk-build-deps -i debian/control</code>
+</li>
+<li>Build the Slurm packages:<br>
+<code>debuild -b -uc -us</code>
+</li>
+</ul>
+
+<p>The packages will be in the parent directory after debuild completes.</p>
+
+<h3 id="debinstall">Installing Debian Packages
+<a class="slurm_link" href="#debinstall"></a>
+</h3>
+
+<p>The packages needed on the head node, compute nodes, and slurmdbd node can
+vary site to site, but this is a good starting point:</p>
+<ul>
+<li>SlurmDBD Node
+	<ul>
+	<li>slurm-smd</li>
+	<li>slurm-smd-slurmdbd</li>
+	</ul>
+</li>
+<li>Head Node (slurmctld node)
+	<ul>
+	<li>slurm-smd</li>
+	<li>slurm-smd-slurmctld</li>
+	<li>slurm-smd-client</li>
+	</ul>
+</li>
+<li>Compute Nodes (slurmd node)
+	<ul>
+	<li>slurm-smd</li>
+	<li>slurm-smd-slurmd</li>
+	<li>slurm-smd-client</li>
+	</ul>
+</li>
+<li>Login Nodes
+	<ul>
+	<li>slurm-smd</li>
+	<li>slurm-smd-client</li>
+	</ul>
+</li>
+</ul>
+
 <h2 id="daemons">Daemons<a class="slurm_link" href="#daemons"></a></h2>
 
 <p><b>slurmctld</b> is sometimes called the &quot;controller&quot;.
@@ -317,12 +384,6 @@ mode. The primary reads the saved state and resumes normal operation. Likewise,
 if both of the first two listed hosts fail the third SlurmctldHost will take
 over until the primary returns to service. Other than a brief period of non-
 responsiveness, the transition back and forth should go undetected.</p>
-
-<p>Note that with an already running cluster, changing the order of the
-SlurmctldHost entries via <code>scontrol reconfigure</code> is not supported.
-The supported method is to drain and restart the cluster since running jobs
-may still go the previous primary controller when completing and delay
-scheduling.</p>
 
 <p>Prior to 18.08, Slurm used the <a href="slurm.conf.html#OPT_BackupAddr">
 &quot;BackupAddr&quot;</a> and <a href="slurm.conf.html#OPT_BackupController">
@@ -409,7 +470,7 @@ jobs in higher priority queues.</li>
 <a href="preempt.html">Preemption</a>,
 <a href="reservations.html">Resource Reservation Guide</a>,
 <a href="resource_limits.html">Resource Limits</a> and
-<a href="cons_res_share.html">Sharing Consumable Resources</a>.</p>
+<a href="cons_tres_share.html">Sharing Consumable Resources</a>.</p>
 
 <h3 id="resource">Resource selection
 <a class="slurm_link" href="#resource"></a>
@@ -417,11 +478,10 @@ jobs in higher priority queues.</li>
 <p>The resource selection mechanism used by Slurm is controlled by the
 <b>SelectType</b> configuration parameter.
 If you want to execute multiple jobs per node, but track and manage allocation
-of the processors, memory and other resources, the <i>cons_res</i> (consumable
-resources) or <i>cons_tres</i> (consumable trackable resources) plugins are
-recommended.
+of the processors, memory and other resources, the <i>cons_tres</i> (consumable
+trackable resources) plugin is recommended.
 For more information, please see
-<a href="cons_res.html">Consumable Resources in Slurm</a>.</p>
+<a href="cons_tres.html">Consumable Resources in Slurm</a>.</p>
 
 <h3 id="logging">Logging<a class="slurm_link" href="#logging"></a></h3>
 <p>Slurm uses syslog to record events if the <code>SlurmctldLogFile</code> and
@@ -530,8 +590,7 @@ SlurmdPort=7003
 SlurmdSpoolDir=/var/spool/slurmd.spool
 SlurmdTimeout=300
 StateSaveLocation=/var/spool/slurm.state
-SwitchType=switch/none
-TreeWidth=50
+TreeWidth=16
 #
 # Node Configurations
 #
@@ -697,22 +756,22 @@ that represent both the major Slurm release and maintenance release level.
 The first two parts combine together to represent the major release, and match
 the year and month of that major release. The third number in the version
 designates a specific maintenance level:
-year.month.maintenance-release (e.g. 21.08.2 is major Slurm release 21.08, and
-maintenance version 2).
-Thus version 21.08.x was initially released in August 2021.
+year.month.maintenance-release (e.g. 23.11.1 is major Slurm release 23.11, and
+maintenance version 1).
+Thus version 23.11.x was initially released in November 2023.
 Changes in the RPCs (remote procedure calls) and state files will only be made
 if the major release number changes, which typically happens about every nine
 months. A list of most recent major Slurm releases is shown below.</p>
 <ul>
-<li>21.08.x (Released August 2021)</li>
 <li>22.05.x (Released May 2022)</li>
 <li>23.02.x (Released February 2023)</li>
+<li>23.11.x (Released November 2023)</li>
 </ul>
 
 <p>If the SlurmDBD daemon is used, it must be at the same or higher major
 release number as the Slurmctld daemons.
-In other words, when changing the version to a higher release number (e.g
-from 21.08.x to 22.05.x) <b>always upgrade the SlurmDBD daemon first</b>.
+In other words, when changing the version to a higher release number (e.g.
+from 23.02.x to 23.11.x) <b>always upgrade the SlurmDBD daemon first</b>.
 Database table changes may be required for the upgrade, for example
 adding new fields to existing tables. This must complete <b>before</b>
 upgrading slurmctld.
@@ -756,8 +815,8 @@ Also see the note above about reverse compatibility.</p>
 <p>Almost every new major release of Slurm (e.g. 22.05.x to 23.02.x)
 involves changes to the state files with new data structures, new options, etc.
 Slurm permits upgrades to a new major release from the past two major releases,
-which happen every nine months (e.g. 21.08.x or 22.05.x to 23.02.x) without loss of
-jobs or other state information.
+which happen every nine months (e.g. 22.05.x or 23.02.x to 23.11.x) without loss
+of jobs or other state information.
 State information from older versions will not be recognized and will be
 discarded, resulting in loss of all running and pending jobs.
 State files are <b>not</b> recognized when downgrading (e.g. from 23.02.x to 22.05.x)
@@ -817,8 +876,8 @@ of its ELF files with 'ldd' and grep for 'slurm'. If you see a versioned
 recompiled.</p>
 
 <p>Slurm daemons will support RPCs and state files from the two previous major
-releases (e.g. a version 23.02.x SlurmDBD will support slurmctld daemons and
-commands with a version of 23.02.x, 22.05.x or 21.08.x).
+releases (e.g. a version 23.11.x SlurmDBD will support slurmctld daemons and
+commands with a version of 23.11.x, 23.02.x or 22.05.x).
 This means that upgrading at least once each year is recommended.
 Otherwise, intermediate upgrades will be required to preserve state information.
 Changes in the maintenance release number generally only include bug fixes,
@@ -896,6 +955,6 @@ cd /usr/ports/sysutils/slurm-wlm && make install
 typical compute nodes.  Installing from source allows the user to enable
 options such as mysql and gui tools via a configuration menu.</p>
 
-<p style="text-align:center;">Last modified 24 October 2023</p>
+<p style="text-align:center;">Last modified 11 December 2023</p>
 
 <!--#include virtual="footer.txt"-->

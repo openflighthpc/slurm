@@ -82,8 +82,9 @@
 #include "src/slurmctld/slurmscriptd.h"
 #include "src/slurmctld/trigger_mgr.h"
 
-pthread_cond_t power_cond = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t power_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t power_thread = 0;
+static pthread_cond_t power_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t power_mutex = PTHREAD_MUTEX_INITIALIZER;
 bool power_save_config = false;
 bool power_save_enabled = false;
 bool power_save_started = false;
@@ -97,7 +98,6 @@ static bool idle_on_node_suspend = false;
 static uint16_t power_save_interval = 10;
 static uint16_t power_save_min_interval = 0;
 
-bool cloud_reg_addrs = false;
 List resume_job_list = NULL;
 
 typedef struct exc_node_partital {
@@ -121,7 +121,7 @@ static void  _do_power_work(time_t now);
 static void  _do_resume(char *host, char *json);
 static void  _do_suspend(char *host);
 static int   _init_power_config(void);
-static void *_init_power_save(void *arg);
+static void *_power_save_thread(void *arg);
 static bool  _valid_prog(char *file_name);
 
 static void _exc_node_part_free(void *x)
@@ -390,7 +390,7 @@ static void _do_power_work(time_t now)
 
 	iter = list_iterator_create(resume_job_list);
 	while ((job_id_ptr = list_next(iter))) {
-		char *nodes;
+		char *nodes, *node_bitmap;
 		job_record_t *job_ptr;
 		data_t *job_node_data;
 		bitstr_t *need_resume_bitmap, *to_resume_bitmap;
@@ -442,8 +442,11 @@ static void _do_power_work(time_t now)
 			     job_ptr->job_id);
 		data_set_string(data_key_set(job_node_data, "features"),
 				job_ptr->details->features_use);
-		data_set_string_own(data_key_set(job_node_data, "nodes_alloc"),
-				    bitmap2node_name(job_ptr->node_bitmap));
+		if ((node_bitmap = bitmap2node_name(job_ptr->node_bitmap))) {
+			data_set_string_own(data_key_set(job_node_data,
+							 "nodes_alloc"),
+					    node_bitmap);
+		}
 		nodes = bitmap2node_name(to_resume_bitmap);
 		data_set_string_own(data_key_set(job_node_data, "nodes_resume"),
 				    nodes);
@@ -563,7 +566,7 @@ static void _do_power_work(time_t now)
 			node_ptr->node_state &= (~NODE_STATE_POWERING_DOWN);
 			node_ptr->node_state |= NODE_STATE_POWERED_DOWN;
 
-			if (IS_NODE_CLOUD(node_ptr) && cloud_reg_addrs) {
+			if (IS_NODE_CLOUD(node_ptr)) {
 				/* Reset hostname and addr to node's name. */
 				set_node_comm_name(node_ptr, NULL,
 						   node_ptr->name);
@@ -576,8 +579,10 @@ static void _do_power_work(time_t now)
 
 			node_ptr->last_busy = 0;
 			node_ptr->power_save_req_time = 0;
+			node_mgr_reset_node_stats(node_ptr);
 
 			reset_node_active_features(node_ptr);
+			reset_node_instance(node_ptr);
 
 			clusteracct_storage_g_node_down(
 				acct_db_conn, node_ptr, now,
@@ -603,6 +608,7 @@ static void _do_power_work(time_t now)
 			node_ptr->node_state |= NODE_STATE_POWERED_DOWN;
 
 			reset_node_active_features(node_ptr);
+			reset_node_instance(node_ptr);
 
 			/*
 			 * set_node_down_ptr() will remove the node from the
@@ -619,6 +625,7 @@ static void _do_power_work(time_t now)
 			bit_clear(booting_node_bitmap, node_ptr->index);
 			node_ptr->last_busy = 0;
 			node_ptr->boot_req_time = 0;
+			node_mgr_reset_node_stats(node_ptr);
 
 			if (resume_fail_prog) {
 				if (!failed_node_bitmap) {
@@ -870,8 +877,6 @@ static int _init_power_config(void)
 	if (slurm_conf.resume_program)
 		resume_prog = xstrdup(slurm_conf.resume_program);
 
-	cloud_reg_addrs = xstrcasestr(slurm_conf.slurmctld_params,
-				      "cloud_reg_addrs");
 	idle_on_node_suspend = xstrcasestr(slurm_conf.slurmctld_params,
 					   "idle_on_node_suspend");
 	if ((tmp_ptr = xstrcasestr(slurm_conf.slurmctld_params,
@@ -896,32 +901,26 @@ static int _init_power_config(void)
 	}
 	if (suspend_rate < 0) {
 		error("power_save module disabled, SuspendRate < 0");
-		test_config_rc = 1;
 		return -1;
 	}
 	if (resume_rate < 0) {
 		error("power_save module disabled, ResumeRate < 0");
-		test_config_rc = 1;
 		return -1;
 	}
 	if (suspend_prog == NULL) {
 		error("power_save module disabled, NULL SuspendProgram");
-		test_config_rc = 1;
 		return -1;
 	} else if (!_valid_prog(suspend_prog)) {
 		error("power_save module disabled, invalid SuspendProgram %s",
 		      suspend_prog);
-		test_config_rc = 1;
 		return -1;
 	}
 	if (resume_prog == NULL) {
 		error("power_save module disabled, NULL ResumeProgram");
-		test_config_rc = 1;
 		return -1;
 	} else if (!_valid_prog(resume_prog)) {
 		error("power_save module disabled, invalid ResumeProgram %s",
 		      resume_prog);
-		test_config_rc = 1;
 		return -1;
 	}
 
@@ -987,20 +986,14 @@ extern void config_power_mgr(void)
 	slurm_mutex_unlock(&power_mutex);
 }
 
-/*
- * start_power_mgr - Start power management thread as needed. The thread
- *	terminates automatically at slurmctld shutdown time or on config change
- *	disabling power_save mode.
- * IN thread_id - pointer to thread ID of the started pthread.
- */
-extern void start_power_mgr(pthread_t *thread_id)
+extern void power_save_init(void)
 {
 	slurm_mutex_lock(&power_mutex);
 	if (power_save_started || !power_save_enabled) {
-		if (!power_save_enabled && *thread_id) {
+		if (!power_save_enabled && power_thread) {
 			slurm_mutex_unlock(&power_mutex);
-			pthread_join(*thread_id, NULL);
-			*thread_id = 0;
+			pthread_join(power_thread, NULL);
+			power_thread = 0;
 			return;
 		}
 		slurm_mutex_unlock(&power_mutex);
@@ -1009,7 +1002,7 @@ extern void start_power_mgr(pthread_t *thread_id)
 	power_save_started = true;
 	slurm_mutex_unlock(&power_mutex);
 
-	slurm_thread_create(thread_id, _init_power_save, NULL);
+	slurm_thread_create(&power_thread, _power_save_thread, NULL);
 }
 
 /* Report if node power saving is enabled */
@@ -1030,6 +1023,12 @@ extern bool power_save_test(void)
 /* Free module's allocated memory */
 extern void power_save_fini(void)
 {
+	slurm_cond_signal(&power_cond);
+	if (power_thread) {
+		pthread_join(power_thread, NULL);
+		power_thread = 0;
+	}
+
 	slurm_mutex_lock(&power_mutex);
 	if (power_save_started) {     /* Already running */
 		power_save_started = false;
@@ -1053,13 +1052,9 @@ static int _build_resume_job_list(void *object, void *arg)
 	return SLURM_SUCCESS;
 }
 
-/*
- * init_power_save - Initialize the power save module. Started as a
- *	pthread. Terminates automatically at slurmctld shutdown time.
- *	Input and output are unused.
- */
-static void *_init_power_save(void *arg)
+static void *_power_save_thread(void *arg)
 {
+	struct timespec ts = {0, 0};
         /* Locks: Write jobs and nodes */
         slurmctld_lock_t node_write_lock = {
                 NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
@@ -1083,8 +1078,14 @@ static void *_init_power_save(void *arg)
 		unlock_slurmctld(node_write_lock);
 	}
 
-	while (slurmctld_config.shutdown_time == 0) {
-		sleep(1);
+	while (!slurmctld_config.shutdown_time) {
+		slurm_mutex_lock(&power_mutex);
+		ts.tv_sec = time(NULL) + 1;
+		slurm_cond_timedwait(&power_cond, &power_mutex, &ts);
+		slurm_mutex_unlock(&power_mutex);
+
+		if (slurmctld_config.shutdown_time)
+			break;
 
 		if (!power_save_enabled) {
 			debug("power_save mode not enabled, stopping power_save thread");
@@ -1112,7 +1113,6 @@ fini:	_clear_power_config();
 }
 
 extern void power_save_set_timeouts(bool *partition_suspend_time_set)
-
 {
 	node_record_t *node_ptr;
 

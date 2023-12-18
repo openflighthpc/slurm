@@ -52,6 +52,7 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 <li><a href="jwt.html">JSON Web Tokens Authentication</a></li>
 <li><a href="federation.html">Federated Scheduling Guide</a></li>
 <li><a href="pam_slurm_adopt.html">Job Containment (SSH Session Control) with pam_slurm_adopt</a></li>
+<li><a href="kubernetes.html">Kubernetes Guide</a></li>
 <li><a href="big_sys.html">Large Cluster Administration Guide</a></li>
 <li><a href="licenses.html">License Management</a></li>
 <li><a href="mcs.html">Multi-Category Security (MCS) Guide</a></li>
@@ -78,7 +79,7 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 <li>Slurm Scheduling
 <ul>
 <li><a href="sched_config.html">Scheduling Configuration Guide</a></li>
-<li><a href="cons_res.html">Consumable Resources Guide</a></li>
+<li><a href="cons_tres.html">Consumable Resources Guide</a></li>
 <li><a href="core_spec.html">Core Specialization</a></li>
 <li><a href="gang_scheduling.html">Gang Scheduling</a></li>
 <li><a href="gres.html">Generic Resource (GRES) Scheduling</a></li>
@@ -87,7 +88,7 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 <li><a href="qos.html">Quality of Service (QOS)</a></li>
 <li><a href="resource_limits.html">Resource Limits</a></li>
 <li><a href="reservations.html">Resource Reservation Guide</a></li>
-<li><a href="cons_res_share.html">Sharing Consumable Resources</a></li>
+<li><a href="cons_tres_share.html">Sharing Consumable Resources</a></li>
 <li><a href="topology.html">Topology</a></li>
 <li><a href="tres.html">Trackable Resources (TRES)</a></li>
 </ul>
@@ -99,7 +100,7 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 </li>
 <li>Cloud
 <ul>
-<li><a href="elastic_computing.html">Cloud Scheduling Guide</a></li>
+<li><a href="power_save.html">Cloud Scheduling Guide</a></li>
 <li><a href="https://github.com/schedmd/slurm-gcp">Slurm on Google Cloud Platform</a></li>
 <li><a href="https://www.schedmd.com/downloads/extras/Slurm_ParallelCluster_AWS.pdf">Deploying Slurm with ParallelCluster on Your AWS Cluster</a></li>
 <li><a href="https://github.com/Azure/cyclecloud-slurm">Slurm on Microsoft Azure and CycleCloud</a></li>
@@ -131,6 +132,6 @@ may be found in the <a href="https://slurm.schedmd.com/archive/">archive</a>.
 </li>
 </ul>
 
-<p style="text-align:center;">Last modified 5 October 2022</p>
+<p style="text-align:center;">Last modified 11 December 2023</p>
 
 <!--#include virtual="footer.txt"-->

@@ -42,6 +42,7 @@
 #include "src/common/xstring.h"
 
 #include "api.h"
+#include "events.h"
 #include "parsers.h"
 #include "parsing.h"
 
@@ -87,8 +88,15 @@ extern int data_parser_p_dump(args_t *args, data_parser_type_t type, void *src,
 	xassert(src_bytes > 0);
 	xassert(dst && (data_get_type(dst) == DATA_TYPE_NULL));
 
-	if (!parser)
-		fatal("%s: invalid data parser type:0x%x", __func__, type);
+	if (!parser) {
+		int rc;
+		char *path = NULL;
+		rc = on_error(DUMPING, type, args, ESLURM_DATA_INVALID_PARSER,
+			      NULL, __func__,
+			      "Invalid or unsupported dumping requested. Output may be incomplete.");
+		xfree(path);
+		return rc;
+	}
 
 	return dump(src, src_bytes, parser, dst, args);
 }
@@ -106,8 +114,15 @@ extern int data_parser_p_parse(args_t *args, data_parser_type_t type, void *dst,
 	xassert(src && (data_get_type(src) != DATA_TYPE_NONE));
 	xassert(dst_bytes > 0);
 
-	if (!parser)
-		fatal("%s: invalid data parser type:0x%x", __func__, type);
+	if (!parser) {
+		int rc;
+		char *path = NULL;
+		rc = on_error(PARSING, type, args, ESLURM_DATA_INVALID_PARSER,
+			      set_source_path(&path, parent_path), __func__,
+			      "Invalid or unsupported parsing requested. Input may not be fully parsed.");
+		xfree(path);
+		return rc;
+	}
 
 	return parse(dst, dst_bytes, parser, src, args, parent_path);
 }
@@ -119,7 +134,7 @@ extern args_t *data_parser_p_new(data_parser_on_error_t on_parse_error,
 				 data_parser_on_warn_t on_parse_warn,
 				 data_parser_on_warn_t on_dump_warn,
 				 data_parser_on_warn_t on_query_warn,
-				 void *warn_arg)
+				 void *warn_arg, const char *params)
 {
 	args_t *args = xmalloc(sizeof(*args));
 	args->magic = MAGIC_ARGS;
@@ -132,7 +147,8 @@ extern args_t *data_parser_p_new(data_parser_on_error_t on_parse_error,
 	args->on_query_warn = on_query_warn;
 	args->warn_arg = warn_arg;
 
-	log_flag(DATA, "init parser 0x%" PRIxPTR, (uintptr_t) args);
+	log_flag(DATA, "init %s(0x%"PRIxPTR") with params=%s",
+		 plugin_type, (uintptr_t) args, params);
 
 	parsers_init();
 
@@ -141,6 +157,9 @@ extern args_t *data_parser_p_new(data_parser_on_error_t on_parse_error,
 
 extern void data_parser_p_free(args_t *args)
 {
+	if (!args)
+		return;
+
 	xassert(args->magic == MAGIC_ARGS);
 	args->magic = ~MAGIC_ARGS;
 

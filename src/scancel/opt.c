@@ -229,7 +229,8 @@ static void _opt_env(void)
 	char *val;
 
 	if ( (val=getenv("SCANCEL_ACCOUNT")) ) {
-		opt.account = xstrtolower(xstrdup(val));
+		opt.account = xstrdup(val);
+		xstrtolower(opt.account);
 	}
 
 	if ( (val=getenv("SCANCEL_BATCH")) ) {
@@ -290,7 +291,8 @@ static void _opt_env(void)
 	}
 
 	if ( (val=getenv("SCANCEL_QOS")) ) {
-		opt.qos = xstrtolower(xstrdup(val));
+		opt.qos = xstrdup(val);
+		xstrtolower(opt.qos);
 	}
 
 	if ( (val=getenv("SCANCEL_STATE")) ) {
@@ -379,7 +381,8 @@ static void _opt_args(int argc, char **argv)
 			exit(1);
 			break;
 		case (int)'A':
-			opt.account = xstrtolower(xstrdup(optarg));
+			opt.account = xstrdup(optarg);
+			xstrtolower(opt.account);
 			break;
 		case (int)'b':
 			opt.batch = true;
@@ -415,7 +418,8 @@ static void _opt_args(int argc, char **argv)
 			opt.verbose = -1;
 			break;
 		case (int)'q':
-			opt.qos = xstrtolower(xstrdup(optarg));
+			opt.qos = xstrdup(optarg);
+			xstrtolower(opt.qos);
 			break;
 		case (int)'R':
 			opt.reservation = xstrdup(optarg);
@@ -507,7 +511,7 @@ _xlate_job_step_ids(char **rest)
 		opt.job_id[buf_offset] = job_id;
 
 		if ((next_str[0] == '_') && (next_str[1] == '[')) {
-			hostlist_t hl;
+			hostlist_t *hl;
 			char save_char, *next_elem;
 			char *end_char = strchr(next_str + 2, ']');
 			if (!end_char || (end_char[1] != '\0')) {
