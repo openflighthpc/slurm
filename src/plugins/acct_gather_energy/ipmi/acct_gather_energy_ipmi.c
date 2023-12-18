@@ -174,6 +174,11 @@ static pthread_cond_t launch_cond = PTHREAD_COND_INITIALIZER;
 pthread_t thread_ipmi_id_launcher = 0;
 pthread_t thread_ipmi_id_run = 0;
 
+/*
+ * DCMI context cannot be reused between threads and this plugin can be called
+ * from different slurmd threads, so we need the __thread specifier.
+ */
+__thread ipmi_ctx_t ipmi_dcmi_ctx = NULL;
 static int dcmi_cnt = 0;
 
 static int _read_ipmi_dcmi_values(void);
@@ -207,20 +212,20 @@ static uint64_t _get_additional_consumption(time_t time0, time_t time1,
 /*
  * _open_dcmi_context opens the inband ipmi device for DCMI power reading
  */
-static int _open_dcmi_context(ipmi_ctx_t *ipmi_dcmi_ctx)
+static int _open_dcmi_context(void)
 {
 	int ret;
 
-	if (!dcmi_cnt || *ipmi_dcmi_ctx)
+	if (!dcmi_cnt || ipmi_dcmi_ctx)
 		return SLURM_SUCCESS;
 
-	*ipmi_dcmi_ctx = ipmi_ctx_create();
-	if (!*ipmi_dcmi_ctx) {
+	ipmi_dcmi_ctx = ipmi_ctx_create();
+	if (!ipmi_dcmi_ctx) {
 		error("Failed creating dcmi ipmi context");
 		return SLURM_ERROR;
 	}
 
-	ret = ipmi_ctx_find_inband(*ipmi_dcmi_ctx,
+	ret = ipmi_ctx_find_inband(ipmi_dcmi_ctx,
 	                           NULL,
 	                           ipmi_config.disable_auto_probe,
 	                           ipmi_config.driver_address,
@@ -230,14 +235,14 @@ static int _open_dcmi_context(ipmi_ctx_t *ipmi_dcmi_ctx)
 	                           IPMI_FLAGS_DEFAULT);
 	if (ret < 0) {
 		error("Error finding inband dcmi ipmi device: %s",
-		      ipmi_ctx_errormsg(*ipmi_dcmi_ctx));
-		ipmi_ctx_destroy(*ipmi_dcmi_ctx);
-		*ipmi_dcmi_ctx = NULL;
+		      ipmi_ctx_errormsg(ipmi_dcmi_ctx));
+		ipmi_ctx_destroy(ipmi_dcmi_ctx);
+		ipmi_dcmi_ctx = NULL;
 		return SLURM_ERROR;
 	} else if (!ret) {
 		error("No inband dcmi ipmi device found");
-		ipmi_ctx_destroy(*ipmi_dcmi_ctx);
-		*ipmi_dcmi_ctx = NULL;
+		ipmi_ctx_destroy(ipmi_dcmi_ctx);
+		ipmi_dcmi_ctx = NULL;
 		return SLURM_ERROR;
 	}
 
@@ -266,7 +271,6 @@ static int _init_ipmi_config (void)
 	 * information.
 	 */
 	unsigned int ipmimonitoring_init_flags = 0;
-        ipmi_ctx_t ipmi_dcmi_ctx = NULL;
 	memset(&ipmi_config, 0, sizeof(struct ipmi_monitoring_ipmi_config));
 	ipmi_config.driver_type = (int) slurm_ipmi_conf.driver_type;
 	ipmi_config.disable_auto_probe =
@@ -347,14 +351,8 @@ static int _init_ipmi_config (void)
 	/* 	sensor_reading_flags |= */
 	/* 		IPMI_MONITORING_SENSOR_READING_FLAGS_ENTITY_SENSOR_NAMES; */
 
-        /* Fail fast if DCMI context can't be opened */
-	if (_open_dcmi_context(&ipmi_dcmi_ctx) != SLURM_SUCCESS)
+	if (_open_dcmi_context() != SLURM_SUCCESS)
 		return SLURM_ERROR;
-	else if (ipmi_dcmi_ctx) {
-		ipmi_ctx_close(ipmi_dcmi_ctx);
-		ipmi_ctx_destroy(ipmi_dcmi_ctx);
-		ipmi_dcmi_ctx = NULL;
-	}
 
 	return SLURM_SUCCESS;
 }
@@ -491,7 +489,10 @@ static int _get_dcmi_power_reading(uint16_t dcmi_mode)
 	int ret;
 	static uint8_t read_err_cnt = 0;
 
-        ipmi_ctx_t ipmi_dcmi_ctx = NULL;
+	if (!ipmi_dcmi_ctx) {
+		error("%s: IPMI DCMI context not initialized", __func__);
+		return SLURM_ERROR;
+	}
 
 	dcmi_rs = fiid_obj_create(tmpl_cmd_dcmi_get_power_reading_rs);
 	if (!dcmi_rs) {
@@ -507,16 +508,8 @@ static int _get_dcmi_power_reading(uint16_t dcmi_mode)
 		error("%s: DCMI mode %d not supported: ", __func__, dcmi_mode);
 		return SLURM_ERROR;
 	}
-
-	if (_open_dcmi_context(&ipmi_dcmi_ctx) != SLURM_SUCCESS) {
-		error("%s: Cannot open DCMI context", __func__);
-		return SLURM_ERROR;
-	}
-        ret = ipmi_cmd_dcmi_get_power_reading(ipmi_dcmi_ctx, mode,
+	ret = ipmi_cmd_dcmi_get_power_reading(ipmi_dcmi_ctx, mode,
 	                                      mode_attributes, dcmi_rs);
-	ipmi_ctx_close(ipmi_dcmi_ctx);
-	ipmi_ctx_destroy(ipmi_dcmi_ctx);
-	ipmi_dcmi_ctx = NULL;
 	if (ret < 0) {
 		if (read_err_cnt < MAX_LOG_ERRORS) {
 			error("%s: get DCMI power reading failed: %s",
@@ -773,6 +766,11 @@ static int _thread_init(void)
 	int rc = SLURM_SUCCESS;
 	uint16_t i;
 
+	if (!first && (_open_dcmi_context() != SLURM_SUCCESS)) {
+		error("Cannot open dcmi context for this thread.");
+		return SLURM_ERROR;
+	}
+
 	if (!first && ipmi_ctx)
 		return first_init;
 	first = false;
@@ -809,14 +807,6 @@ static int _thread_init(void)
 	first_init = SLURM_SUCCESS;
 
 	return rc;
-}
-
-/*
- * _thread_cleanup handles closing of the DCMI context if necessary
- */
-static int _thread_cleanup(void)
-{
-	return SLURM_SUCCESS;
 }
 
 static int _ipmi_send_profile(void)
