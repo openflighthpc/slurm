@@ -48,8 +48,9 @@ Commit changes immediately without asking for confirmation.
 .IP
 
 .TP
-\fB\-\-json\fR
-Dump information as JSON. All other formatting arguments will be ignored.
+\f3\-\-json\fP, \f3\-\-json\fP=\fIlist\fR, \f3\-\-json\fP=<\fIdata_parser\fR>
+Dump information as JSON using the default data_parser plugin or explicit
+data_parser with parameters. Sorting and formatting arguments will be ignored.
 .IP
 
 .TP
@@ -80,8 +81,9 @@ The \fBreadonly\fR option is for use within interactive mode.
 .IP
 
 .TP
-\fB\-\-yaml\fR
-Dump information as YAML. All other formatting arguments will be ignored.
+\f3\-\-yaml\fP, \f3\-\-yaml\fP=\fIlist\fR, \f3\-\-yaml\fP=<\fIdata_parser\fR>
+Dump information as YAML using the default data_parser plugin or explicit
+data_parser with parameters. Sorting and formatting arguments will be ignored.
 .IP
 
 .TP
@@ -128,7 +130,7 @@ Identical to the \fBremove\fR command.
 .IP
 
 .TP
-\fBdump\fR <\fIENTITY\fR> [File=<\fIFILENAME\fR>]
+\fBdump\fR <\fIcluster\fR>
 Dump cluster data to the specified file. If the filename is not specified
 it uses clustername.cfg filename by default.
 .IP
@@ -530,8 +532,8 @@ value of \-1 for each TRES id.
 \fInode\fR, etc...), or any defined generic resource. You can see the list
 of available resources by running \fBsacctmgr show tres\fR.
 
-\fBNOTE\fR: This limit only applies fully when using \fBcons_res\fR or
-\fBcons_tres\fR select type plugins.
+\fBNOTE\fR: This limit only applies fully when using the
+\fBcons_tres\fR select type plugin.
 .IP
 
 .IP \fBMaxWall\fR=<\fImax_wall\fR>
@@ -1116,11 +1118,6 @@ The current Nodes associated with the cluster.
 .IP
 
 .TP
-\fBPluginIDSelect\fR
-The numeric value of the select plugin the cluster is using.
-.IP
-
-.TP
 \fBRPC\fR
 When a slurmctld registers with the database the rpc version the controller
 is running is placed here.
@@ -1403,6 +1400,108 @@ Numeric value of the name of the FedState.
 The index of the cluster in the federation.
 .IP
 
+.SH "SPECIFICATIONS FOR INSTANCES"
+
+.TP
+\fBClusters\fR=<\fIcluster_name\fR>[,<\fIcluster_name\fR>,...]
+Name of the cluster that the instance ran on.  Default is the cluster where the
+command was run.
+.IP
+
+.TP
+\fBEnd\fR=<\fIOPT\fR>
+Period ending of instances. Default is now.
+
+Valid time formats are...
+.br
+HH:MM[:SS] [AM|PM]
+.br
+MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]
+.br
+MM/DD[/YY]\-HH:MM[:SS]
+.br
+YYYY\-MM\-DD[THH:MM[:SS]]
+.br
+now[{+|\-}\fIcount\fR[seconds(default)|minutes|hours|days|weeks]]
+.IP
+
+.TP
+\fBExtra\fR=<\fIOPT\fR>
+Arbitrary string associated with node during life of the instance.
+.IP
+
+.TP
+\fBInstanceId\fR=<\fIOPT\fR>
+Cloud instance ID.
+.IP
+
+.TP
+\fBInstanceType\fR=<\fIOPT\fR>
+Cloud instance type.
+.IP
+
+.TP
+\fBNodes\fR=<\fInode_name\fR>[,<\fInode_name\fR>,...]
+The node on which the instance ran.
+.IP
+
+.TP
+\fBStart\fR=<\fIOPT\fR>
+Period start of instances.  Default is 00:00:00 of previous day.
+
+Valid time formats are...
+.br
+HH:MM[:SS] [AM|PM]
+.br
+MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]
+.br
+MM/DD[/YY]\-HH:MM[:SS]
+.br
+YYYY\-MM\-DD[THH:MM[:SS]]
+.br
+now[{+|\-}\fIcount\fR[seconds(default)|minutes|hours|days|weeks]]
+.IP
+
+
+.SH "LIST/SHOW INSTANCE FORMAT OPTIONS"
+Show time periods for when cloud nodes were active.
+
+.TP
+\fBCluster\fR
+Name of the cluster that the instance ran on.
+.IP
+
+.TP
+\fBEnd\fR
+Time when instance ended.
+.IP
+
+.TP
+\fBExtra\fR
+Arbitrary string associated with node during life of the instance.
+.IP
+
+.TP
+\fBInstanceId\fR
+Cloud instance ID.
+.IP
+
+.TP
+\fBInstanceType\fR
+Cloud instance type.
+.IP
+
+.TP
+\fBNodeName\fR
+The node on which the instance ran.
+.IP
+
+.TP
+\fBStart\fR
+Time when instance started.
+.IP
+
+
 
 .SH "SPECIFICATIONS FOR JOB"
 
@@ -1582,6 +1681,17 @@ override the requested partition's MinNodes limit.
 \fBPartitionTimeLimit\fR
 If set jobs using this QOS will be able to
 override the requested partition's TimeLimit.
+.IP
+
+.TP
+\fBRelative\fR
+If set the QOS limits will be treated as percentages of a cluster/partition
+instead of absolutes.
+Since the QOS limits will be based on the size of a cluster or partitions some
+limitations are inherit. Namely if this flag is set only one partition can have
+this QOS as it's partition QOS, and if this is used as a partition QOS jobs will
+not be allowed to use it as a normal QOS.
+
 .IP
 
 .TP
@@ -1981,10 +2091,9 @@ What priority will be added to a job's priority when using this QOS.
 
 .TP
 \fBRawUsage\fR=<\fIvalue\fR>
-This allows an administrator to reset the raw usage accrued to a
-QOS.  The only value currently supported is 0 (zero).  This is a
-settable specification only \- it cannot be used as a filter to list
-accounts.
+This allows an administrator to set the raw usage accrued to a QOS. Specifying
+a value of 0 (zero) will reset the raw usage. This is a settable specification
+only \- it cannot be used as a filter to list accounts.
 .IP
 
 .TP
@@ -2292,7 +2401,7 @@ Node names where reservation ran.
 
 .TP
 \fBStart\fR=<\fIOPT\fR>
-Period start of reservations.  Default is 00:00:00 of current day.
+Period start of reservations.  Default is 00:00:00 of previous day.
 
 Valid time formats are...
 .br
@@ -2840,28 +2949,65 @@ dash, space, entity value, then specifications. Specifications are colon
 separated. If any variable, such as an Organization name, has a space in it,
 surround the name with single or double quotes.
 
-To create a file of associations you can run
-.RS
-\fBsacctmgr dump tux file=tux.cfg\fP
-.RE
-
-To load a previously created file you can run
-.RS
-\fBsacctmgr load file=tux.cfg\fP
-.RE
-
+.P
 sacctmgr dump/load must be run as a Slurm administrator or root. If using
 sacctmgr load on a database without any associations, it must be run as root
 (because there aren't any users in the database yet).
 
-Other options for load are:
+.SS dump
+Dump cluster associations from the database into a file. If no file is given
+then one will be generated, using the cluster name for the file name. That
+file will be created in the current working directory.
+
+.P
+To create a file with the association information you can run:
+
+.nf
+sacctmgr dump tux file=tux.cfg
+.fi
+
 .RS
-\fBclean\fP     \- delete what was already there and start from scratch with
-this information.
-.br
-\fBCluster=\fP  \- specify a different name for the cluster than that which is
-in the file.
+.TP
+\fBCluster=\fR
+Specify the cluster to dump the information for.
+.IP
+
+.TP
+\fBFile=\fR
+Specify a file to save flat file data to.
+If the filename is not specified it uses clustername.cfg filename by default.
+.IP
 .RE
+
+.SS load
+Load cluster associations into the database. The imported associations will be
+reconciled with existing ones.
+
+.P
+To load a previously created file you can run:
+
+.nf
+sacctmgr load file=tux.cfg
+.fi
+
+.RS
+.TP
+\fBclean\fR
+Delete what was already there and start from scratch with this information.
+.IP
+
+.TP
+\fBCluster=\fR
+Specify a different name for the cluster than that which is in the file.
+.IP
+
+.TP
+\fBFile=\fR
+Specify a flat file to load from.
+.IP
+.RE
+
+.SH "SPECIFICATIONS FOR FLAT FILE"
 
 Since the associations in the system follow a hierarchy, so does the
 file.  Anything that is a parent needs to be defined before any
@@ -3138,6 +3284,7 @@ This operation cannot be rolled back
 once executed. If one of the following options is not specified when sacctmgr
 is called, the value configured in slurmdbd.conf is used.
 
+.RS
 .TP
 \fBDirectory=\fR
 Directory to store the archive data.
@@ -3202,6 +3349,8 @@ all step data removed will be lost permanently.
 \fBSuspend\fR
 Archive Suspend Data.  If not specified and PurgeSuspendAfter is set
 all suspend data removed will be lost permanently.
+.IP
+.RE
 
 .SS archive load
 Load in to the database previously archived data. The archive file will not be
@@ -3216,6 +3365,7 @@ will have duplicate records.
 Archive files from the current or any prior Slurm release may be loaded
 through \fBarchive load\fR.
 
+.RS
 .TP
 \fBFile=\fR
 File to load into database. The specified file must exist on the slurmdbd host,
@@ -3227,6 +3377,7 @@ which is not necessarily the machine running the command.
 SQL to insert directly into the database.  This should be used very
 cautiously since this is writing your sql into the database.
 .IP
+.RE
 
 .SH "PERFORMANCE"
 .PP

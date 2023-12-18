@@ -73,7 +73,7 @@
 #define MAX_POLL_WAIT 500 /* in milliseconds */
 #define MAX_SHUTDOWN_DELAY 10
 
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__)
+#ifndef POLLRDHUP
 #define POLLRDHUP POLLHUP
 #endif
 
@@ -117,12 +117,14 @@ typedef struct {
 
 static void _incr_script_cnt(void);
 
+static bool shutting_down = false;
 static int slurmctld_readfd = -1;
 static int slurmctld_writefd = -1;
 static pid_t slurmscriptd_pid;
 static pthread_t slurmctld_listener_tid;
 static int script_count = 0;
 static pthread_mutex_t script_count_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t script_count_cond = PTHREAD_COND_INITIALIZER;
 
 static pthread_mutex_t script_resp_map_mutex = PTHREAD_MUTEX_INITIALIZER;
 static xhash_t *script_resp_map = NULL;
@@ -134,8 +136,10 @@ static xhash_t *script_resp_map = NULL;
  */
 static int slurmscriptd_readfd = -1;
 static int slurmscriptd_writefd = -1;
-static pthread_mutex_t powersave_script_count_mutex;
+static pthread_mutex_t powersave_script_count_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t powersave_script_cond = PTHREAD_COND_INITIALIZER;
 static int powersave_script_count = 0;
+static bool powersave_wait_called = false;
 
 
 /* Function definitions: */
@@ -215,8 +219,11 @@ static void _wait_for_script_resp(script_response_t *script_resp,
 
 static void _wait_for_powersave_scripts()
 {
-	static bool called = false;
-	int i, cnt;
+	int cnt;
+	struct timespec ts = {0, 0};
+	time_t start;
+	time_t now;
+	bool first = true;
 
 	/*
 	 * Only do this wait once. Under normal operation, this is called twice:
@@ -227,27 +234,33 @@ static void _wait_for_powersave_scripts()
 	 * SLURMSCRIPTD_SHUTDOWN, then only _handle_close() is called. So, we
 	 * need this to be called from both places but only happen once.
 	 */
-	if (called)
+	if (powersave_wait_called)
 		return;
-	called = true;
+	powersave_wait_called = true;
 
 	/*
 	 * ResumeProgram has a temporary file open held in memory.
-	 * Wait a short time for powersave scripts to finish before
-	 * shutting down (which will close the temporary file).
+	 * Wait up to MAX_SHUTDOWN_DELAY seconds for powersave scripts to
+	 * finish before shutting down (which will close the temporary file).
 	 */
-	for (i = 0; i < MAX_SHUTDOWN_DELAY; i++) {
-		slurm_mutex_lock(&powersave_script_count_mutex);
+	slurm_mutex_lock(&powersave_script_count_mutex);
+	start = now = time(NULL);
+	while (now < (start + MAX_SHUTDOWN_DELAY)) {
 		cnt = powersave_script_count;
-		slurm_mutex_unlock(&powersave_script_count_mutex);
 		if (!cnt)
 			break;
-		if (i == 0)
+		if (first) {
 			log_flag(SCRIPT, "Waiting up to %d seconds for %d powersave scripts to complete",
 				 MAX_SHUTDOWN_DELAY, cnt);
+			first = false;
+		}
 
-		sleep(1);
+		ts.tv_sec = now + 2;
+		slurm_cond_timedwait(&powersave_script_cond,
+				     &powersave_script_count_mutex, &ts);
+		now = time(NULL);
 	}
+	slurm_mutex_unlock(&powersave_script_count_mutex);
 
 	/* Kill or orphan running scripts. */
 	run_command_shutdown();
@@ -260,12 +273,15 @@ static void _wait_for_powersave_scripts()
 		 * sent to slurmctld, otherwise slurmctld may wait forever for
 		 * a message that won't come.
 		 */
+		slurm_mutex_lock(&powersave_script_count_mutex);
 		while (cnt) {
-			slurm_mutex_lock(&powersave_script_count_mutex);
+			ts.tv_sec = time(NULL) + 2;
+			slurm_cond_timedwait(&powersave_script_cond,
+					     &powersave_script_count_mutex,
+					     &ts);
 			cnt = powersave_script_count;
-			slurm_mutex_unlock(&powersave_script_count_mutex);
-			usleep(100000); /* 100 ms */
 		}
+		slurm_mutex_unlock(&powersave_script_count_mutex);
 	}
 
 }
@@ -289,6 +305,9 @@ static int _handle_close(eio_obj_t *obj, List objs)
 	if (!running_in_slurmctld()) { /* Only do this for slurmscriptd */
 		_wait_for_powersave_scripts();
 		track_script_flush();
+	} else {
+		/* fd has been closed */
+		slurmctld_readfd = -1;
 	}
 
 	return SLURM_SUCCESS; /* Note: Return value is ignored by eio. */
@@ -321,7 +340,9 @@ static int _write_msg(int fd, int req, buf_t *buffer)
 	return SLURM_SUCCESS;
 
 rwfail:
-	error("%s: read/write op failed", __func__);
+	if (running_in_slurmctld())
+		error("%s: read/write op failed, restart slurmctld now: %m",
+		      __func__);
 	slurm_mutex_unlock(&write_mutex);
 	return SLURM_ERROR;
 }
@@ -363,9 +384,9 @@ static int _send_to_slurmscriptd(uint32_t msg_type, void *msg_data, bool wait,
 	}
 	if (msg_type == SLURMSCRIPTD_REQUEST_RUN_SCRIPT)
 		_incr_script_cnt();
-	_write_msg(slurmctld_writefd, msg.msg_type, buffer);
+	rc = _write_msg(slurmctld_writefd, msg.msg_type, buffer);
 
-	if (wait) {
+	if ((rc == SLURM_SUCCESS) && wait) {
 		_wait_for_script_resp(script_resp, &rc, resp_msg, signalled);
 		_script_resp_map_remove(script_resp->key);
 	}
@@ -433,6 +454,8 @@ static void _decr_script_cnt(void)
 {
 	slurm_mutex_lock(&script_count_mutex);
 	script_count--;
+	if (!script_count && shutting_down)
+		slurm_cond_signal(&script_count_cond);
 	slurm_mutex_unlock(&script_count_mutex);
 }
 
@@ -538,6 +561,11 @@ static int _handle_flush(slurmscriptd_msg_t *recv_msg)
 	log_flag(SCRIPT, "Handling %s", rpc_num2string(recv_msg->msg_type));
 	/* Kill all running scripts */
 	track_script_flush();
+	/*
+	 * DO NOT CALL _wait_for_powersave_scripts HERE. That would result in
+	 * reconfigure waiting for up to MAX_SHUTDOWN_DELAY seconds, which is
+	 * an unacceptably long time for reconfigure.
+	 */
 
 	/* We need to respond to slurmctld that we are done */
 	_respond_to_slurmctld(recv_msg->key, 0, NULL,
@@ -775,9 +803,6 @@ static int _handle_run_script(slurmscriptd_msg_t *recv_msg)
 				     script_msg->tmp_file_str,
 				     &resp_msg, &signalled);
 
-		slurm_mutex_lock(&powersave_script_count_mutex);
-		powersave_script_count--;
-		slurm_mutex_unlock(&powersave_script_count_mutex);
 		break;
 	default:
 		error("%s: Invalid script type=%d",
@@ -791,6 +816,14 @@ static int _handle_run_script(slurmscriptd_msg_t *recv_msg)
 				   resp_msg, script_msg->script_name,
 				   script_msg->script_type, signalled, status,
 				   timed_out);
+
+	if (script_msg->script_type == SLURMSCRIPTD_POWER) {
+		slurm_mutex_lock(&powersave_script_count_mutex);
+		powersave_script_count--;
+		if (!powersave_script_count && powersave_wait_called)
+			slurm_cond_signal(&powersave_script_cond);
+		slurm_mutex_unlock(&powersave_script_count_mutex);
+	}
 	xfree(resp_msg);
 	env_array_free(run_command_args.env);
 
@@ -1022,7 +1055,7 @@ static int _msg_accept(eio_obj_t *obj, List objs)
 		req_args = xmalloc(sizeof *req_args);
 		req_args->req = req;
 		req_args->buffer = buffer;
-		slurm_thread_create_detached(NULL, _handle_accept, req_args);
+		slurm_thread_create_detached(_handle_accept, req_args);
 
 		/*
 		 * xmalloc()'d data will be xfree()'d by _handle_accept()
@@ -1068,20 +1101,12 @@ static void *_slurmctld_listener_thread(void *x)
 	return NULL;
 }
 
-static int _script_cnt(void)
-{
-	int cnt;
-
-	slurm_mutex_lock(&script_count_mutex);
-	cnt = script_count;
-	slurm_mutex_unlock(&script_count_mutex);
-
-	return cnt;
-}
-
 static void _kill_slurmscriptd(void)
 {
 	int status;
+	int rc;
+	int last_pc = 0;
+	struct timespec ts = {0, 0};
 
 	if (slurmscriptd_pid <= 0) {
 		error("%s: slurmscriptd_pid < 0, we don't know the PID of slurmscriptd.",
@@ -1089,13 +1114,50 @@ static void _kill_slurmscriptd(void)
 		return;
 	}
 
+	shutting_down = true;
+	slurmscriptd_flush();
+
 	/* Tell slurmscriptd to shutdown, then wait for it to finish. */
-	_send_to_slurmscriptd(SLURMSCRIPTD_SHUTDOWN, NULL, false, NULL, NULL);
-	if (waitpid(slurmscriptd_pid, &status, 0) < 0) {
-		if (WIFEXITED(status)) {
-			/* Exited normally. */
-		} else {
-			error("%s: Unable to reap slurmscriptd child process", __func__);
+	rc = _send_to_slurmscriptd(SLURMSCRIPTD_SHUTDOWN, NULL, false, NULL,
+				   NULL);
+	/*
+	 * Wait until all script complete messages have been processed or until
+	 * the readfd is closed, in which case we know we'll never get more
+	 * messages from slurmscriptd.
+	 */
+	slurm_mutex_lock(&script_count_mutex);
+	while ((rc == SLURM_SUCCESS) && (slurmctld_readfd > 0)) {
+		if (!script_count)
+			break;
+		if (last_pc != script_count)
+			info("waiting for %d running processes", script_count);
+		last_pc = script_count;
+		ts.tv_sec = time(NULL) + 2;
+		slurm_cond_timedwait(&script_count_cond, &script_count_mutex,
+				     &ts);
+	}
+	slurm_mutex_unlock(&script_count_mutex);
+
+	if (rc != SLURM_SUCCESS) {
+		/* Shutdown signal failed. Try to reap slurmscriptd now. */
+		if (waitpid(slurmscriptd_pid, &status, WNOHANG) == 0) {
+			/*
+			 * slurmscriptd is not reaped and we cannot send a
+			 * shutdown signal to slurmscriptd; kill it so we know
+			 * that we won't wait forever.
+			 */
+			run_command_waitpid_timeout("slurmscriptd",
+						    slurmscriptd_pid,
+						    &status, 10 * MSEC_IN_SEC,
+						    0, 0, NULL);
+		}
+	} else {
+		while (waitpid(slurmscriptd_pid, &status, 0) < 0) {
+			if (errno == EINTR)
+				continue;
+			error("%s: Unable to reap slurmscriptd child process",
+			      __func__);
+			break;
 		}
 	}
 }
@@ -1281,8 +1343,7 @@ extern void slurmscriptd_run_prepilog(uint32_t job_id, bool is_epilog,
 	 */
 	send_args->msg_data = run_script_msg;
 	send_args->msg_type = SLURMSCRIPTD_REQUEST_RUN_SCRIPT;
-	slurm_thread_create_detached(NULL, _async_send_to_slurmscriptd,
-				     send_args);
+	slurm_thread_create_detached(_async_send_to_slurmscriptd, send_args);
 }
 
 extern int slurmscriptd_run_reboot(char *script_path, uint32_t argc,
@@ -1508,14 +1569,7 @@ extern int slurmscriptd_init(int argc, char **argv)
 			failed_plugin = "burst_buffer";
 			ack = SLURM_ERROR;
 		}
-		/*
-		 * Required by burst buffer plugin - specifically for
-		 * unpacking job_info in _run_bb_script()
-		 */
-		if (select_g_init(0) != SLURM_SUCCESS) {
-			failed_plugin = "select";
-			ack = SLURM_ERROR;
-		}
+
 		i = write(slurmscriptd_writefd, &ack, sizeof(int));
 		if (i != sizeof(int))
 			fatal("%s: Failed to send initialization code to slurmctld",
@@ -1544,19 +1598,8 @@ extern int slurmscriptd_init(int argc, char **argv)
 
 extern int slurmscriptd_fini(void)
 {
-	int pc, last_pc = 0;
-
 	debug("%s starting", __func__);
 	_kill_slurmscriptd();
-
-	/* Wait until all script complete messages have been processed. */
-	while ((pc = _script_cnt()) > 0) {
-		if ((last_pc != 0) && (last_pc != pc)) {
-			info("waiting for %d running processes", pc);
-		}
-		last_pc = pc;
-		usleep(100000);
-	}
 
 	/* Now shutdown communications. */
 	eio_signal_shutdown(msg_handle);

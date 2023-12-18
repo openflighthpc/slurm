@@ -47,6 +47,7 @@
 #include "slurm/slurm_errno.h"
 #include "src/common/fd.h"
 #include "src/common/macros.h"
+#include "src/common/net.h"
 #include "src/interfaces/auth.h"
 #include "src/common/slurm_protocol_pack.h"
 #include "src/common/slurmdbd_defs.h"
@@ -217,7 +218,7 @@ static void _persist_free_msg_members(slurm_persist_conn_t *persist_conn,
 static int _process_service_connection(
 	slurm_persist_conn_t *persist_conn, void *arg)
 {
-	uint32_t nw_size = 0, msg_size = 0, uid = NO_VAL;
+	uint32_t nw_size = 0, msg_size = 0;
 	char *msg_char = NULL;
 	ssize_t msg_read = 0, offset = 0;
 	bool first = true, fini = false;
@@ -241,14 +242,15 @@ static int _process_service_connection(
 			break;
 		if (msg_read != sizeof(nw_size)) {
 			error("Could not read msg_size from connection %d(%s) uid(%u)",
-			      persist_conn->fd, persist_conn->rem_host, uid);
+			      persist_conn->fd, persist_conn->rem_host,
+			      persist_conn->auth_uid);
 			break;
 		}
 		msg_size = ntohl(nw_size);
 		if ((msg_size < 2) || (msg_size > MAX_MSG_SIZE)) {
 			error("Invalid msg_size (%u) from connection %d(%s) uid(%u)",
 			      msg_size, persist_conn->fd,
-			      persist_conn->rem_host, uid);
+			      persist_conn->rem_host, persist_conn->auth_uid);
 			break;
 		}
 
@@ -274,8 +276,8 @@ static int _process_service_connection(
 				&buffer, first);
 
 			if (rc == SLURM_SUCCESS) {
-				rc = (persist_conn->callback_proc)(
-					arg, &msg, &buffer, &uid);
+				rc = (persist_conn->callback_proc)(arg, &msg,
+								   &buffer);
 				_persist_free_msg_members(persist_conn, &msg);
 				if (rc != SLURM_SUCCESS &&
 				    rc != ACCOUNTING_FIRST_REG &&
@@ -283,7 +285,8 @@ static int _process_service_connection(
 				    rc != ACCOUNTING_NODES_CHANGE_DB) {
 					error("Processing last message from connection %d(%s) uid(%u)",
 					      persist_conn->fd,
-					      persist_conn->rem_host, uid);
+					      persist_conn->rem_host,
+					      persist_conn->auth_uid);
 					if (rc == ESLURM_ACCESS_DENIED ||
 					    rc == SLURM_PROTOCOL_VERSION_ERROR)
 						fini = true;
@@ -308,7 +311,8 @@ static int _process_service_connection(
 					log_flag(NET, "%s: Problem sending response to connection host:%s fd:%d uid:%u",
 						 __func__,
 						 persist_conn->rem_host,
-						 persist_conn->fd, uid);
+						 persist_conn->fd,
+						 persist_conn->auth_uid);
 				fini = true;
 			}
 			FREE_NULL_BUFFER(buffer);
@@ -316,7 +320,8 @@ static int _process_service_connection(
 	}
 
 	log_flag(NET, "%s: Closed connection host:%s fd:%d uid:%u",
-		 __func__, persist_conn->rem_host, persist_conn->fd, uid);
+		 __func__, persist_conn->rem_host, persist_conn->fd,
+		 persist_conn->auth_uid);
 
 	return rc;
 }
@@ -569,6 +574,7 @@ extern int slurm_persist_conn_open_without_init(
 		return SLURM_ERROR;
 	}
 	fd_set_nonblocking(persist_conn->fd);
+	net_set_keep_alive(persist_conn->fd);
 
 	return SLURM_SUCCESS;
 }
@@ -699,6 +705,9 @@ extern void slurm_persist_conn_members_destroy(
 	if (persist_conn->auth_cred) {
 		auth_g_destroy(persist_conn->auth_cred);
 		persist_conn->auth_cred = NULL;
+		persist_conn->auth_uid = SLURM_AUTH_NOBODY;
+		persist_conn->auth_gid = SLURM_AUTH_NOBODY;
+		persist_conn->auth_ids_set = false;
 	}
 	xfree(persist_conn->cluster_name);
 	xfree(persist_conn->rem_host);
@@ -1074,6 +1083,9 @@ extern int slurm_persist_msg_unpack(slurm_persist_conn_t *persist_conn,
 			auth_g_destroy(persist_conn->auth_cred);
 
 		persist_conn->auth_cred = msg->auth_cred;
+		persist_conn->auth_uid = msg->auth_uid;
+		persist_conn->auth_gid = msg->auth_gid;
+		persist_conn->auth_ids_set = msg->auth_ids_set;
 		msg->auth_cred = NULL;
 	}
 

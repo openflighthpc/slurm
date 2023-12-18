@@ -58,6 +58,7 @@
 #include "src/interfaces/cred.h"
 #include "src/interfaces/ext_sensors.h"
 #include "src/interfaces/jobacct_gather.h"
+#include "src/interfaces/topology.h"
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_time.h"
 #include "src/interfaces/switch.h"
@@ -177,15 +178,19 @@ static char *_convert_to_id(char *name, bool gid)
  * value IN - numeric value
  * RET true if "tok" is a valid number
  */
-static bool _is_valid_number(char *tok, unsigned long long int *value)
+static bool _is_valid_number(char *tok, uint64_t *value)
 {
-	unsigned long long int tmp_val;
+	uint64_t tmp_val = 1;
 	uint64_t mult;
 	char *end_ptr = NULL;
 
-	tmp_val = strtoull(tok, &end_ptr, 10);
-	if (tmp_val == ULLONG_MAX)
+	if (isdigit(tok[0])) {
+		tmp_val = strtoull(tok, &end_ptr, 10);
+		if (tmp_val == ULLONG_MAX)
+			return false;
+	} else
 		return false;
+
 	if ((mult = suffix_mult(end_ptr)) == NO_VAL64)
 		return false;
 	tmp_val *= mult;
@@ -202,6 +207,7 @@ extern void slurm_msg_t_init(slurm_msg_t *msg)
 	memset(msg, 0, sizeof(slurm_msg_t));
 
 	msg->auth_uid = SLURM_AUTH_NOBODY;
+	msg->auth_gid = SLURM_AUTH_NOBODY;
 	msg->conn_fd = -1;
 	msg->msg_type = NO_VAL16;
 	msg->protocol_version = NO_VAL16;
@@ -243,7 +249,7 @@ extern void slurm_msg_t_copy(slurm_msg_t *dest, slurm_msg_t *src)
 #endif
 
 	dest->orig_addr.ss_family = AF_UNSPEC;
-	if (src->auth_uid_set)
+	if (src->auth_ids_set)
 		slurm_msg_set_r_uid(dest, src->auth_uid);
 }
 
@@ -312,6 +318,13 @@ extern int slurm_find_char_in_list(void *x, void *key)
 	if (!xstrcasecmp(char1, char2))
 		return 1;
 
+	return 0;
+}
+
+extern int slurm_find_ptr_in_list(void *x, void *key)
+{
+	if (x == key)
+		return 1;
 	return 0;
 }
 
@@ -461,7 +474,7 @@ extern int slurm_addto_char_list_with_case(List char_list, char *names,
 	bool first_brack = false;
 	char *this_node_name;
 	char *tmp_this_node_name;
-	hostlist_t host_list;
+	hostlist_t *host_list;
 
 	if (!char_list) {
 		error("No list was given to fill in");
@@ -727,7 +740,7 @@ extern int slurm_sort_char_list_desc(void *v1, void *v2)
 extern char *slurm_sort_node_list_str(char *node_list)
 {
 	char *sorted_node_list;
-	hostset_t hs;
+	hostset_t *hs;
 
 	hs = hostset_create(node_list);
 	sorted_node_list = hostset_ranged_string_xmalloc(hs);
@@ -1324,6 +1337,7 @@ extern void slurm_free_job_desc_msg(job_desc_msg_t *msg)
 		xfree(msg->exc_nodes);
 		xfree(msg->features);
 		xfree(msg->cluster_features);
+		FREE_NULL_IDENTITY(msg->id);
 		xfree(msg->job_id_str);
 		xfree(msg->job_size_str);
 		xfree(msg->licenses);
@@ -1384,6 +1398,7 @@ extern void slurm_free_dep_msg(dep_msg_t *msg)
 	if (msg) {
 		xfree(msg->dependency);
 		xfree(msg->job_name);
+		xfree(msg);
 	}
 }
 
@@ -1391,6 +1406,7 @@ extern void slurm_free_dep_update_origin_msg(dep_update_origin_msg_t *msg)
 {
 	if (msg) {
 		FREE_NULL_LIST(msg->depend_list);
+		xfree(msg);
 	}
 }
 
@@ -1402,11 +1418,8 @@ extern void slurm_free_prolog_launch_msg(prolog_launch_msg_t * msg)
 		xfree(msg->alias_list);
 		FREE_NULL_LIST(msg->job_gres_prep);
 		xfree(msg->nodes);
-		xfree(msg->partition);
-		xfree(msg->std_err);
-		xfree(msg->std_out);
 		xfree(msg->work_dir);
-		xfree(msg->user_name);
+		xfree(msg->user_name_deprecated);
 
 		xfree(msg->x11_alloc_host);
 		xfree(msg->x11_magic_cookie);
@@ -1469,7 +1482,6 @@ extern void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg)
 		xfree(msg->std_out);
 		xfree(msg->tres_bind);
 		xfree(msg->tres_freq);
-		xfree(msg->user_name);
 		xfree(msg->work_dir);
 		xfree(msg);
 	}
@@ -1587,9 +1599,12 @@ extern void slurm_free_node_registration_status_msg(
 		xfree(msg->cpu_spec_list);
 		if (msg->energy)
 			acct_gather_energy_destroy(msg->energy);
+		xfree(msg->extra);
 		xfree(msg->features_active);
 		xfree(msg->features_avail);
 		xfree(msg->hostname);
+		xfree(msg->instance_id);
+		xfree(msg->instance_type);
 		FREE_NULL_BUFFER(msg->gres_info);
 		xfree(msg->node_name);
 		xfree(msg->os);
@@ -1627,6 +1642,8 @@ extern void slurm_free_update_node_msg(update_node_msg_t * msg)
 		xfree(msg->features);
 		xfree(msg->features_act);
 		xfree(msg->gres);
+		xfree(msg->instance_id);
+		xfree(msg->instance_type);
 		xfree(msg->node_addr);
 		xfree(msg->node_hostname);
 		xfree(msg->node_names);
@@ -1665,22 +1682,21 @@ extern void slurm_free_resv_desc_msg_part(resv_desc_msg_t *msg,
 		xfree(msg->burst_buffer);
 	if (res_free_flags & RESV_FREE_STR_COMMENT)
 		xfree(msg->comment);
-	if (res_free_flags & RESV_FREE_STR_TRES_CORE)
-		xfree(msg->core_cnt);
 	if (res_free_flags & RESV_FREE_STR_TRES_LIC)
 		xfree(msg->licenses);
-	if (res_free_flags & RESV_FREE_STR_TRES_NODE)
-		xfree(msg->node_cnt);
 	if (res_free_flags & RESV_FREE_STR_GROUP)
 		xfree(msg->groups);
 	if (res_free_flags & RESV_FREE_STR_NODES)
 		xfree(msg->node_list);
+	if (res_free_flags & RESV_FREE_STR_TRES)
+		xfree(msg->tres_str);
 }
 
 extern void slurm_free_resv_desc_msg(resv_desc_msg_t * msg)
 {
 	if (msg) {
 		xfree(msg->features);
+		xassert(!msg->job_ptr); /* This shouldn't be here */
 		xfree(msg->name);
 		xfree(msg->node_list);
 		xfree(msg->partition);
@@ -1800,10 +1816,11 @@ extern void slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg
 		xfree(msg->env);
 	}
 	xfree(msg->acctg_freq);
-	xfree(msg->user_name);
 	xfree(msg->alias_list);
 	xfree(msg->container);
 	xfree(msg->cwd);
+	xfree(msg->cpt_compact_array);
+	xfree(msg->cpt_compact_reps);
 	xfree(msg->cpu_bind);
 	xfree(msg->mem_bind);
 	if (msg->argv) {
@@ -1844,8 +1861,6 @@ extern void slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg
 	xfree(msg->task_prolog);
 	xfree(msg->task_epilog);
 	xfree(msg->complete_nodelist);
-
-	xfree(msg->partition);
 
 	if (msg->switch_job)
 		switch_g_free_jobinfo(msg->switch_job);
@@ -1999,16 +2014,15 @@ slurm_free_requeue_msg(requeue_msg_t *msg)
 
 extern void slurm_free_suspend_int_msg(suspend_int_msg_t *msg)
 {
-	if (msg) {
-		switch_g_job_suspend_info_free(msg->switch_info);
-		xfree(msg);
-	}
+	xfree(msg);
 }
 
 extern void slurm_free_stats_response_msg(stats_info_response_msg_t *msg)
 {
 	int i;
 	if (msg) {
+		xfree(msg->bf_exit);
+		xfree(msg->schedule_exit);
 		xfree(msg->rpc_type_id);
 		xfree(msg->rpc_type_cnt);
 		xfree(msg->rpc_type_time);
@@ -2450,6 +2464,8 @@ extern char *job_reason_string(enum job_state_reason inx)
 		return "ReservationDeleted";
 	case WAIT_RESV_INVALID:
 		return "ReservationInvalid";
+	case FAIL_CONSTRAINTS:
+		return "Constraints";
 	default:
 		snprintf(val, sizeof(val), "%d", inx);
 		return val;
@@ -2855,6 +2871,8 @@ extern enum job_state_reason job_reason_num(char *reason)
 		return WAIT_RESV_DELETED;
 	if (!xstrcasecmp(reason, "ReservationInvalid"))
 		return WAIT_RESV_INVALID;
+	if (!xstrcasecmp(reason, "Constraints"))
+		return FAIL_CONSTRAINTS;
 
 	return NO_VAL;
 }
@@ -2915,6 +2933,7 @@ extern void slurm_free_kvs_comm_set(kvs_comm_set_t *msg)
 				}
 				xfree(msg->kvs_comm_ptr[i]->kvs_keys);
 				xfree(msg->kvs_comm_ptr[i]->kvs_values);
+				xfree(msg->kvs_comm_ptr[i]);
 			}
 			xfree(msg->kvs_comm_ptr);
 		}
@@ -3598,11 +3617,6 @@ extern char *reservation_flags_string(reserve_info_t * resv_ptr)
 		if (flag_str[0])
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "NO_PART_NODES");
-	}
-	if (flags & RESERVE_FLAG_FIRST_CORES) {
-		if (flag_str[0])
-			xstrcat(flag_str, ",");
-		xstrcat(flag_str, "FIRST_CORES");
 	}
 	if (flags & RESERVE_FLAG_TIME_FLOAT) {
 		if (flag_str[0])
@@ -4515,9 +4529,9 @@ extern void accounting_enforce_string(uint16_t enforce, char *str, int str_len)
 		strcat(str, "none");
 }
 
-extern char *cray_nodelist2nids(hostlist_t hl_in, char *nodelist)
+extern char *cray_nodelist2nids(hostlist_t *hl_in, char *nodelist)
 {
-	hostlist_t hl = hl_in;
+	hostlist_t *hl = hl_in;
 	char *nids = NULL, *node_name, *sep = "";
 	int i, nid;
 	int nid_begin = -1, nid_end = -1;
@@ -4871,6 +4885,7 @@ extern void slurm_free_node_info_members(node_info_t * node)
 		xfree(node->gres);
 		xfree(node->gres_drain);
 		xfree(node->gres_used);
+		xfree(node->instance_id);
 		xfree(node->mcs_label);
 		xfree(node->name);
 		xfree(node->node_addr);
@@ -5017,6 +5032,7 @@ extern void slurm_free_topo_info_msg(topo_info_response_msg_t *msg)
 			}
 			xfree(msg->topo_array);
 		}
+		topology_g_topology_free(msg->topo_info);
 		xfree(msg);
 	}
 }
@@ -5399,6 +5415,49 @@ extern void slurm_free_suspend_exc_update_msg(suspend_exc_update_msg_t *msg)
 	xfree(msg);
 }
 
+extern void slurm_copy_node_alias_addrs_members(slurm_node_alias_addrs_t *dest,
+						slurm_node_alias_addrs_t *src)
+{
+	xassert(dest);
+	xassert(src);
+
+	dest->expiration = src->expiration;
+	dest->node_cnt = src->node_cnt;
+
+	if (dest->net_cred)
+		dest->net_cred[0] = '\0';
+	if (src->net_cred)
+		xstrcat(dest->net_cred, src->net_cred);
+
+	xrecalloc(dest->node_addrs, src->node_cnt, sizeof(slurm_addr_t));
+	memcpy(dest->node_addrs, src->node_addrs,
+	       (sizeof(slurm_addr_t) * src->node_cnt));
+
+	if (dest->node_list)
+		dest->node_list[0] = '\0';
+	if (src->node_list)
+		xstrcat(dest->node_list, src->node_list);
+}
+
+extern void slurm_free_node_alias_addrs_members(slurm_node_alias_addrs_t *msg)
+{
+	if (!msg)
+		return;
+
+	xfree(msg->net_cred);
+	xfree(msg->node_addrs);
+	xfree(msg->node_list);
+}
+
+extern void slurm_free_node_alias_addrs(slurm_node_alias_addrs_t *msg)
+{
+	if (!msg)
+		return;
+
+	slurm_free_node_alias_addrs_members(msg);
+	xfree(msg);
+}
+
 extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 {
 	if (!data)
@@ -5418,6 +5477,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_BUILD_INFO:
 		slurm_free_last_update_msg(data);
 		break;
+	case RESPONSE_BUILD_INFO:
+		slurm_free_ctl_conf(data);
+		break;
 	case REQUEST_JOB_INFO:
 		slurm_free_job_info_request_msg(data);
 		break;
@@ -5432,6 +5494,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		break;
 	case MESSAGE_EPILOG_COMPLETE:
 		slurm_free_epilog_complete_msg(data);
+		break;
+	case RESPONSE_JOB_STEP_INFO:
+		slurm_free_job_step_info_response_msg(data);
 		break;
 	case REQUEST_KILL_JOB:
 	case REQUEST_CANCEL_JOB_STEP:
@@ -5483,6 +5548,7 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		slurm_free_submit_response_response_msg(data);
 		break;
 	case RESPONSE_ACCT_GATHER_UPDATE:
+	case RESPONSE_ACCT_GATHER_ENERGY:
 		slurm_free_acct_gather_node_resp_msg(data);
 		break;
 	case RESPONSE_NODE_REGISTRATION:
@@ -5529,6 +5595,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_RESERVATION_INFO:
 		slurm_free_resv_info_request_msg(data);
 		break;
+	case RESPONSE_RESERVATION_INFO:
+		slurm_free_reservation_info_msg(data);
+		break;
 	case REQUEST_FRONT_END_INFO:
 		slurm_free_front_end_info_request_msg(data);
 		break;
@@ -5559,6 +5628,12 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case RESPONSE_BATCH_SCRIPT:
 		slurm_free_batch_script_msg(data);
 		break;
+	case RESPONSE_PARTITION_INFO:
+		slurm_free_partition_info_msg(data);
+		break;
+	case RESPONSE_NODE_INFO:
+		slurm_free_node_info_msg(data);
+		break;
 	case REQUEST_JOB_USER_INFO:
 		slurm_free_job_user_id_msg(data);
 		break;
@@ -5581,6 +5656,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_JOB_STEP_PIDS:
 	case REQUEST_STEP_LAYOUT:
 		slurm_free_step_id(data);
+		break;
+	case RESPONSE_STEP_LAYOUT:
+		slurm_job_step_layout_free(data);
 		break;
 	case RESPONSE_JOB_STEP_STAT:
 		slurm_free_job_step_stat(data);
@@ -5612,9 +5690,13 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_JOB_ID:
 		slurm_free_job_id_request_msg(data);
 		break;
+	case RESPONSE_JOB_ID:
+		slurm_free_job_id_response_msg(data);
+		break;
 	case REQUEST_CONFIG:
 		slurm_free_config_request_msg(data);
 		break;
+	case REQUEST_RECONFIGURE_SACKD:
 	case REQUEST_RECONFIGURE_WITH_CONFIG:
 	case RESPONSE_CONFIG:
 		slurm_free_config_response_msg(data);
@@ -5626,10 +5708,18 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case RESPONSE_CONTAINER_KILL:
 	case RESPONSE_CONTAINER_DELETE:
 	case RESPONSE_CONTAINER_EXEC:
+	case RESPONSE_PROLOG_EXECUTING:
+	case RESPONSE_JOB_READY:
 		slurm_free_return_code_msg(data);
 		break;
 	case RESPONSE_SLURM_RC_MSG:
 		slurm_free_return_code2_msg(data);
+		break;
+	case RESPONSE_SLURM_REROUTE_MSG:
+		slurm_free_reroute_msg(data);
+		break;
+	case RESPONSE_JOB_STEP_CREATE:
+		slurm_free_job_step_create_response_msg(data);
 		break;
 	case RESPONSE_SLURM_RC:
 		slurm_free_return_code_msg(data);
@@ -5654,8 +5744,6 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_HEALTH_CHECK:
 	case REQUEST_ACCT_GATHER_UPDATE:
 	case ACCOUNTING_FIRST_REG:
-	case ACCOUNTING_TRES_CHANGE_DB:
-	case ACCOUNTING_NODES_CHANGE_DB:
 	case REQUEST_TOPO_INFO:
 	case REQUEST_BURST_BUFFER_INFO:
 	case ACCOUNTING_REGISTER_CTLD:
@@ -5664,6 +5752,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		break;
 	case RESPONSE_FED_INFO:
 		slurmdb_destroy_federation_rec(data);
+		break;
+	case RESPONSE_FRONT_END_INFO:
+		slurm_free_front_end_info_msg(data);
 		break;
 	case REQUEST_PERSIST_INIT:
 		slurm_persist_free_init_req_msg(data);
@@ -5680,11 +5771,17 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case RESPONSE_TOPO_INFO:
 		slurm_free_topo_info_msg(data);
 		break;
+	case RESPONSE_JOB_SBCAST_CRED:
+		slurm_free_sbcast_cred_msg(data);
+		break;
 	case REQUEST_UPDATE_JOB_STEP:
 		slurm_free_update_step_msg(data);
 		break;
 	case RESPONSE_PING_SLURMD:
 		slurm_free_ping_slurmd_resp(data);
+		break;
+	case RESPONSE_LICENSE_INFO:
+		slurm_free_license_info_msg(data);
 		break;
 	case RESPONSE_JOB_ARRAY_ERRORS:
 		slurm_free_job_array_resp(data);
@@ -5699,11 +5796,17 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_TRIGGER_PULL:
 		slurm_free_trigger_msg(data);
 		break;
+	case RESPONSE_SLURMD_STATUS:
+		slurm_free_slurmd_status(data);
+		break;
 	case REQUEST_JOB_NOTIFY:
 		slurm_free_job_notify_msg(data);
 		break;
 	case REQUEST_STATS_INFO:
 		slurm_free_stats_info_request_msg(data);
+		break;
+	case RESPONSE_STATS_INFO:
+		slurm_free_stats_response_msg(data);
 		break;
 	case REQUEST_LICENSE_INFO:
 		slurm_free_license_info_request_msg(data);
@@ -5716,6 +5819,9 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		break;
 	case REQUEST_NETWORK_CALLERID:
 		slurm_free_network_callerid_msg(data);
+		break;
+	case RESPONSE_NETWORK_CALLERID:
+		slurm_free_network_callerid_resp(data);
 		break;
 	case SRUN_JOB_COMPLETE:
 		slurm_free_srun_job_complete_msg(data);
@@ -5745,11 +5851,15 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case PMI_KVS_PUT_REQ:
 		slurm_free_kvs_comm_set(data);
 		break;
+	case RESPONSE_JOB_ALLOCATION_INFO:
 	case RESPONSE_RESOURCE_ALLOCATION:
 		slurm_free_resource_allocation_response_msg(data);
 		break;
 	case REQUEST_ASSOC_MGR_INFO:
 		slurm_free_assoc_mgr_info_request_msg(data);
+		break;
+	case RESPONSE_ASSOC_MGR_INFO:
+		slurm_free_assoc_mgr_info_msg(data);
 		break;
 	case REQUEST_CTLD_MULT_MSG:
 	case RESPONSE_CTLD_MULT_MSG:
@@ -5810,6 +5920,10 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		/* struct has no members that need to be freed */
 		xfree_ptr(data);
 		break;
+	case REQUEST_NODE_ALIAS_ADDRS:
+	case RESPONSE_NODE_ALIAS_ADDRS:
+		slurm_free_node_alias_addrs(data);
+		break;
 	default:
 		error("invalid type trying to be freed %u", type);
 		break;
@@ -5850,6 +5964,7 @@ extern uint32_t slurm_get_return_code(slurm_msg_type_t type, void *data)
 		rc = SLURM_COMMUNICATIONS_CONNECTION_ERROR;
 		break;
 	default:
+		xassert(false);
 		error("don't know the rc for type %u returning %u", type, rc);
 		break;
 	}
@@ -5942,6 +6057,8 @@ rpc_num2string(uint16_t opcode)
 		return "REQUEST_RECONFIGURE_WITH_CONFIG";
 	case REQUEST_SHUTDOWN:					/* 1005 */
 		return "REQUEST_SHUTDOWN";
+	case REQUEST_RECONFIGURE_SACKD:
+		return "REQUEST_RECONFIGURE_SACKD";
 
 	case REQUEST_PING:					/* 1008 */
 		return "REQUEST_PING";
@@ -6764,46 +6881,60 @@ out:
 		FREE_NULL_BITMAP(task_bitmap);
 }
 
+#define _slurm_integer_array_to_value_reps(type_t, array, array_cnt,	\
+					   values, values_reps,		\
+					   values_cnt) do {		\
+	type_t prev_value;						\
+	int values_inx = 0;						\
+	xassert(values);						\
+	xassert(values_reps);						\
+	xassert(values_cnt);						\
+									\
+	if (!array)							\
+		return;							\
+									\
+	*values_cnt = 1;						\
+									\
+	/* Figure out how big the compressed arrays should be */	\
+	prev_value = array[0];						\
+	for (int i = 0; i < array_cnt; i++) {				\
+		if (prev_value != array[i]) {				\
+			prev_value = array[i];				\
+			(*values_cnt)++;				\
+		}							\
+	}								\
+									\
+	*values = xcalloc(*values_cnt, sizeof(**values));		\
+	*values_reps = xcalloc(*values_cnt, sizeof(**values_reps));	\
+									\
+	prev_value = (*values)[0] = array[0];				\
+	for (int i = 0; i < array_cnt; i++) {				\
+		if (prev_value != array[i]) {				\
+			prev_value = array[i];				\
+			values_inx++;					\
+			(*values)[values_inx] = array[i];		\
+		}							\
+		(*values_reps)[values_inx]++;				\
+	}								\
+									\
+} while (0);
+
 extern void slurm_array64_to_value_reps(uint64_t *array, uint32_t array_cnt,
 					uint64_t **values,
 					uint32_t **values_reps,
 					uint32_t *values_cnt)
 {
-	uint64_t prev_value;
-	int values_inx = 0;
+	_slurm_integer_array_to_value_reps(uint64_t, array, array_cnt, values,
+					   values_reps, values_cnt);
+}
 
-	xassert(values);
-	xassert(values_reps);
-	xassert(values_cnt);
-
-	if (!array)
-		return;
-
-	*values_cnt = 1;
-
-	/* Figure out how big the compressed arrays should be */
-	prev_value = array[0];
-	for (int i = 0; i < array_cnt; i++) {
-		if (prev_value != array[i]) {
-			prev_value = array[i];
-			(*values_cnt)++;
-		}
-	}
-
-	*values = xcalloc(*values_cnt, sizeof(**values));
-	*values_reps = xcalloc(*values_cnt, sizeof(**values_reps));
-
-	prev_value = (*values)[0] = array[0];
-	for (int i = 0; i < array_cnt; i++) {
-		if (prev_value != array[i]) {
-			prev_value = array[i];
-			values_inx++;
-			(*values)[values_inx] = array[i];
-		}
-		(*values_reps)[values_inx]++;
-	}
-
-
+extern void slurm_array16_to_value_reps(uint16_t *array, uint32_t array_cnt,
+					uint16_t **values,
+					uint32_t **values_reps,
+					uint32_t *values_cnt)
+{
+	_slurm_integer_array_to_value_reps(uint16_t, array, array_cnt, values,
+					   values_reps, values_cnt);
 }
 
 extern int slurm_get_rep_count_inx(
@@ -6826,12 +6957,13 @@ extern int slurm_get_rep_count_inx(
 }
 
 extern int slurm_get_next_tres(
-	char *tres_type, char *in_val, char **name_ptr, char **type_ptr,
+	char **tres_type, char *in_val, char **name_ptr, char **type_ptr,
 	uint64_t *cnt, char **save_ptr)
 {
-	char *comma, *sep, *sep2, *name = NULL, *type = NULL;
-	int rc = SLURM_SUCCESS, tres_type_len;
-	unsigned long long int value = 0;
+	char *comma, *sep, *name = NULL, *type = NULL;
+	int rc = SLURM_SUCCESS, tres_type_len = 0;
+	uint64_t value = 0;
+	bool is_gres = false;
 
 	xassert(tres_type);
 	xassert(cnt);
@@ -6845,23 +6977,63 @@ extern int slurm_get_next_tres(
 		*save_ptr = in_val;
 	}
 
-	tres_type_len = strlen(tres_type);
+	if (*tres_type)
+		tres_type_len = strlen(*tres_type);
 
 next:	if (*save_ptr[0] == '\0') {	/* Empty input token */
 		*save_ptr = NULL;
 		goto fini;
 	}
 
-	if (!(sep = xstrstr(*save_ptr, tres_type))) {
-		debug2("%s is not a %s", *save_ptr, tres_type);
-		xfree(name);
+	if (*tres_type) {
+		if (!(sep = xstrstr(*save_ptr, *tres_type))) {
+			debug2("%s is not a %s", *save_ptr, *tres_type);
+			xfree(name);
+			*save_ptr = NULL;
+			*name_ptr = NULL;
+			goto fini;
+		} else {
+			sep += tres_type_len; /* strlen "gres" */
+			*save_ptr = sep;
+		}
+	} else {
+		char extra = '\0';
+		comma = strchr(*save_ptr, ',');
+
+		/*
+		 * This is original memory so anything we change here needs to
+		 * be put back to the way it was before we starting messing with
+		 * it.
+		 */
+		if (comma)
+			comma[0] = '\0';
+
+		if ((sep = strchr(*save_ptr, '/')) ||
+		    (sep = strchr(*save_ptr, ':')) ||
+		    (sep = strchr(*save_ptr, '='))) {
+			extra = sep[0];
+			sep[0] = '\0';
+		}
+
+		*tres_type = xstrdup(*save_ptr);
+
+		if (comma)
+			comma[0] = ',';
+		if (sep) {
+			sep[0] = extra;
+			*save_ptr = sep;
+		} else
+			*save_ptr += strlen(*tres_type);
+	}
+
+	if (!*tres_type) {
 		*save_ptr = NULL;
 		*name_ptr = NULL;
 		goto fini;
-	} else {
-		sep += tres_type_len; /* strlen "gres:" */
-		*save_ptr = sep;
 	}
+
+	if (*save_ptr[0] == '/')
+		(*save_ptr)++;
 
 	name = xstrdup(*save_ptr);
 	comma = strchr(name, ',');
@@ -6874,55 +7046,68 @@ next:	if (*save_ptr[0] == '\0') {	/* Empty input token */
 
 	if (name[0] == '\0') {
 		/* Nothing but a comma */
+		if (!tres_type_len)
+			xfree(*tres_type);
 		xfree(name);
 		goto next;
 	}
 
-	sep = strchr(name, ':');
-	if (sep) {
+	is_gres = !xstrcasecmp(*tres_type, "gres");
+
+	/* First check to see if the last part is a count or not */
+	if ((sep = strrchr(name, '=')) ||
+	    (sep = strrchr(name, ':'))) {
+		bool equals = (sep[0] == '=') ? true : false, valid_num;
 		sep[0] = '\0';
 		sep++;
-		sep2 = strchr(sep, ':');
-		if (sep2) {
-			sep2[0] = '\0';
-			sep2++;
-		}
-	} else {
-		sep2 = NULL;
-	}
-
-	if (sep2) {		/* Two colons */
-		/* We have both type and count */
-		if ((sep[0] == '\0') || (sep2[0] == '\0')) {
-			/* Bad format (e.g. "gpu:tesla:" or "gpu::1") */
-			rc = ESLURM_INVALID_GRES;
-			goto fini;
-		}
-		type = xstrdup(sep);
-		if (!_is_valid_number(sep2, &value)) {
-			debug("%s: Invalid count value TRES %s%s:%s:%s", __func__,
-			      tres_type, name, type, sep2);
-			rc = ESLURM_INVALID_TRES;
-			goto fini;
-		}
-	} else if (sep) {	/* One colon */
 		if (sep[0] == '\0') {
 			/* Bad format (e.g. "gpu:") */
 			rc = ESLURM_INVALID_TRES;
 			goto fini;
-		} else if (_is_valid_number(sep, &value)) {
-			/* We have count, but no type */
-			type = NULL;
-		} else {
+		}
+
+		valid_num = _is_valid_number(sep, &value);
+
+		if (!valid_num) {
+			if (equals) {
+				rc = ESLURM_INVALID_TRES;
+				goto fini;
+			}
 			/* We have type with implicit count of 1 */
 			type = xstrdup(sep);
 			value = 1;
 		}
-	} else {		/* No colon */
-		/* We have no type and implicit count of 1 */
-		type = NULL;
+	} else if (_is_valid_number(name, &value)) {
+		xfree(name); /* we got a valid number, we don't have a name */
+		goto fini;
+	} else
 		value = 1;
+
+	if ((sep = strchr(name, ':'))) {
+		sep[0] = '\0';
+		sep++;
+
+		/*
+		 * If we already have a type we know it was 'supposed' to be a
+		 * count.
+		 */
+		if (type) {
+			xfree(type);
+			rc = ESLURM_INVALID_TRES;
+			goto fini;
+		}
+		type = xstrdup(sep);
 	}
+
+	/* Only 'gres' tres have 'types' */
+	if (type && !is_gres) {
+		error("TRES '%s' can't have a type (%s:%s)",
+		      *tres_type, name, type);
+		rc = ESLURM_INVALID_TRES;
+		xfree(type);
+		goto fini;
+	}
+
 	if (value == 0) {
 		xfree(name);
 		xfree(type);
@@ -6935,6 +7120,8 @@ fini:	if (rc != SLURM_SUCCESS) {
 			info("%s: Invalid TRES job specification %s", __func__,
 			     in_val);
 		}
+		if (!tres_type_len)
+			xfree(*tres_type);
 		xfree(type);
 		xfree(name);
 		*type_ptr = NULL;
@@ -6942,8 +7129,171 @@ fini:	if (rc != SLURM_SUCCESS) {
 	} else {
 		*cnt = value;
 		*type_ptr = type;
+		if (name && name[0] == '\0')
+			xfree(name);
 		*name_ptr = name;
 	}
 
 	return rc;
+}
+
+extern char *slurm_get_tres_sub_string(
+	char *full_tres_str, char *tres_type, uint32_t num_tasks,
+	bool include_tres_type, bool include_type)
+{
+	char *sub_tres = NULL, *sub_tres_pos = NULL;
+	char *name, *type, *save_ptr = NULL;
+	uint64_t cnt = 0;
+	bool free_tres_type = false;
+
+	if (!tres_type)
+		free_tres_type = true;
+
+	while ((slurm_get_next_tres(&tres_type,
+				    full_tres_str,
+				    &name, &type,
+				    &cnt, &save_ptr) == SLURM_SUCCESS) &&
+	       save_ptr) {
+
+		if (num_tasks != NO_VAL)
+			cnt *= num_tasks;
+
+		if (sub_tres)
+			xstrcatat(sub_tres, &sub_tres_pos, ",");
+		if (include_tres_type)
+			xstrfmtcatat(sub_tres, &sub_tres_pos, "%s%s", tres_type,
+				     name ? "/" : "");
+		if (name) {
+			xstrfmtcatat(sub_tres, &sub_tres_pos, "%s", name);
+			if (include_type && type)
+				xstrfmtcatat(sub_tres, &sub_tres_pos, ":%s",
+					     type);
+		}
+		xstrfmtcatat(sub_tres, &sub_tres_pos, "=%"PRIu64, cnt);
+		if (free_tres_type)
+			xfree(tres_type);
+		xfree(name);
+		xfree(type);
+	}
+
+	if (free_tres_type)
+		xfree(tres_type);
+
+	return sub_tres;
+}
+
+extern uint32_t slurm_select_cr_type(void)
+{
+	static bool cr_set = false;
+	static uint32_t cr_type = 0;
+
+	if (!cr_set) {
+		/*
+		 * Only use in the controller. Currently, only the controller
+		 * and the node_info api load in the select plugin. The slurmd
+		 * doesn't load in the select plugin, but both the controller
+		 * and the slurmd read in interfaces/gres.c which use this
+		 * function. The slurmd is already protected by
+		 * running_in_slurmctld() but we add this assert to guard
+		 * against places that aren't loading in the select plugin.
+		 */
+		xassert(running_in_slurmctld());
+
+		/*
+		 * Call this instead of select_get_plugin_id(). Here we are
+		 * looking for the underlying id instead of actual id, meaning
+		 * we want SELECT_TYPE_CONS_TRES not
+		 * SELECT_PLUGIN_CRAY_CONS_TRES.
+		 */
+		(void) select_g_get_info_from_plugin(SELECT_CR_PLUGIN, NULL,
+						     &cr_type);
+		cr_set = true;
+	}
+
+	return cr_type;
+}
+
+char *schedule_exit2string(uint16_t opcode)
+{
+	switch (opcode) {
+	case SCHEDULE_EXIT_END:
+		return "End of job queue";
+	case SCHEDULE_EXIT_MAX_DEPTH:
+		return "Hit default_queue_depth";
+	case SCHEDULE_EXIT_MAX_JOB_START:
+		return "Hit sched_max_job_start";
+	case SCHEDULE_EXIT_LIC:
+		return "Blocked on licenses";
+	case SCHEDULE_EXIT_RPC_CNT:
+		return "Hit max_rpc_cnt";
+	case SCHEDULE_EXIT_TIMEOUT:
+		return "Timeout (max_sched_time)";
+	default:
+		return "unknown";
+	}
+}
+
+char *bf_exit2string(uint16_t opcode)
+{
+	switch (opcode) {
+	case BF_EXIT_END:
+		return "End of job queue";
+	case BF_EXIT_MAX_JOB_START:
+		return "Hit bf_max_job_start";
+	case BF_EXIT_MAX_JOB_TEST:
+		return "Hit bf_max_job_test";
+	case BF_EXIT_STATE_CHANGED:
+		return "System state changed";
+	case BF_EXIT_TABLE_LIMIT:
+		return "Hit table size limit (bf_node_space_size)";
+	case BF_EXIT_TIMEOUT:
+		return "Timeout (bf_max_time)";
+	default:
+		return "unknown";
+	}
+}
+
+extern char *slurm_watts_to_str(uint32_t watts)
+{
+	char *str = NULL;
+
+	if ((watts == NO_VAL) || (watts == 0))
+		xstrcat(str, "n/a");
+	else if (watts == INFINITE)
+		xstrcat(str, "INFINITE");
+	else if ((watts % 1000000) == 0)
+		xstrfmtcat(str, "%uM", watts / 1000000);
+	else if ((watts % 1000) == 0)
+		xstrfmtcat(str, "%uK", watts / 1000);
+	else
+		xstrfmtcat(str, "%u", watts);
+
+	return str;
+}
+
+extern uint32_t slurm_watts_str_to_int(char *watts_str,
+				       char **err_msg)
+{
+	uint32_t resv_watts = NO_VAL;
+	char *end_ptr = NULL;
+
+	if (!xstrcasecmp(watts_str, "n/a") || !xstrcasecmp(watts_str, "none"))
+		return 0;
+	if (!xstrcasecmp(watts_str, "INFINITE")) {
+		resv_watts = INFINITE;
+		return resv_watts;
+	}
+	resv_watts = (uint32_t)strtoul(watts_str, &end_ptr, 10);
+	if ((end_ptr[0] == 'k') || (end_ptr[0] == 'K')) {
+		resv_watts *= 1000;
+	} else if ((end_ptr[0] == 'm') || (end_ptr[0] == 'M')) {
+		resv_watts *= 1000000;
+	} else if (end_ptr[0] != '\0') {
+		if (err_msg)
+			xstrfmtcat(*err_msg, "Invalid Watts value: %s",
+				   watts_str);
+		resv_watts = NO_VAL;
+		return resv_watts;
+	}
+	return resv_watts;
 }

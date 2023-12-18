@@ -1,4 +1,4 @@
-.TH scontrol "1" "Slurm Commands" "October 2023" "Slurm Commands"
+.TH scontrol "1" "Slurm Commands" "November 2023" "Slurm Commands"
 
 .SH "NAME"
 scontrol \- view or modify Slurm configuration and state.
@@ -69,9 +69,11 @@ unavailable to user's group will be displayed (i.e. this is the default behavior
 .IP
 
 .TP
-\fB\-\-json\fR
-Formats information from the \fIshow\fR command as JSON. All information is
-dumped, even if it would normally not be. Filtering arguments are still used.
+\f3\-\-json\fP, \f3\-\-json\fP=\fIlist\fR, \f3\-\-json\fP=<\fIdata_parser\fR>
+Dump information as JSON using the default data_parser plugin or explicit
+data_parser with parameters.  All information is dumped, even if it would
+normally not be. Sorting and formatting arguments passed to other options are
+ignored; however, filtering arguments are still used.
 This option implicitly sets the \fB\-\-details\fR option.
 .IP
 
@@ -113,10 +115,12 @@ Print version information and exit.
 .IP
 
 .TP
-\fB\-\-yaml\fR
-Formats information from the \fIshow\fR command as YAML. All information is
-dumped, even if it would normally not be. Filtering arguments are still used.
+Dump information as YAML using the default data_parser plugin or explicit
+data_parser with parameters.  All information is dumped, even if it would
+normally not be. Sorting and formatting arguments passed to other options are
+ignored; however, filtering arguments are still used.
 This option implicitly sets the \fB\-\-details\fR option.
+
 .IP
 
 .SH "COMMANDS"
@@ -132,11 +136,6 @@ written.
 \fBcancel_reboot\fR <\fINodeList\fR>
 Cancel pending reboots on nodes. The node will be undrain'ed and the reason
 cleared if the node was drained by an ASAP reboot.
-.IP
-
-.TP
-\fBcluster\fR <\fICLUSTER_NAME\fR>
-The cluster to issue commands to. Only one cluster name may be specified.
 .IP
 
 .TP
@@ -169,6 +168,11 @@ Given a Slurm error number, return a descriptive string.
 .TP
 \fBfsdampeningfactor\fR <\fIFACTOR\fR>
 Set the FairShareDampeningFactor in slurmctld.
+.IP
+
+.TP
+\fBgetaddrs\fR <\fINODES\fR>
+Get IP addresses of <\fINODES\fR> from slurmctld.
 .IP
 
 .TP
@@ -230,7 +234,7 @@ they are responding.
 
 .TP
 \fBreboot\fR [ASAP] [nextstate={RESUME|DOWN}] [reason=<\fIreason\fR>] {ALL|\
-<\fINodeList\fR>}
+<\fINodeList\fR>|<\fINodeSet\fR>}
 Reboot the nodes in the system when they become idle using the
 \fBRebootProgram\fP as configured in Slurm's slurm.conf file.
 Each node will have the "REBOOT" flag added to its node state.
@@ -721,6 +725,11 @@ are unavailable to user's group.
 .IP
 
 .TP
+\fBcluster\fR <\fICLUSTER_NAME\fR>
+The cluster to issue commands to. Only one cluster name may be specified.
+.IP
+
+.TP
 \fBdetails\fR
 Causes the \fIshow\fP command to provide additional details where available.
 Job information will include CPUs and NUMA memory allocated on each node.
@@ -935,8 +944,9 @@ Value may be cleared with blank data value, "ExcNodeList=".
 
 .TP
 \fBExtra\fR=<\fIspec\fR>
-An arbitrary string enclosed in double quotes if using spaces or some
-special characters.
+An arbitrary string enclosed in single or double quotes if using spaces or some
+special characters. See <https://slurm.schedmd.com/extra_constraints.html> for
+more details.
 .IP
 
 .TP
@@ -988,6 +998,9 @@ Examples of use include "Gres=gpus:2*cpu,disk=40G" and "Gres=help".
 Identify the job(s) to be updated.
 The job_list may be a comma separated list of job IDs.
 Either \fIJobId\fP or \fIJobName\fP is required.
+If the \fIJobId\fP is equal to the \fIArrayJobID\fP then the update will affect
+all of the individual jobs of the array. In that case, to update the specific
+individual job, the form <\fIArrayJobID\fP>_<\fIArrayTaskId\fP> must be used.
 .IP
 
 .TP
@@ -1074,6 +1087,9 @@ allocated to the job. Multiple node names may be specified using
 simple node range expressions (e.g. "lx[10\-20]"). After a job's allocation
 is reduced, subsequent \fBsrun\fR commands must explicitly specify node and
 task counts which are valid for the new allocation.
+
+\fBNOTE\fR: The allocated nodes of jobs with arbitrary distribution can not be
+updated.
 .IP
 
 .TP
@@ -1090,6 +1106,9 @@ relinquished. After a job's allocation is reduced, subsequent \fBsrun\fR
 commands must explicitly specify node and task counts which are valid for the
 new allocation. Also see the \fINodeList\fP parameter above. This is the same
 as ReqNodes.
+
+\fBNOTE\fR: The node count of jobs with arbitrary distribution can not be
+updated.
 .IP
 
 .TP
@@ -1547,7 +1566,8 @@ Supported options include: "none", "socket", "ldom" (NUMA), "core",
 .TP
 \fBExtra\fR=<\fIcomment\fR>
 Arbitrary string on the node. Use quotes to enclose a string having more than
-one word.
+one word. See <https://slurm.schedmd.com/extra_constraints.html> for more
+details.
 .IP
 
 .TP
@@ -1571,6 +1591,16 @@ restart of the slurmctld daemon with the \fI\-R\fR option and state files
 preserved or slurmctld's receipt of a SIGHUP.
 Update slurm.conf with any changes meant to be persistent across normal
 restarts of slurmctld or the execution of \fBscontrol reconfig\fR.
+.IP
+
+.TP
+\fBInstanceId\fR=<\fIinstance_id\fR>
+Cloud instance ID.
+.IP
+
+.TP
+\fBInstanceType\fR=<\fIinstance_type\fR>
+Cloud instance type.
 .IP
 
 .TP
@@ -2122,7 +2152,7 @@ Specifies, in units of seconds, the preemption grace time
 to be extended to a job which has been selected for preemption.
 The default value is zero, no preemption grace time is allowed on
 this partition or qos.
-(Meaningful only for PreemptMode=CANCEL)
+(Meaningful only for \fIPreemptMode=CANCEL\fR and \fIPreemptMode=REQUEUE\fR)
 .IP
 
 .TP
@@ -2215,6 +2245,10 @@ in this partition.
 \fBNodes\fR=<\fIname\fR>
 Identify the node(s) to be associated with this partition. Multiple node names
 may be specified using simple node range expressions (e.g. "lx[10\-20]").
+A specification of "ALL" will associate all nodes.
+You can add or remove nodes by adding a '+' or '-' sign before the '=' sign.
+It also works to do nodes=+lx0,-lx[2-4] if you want to remove lx[2-4] and add
+lx0 at the same time.
 Note that jobs may only be associated with one partition at any time.
 Specify a blank data value to remove all nodes from a partition: "Nodes=".
 Changing the \fINodes\fP in a partition has no effect upon jobs that
@@ -2423,13 +2457,10 @@ This is because the CRAY API for managing DataWarps supports both formats.
 
 .TP
 \fBCoreCnt\fR=<\fInum\fR>
-This option is only supported when \fISelectType=select/cons_res\fP or
-\fIselect/cons_tres\fP. Identify number of cores to be reserved.
-If NodeCnt is used without the FIRST_CORES flag, this
-is the total number of cores to reserve where cores per node is CoreCnt/NodeCnt.
-If a nodelist is used, or if NodeCnt is used with the FIRST_CORES flag, this
-should be an array of core numbers by node: Nodes=node[1\-5] CoreCnt=2,2,3,3,4
-or flags=FIRST_CORES NodeCnt=5 CoreCnt=1,2,1,3,2.
+This option is only supported when
+\fIselect/cons_tres\fP is used. Identify number of cores to be reserved.
+If NodeCnt or Nodelist is used this is the total number of cores to reserve
+where cores per node is CoreCnt/NodeCnt.
 .IP
 
 .TP
@@ -2571,12 +2602,6 @@ forcing jobs requesting the reservation to use those resources in the time
 frame reserved. Another use case could be to always have a particular number of
 nodes with a specific feature reserved for a specific account so users in this
 account may use this nodes plus possibly other nodes without this feature.
-.IP
-
-.TP
-\fBFIRST_CORES\fR
-Use the lowest numbered cores on a node only. Flag removal with '\-=' is not
-supported.
 .IP
 
 .TP
@@ -2765,7 +2790,7 @@ or user='' and fill in the opposite with the appropriate setting.
 .TP
 \fBTRES\fR=<\fItres_spec\fR>
 Comma\-separated list of TRES required for the reservation. Current supported
-TRES types with reservations are: CPU, Node, License and BB. CPU and Node
+TRES types with reservations are: CPU, GRES, Node, License and BB. CPU and Node
 follow the same format as CoreCnt and NodeCnt parameters respectively.
 License names can be followed by an equal '=' and a count:
 
@@ -2781,9 +2806,7 @@ TRES=cpu=5,bb/cray=4,license/iop1=1,license/iop2=3
 
 TRES=node=5k,license/iop1=2
 
-As specified in CoreCnt, if a nodelist is specified, cpu can be an array
-of core numbers by node:
-nodes=compute[1\-3] TRES=cpu=2,2,1,bb/cray=4,license/iop1=2
+TRES=gres/gpu:a100=2
 
 Please note that CPU, Node, License and BB can override CoreCnt, NodeCnt,
 Licenses and BurstBuffer parameters respectively.  Also CPU represents
@@ -2794,6 +2817,20 @@ Note that a reservation that contains nodes or cores is associated with
 one partition, and can't span resources over multiple partitions.
 The only exception from this is when
 the reservation is created with explicitly requested nodes.
+
+Note that if GRES is requested those GRES must be TRES listed in
+AccountingStorageTRES to be valid.
+.IP
+
+.TP
+\fBTRESPerNode\fR=<\fItres_spec\fR>
+Comma\-separated list of TRES required per node for the reservation. See
+\fBTRES\fR above for supported types.
+
+TRESPerNode=gres/gpu:a100=2
+
+Above will allocate 2 gpu:a100 per node as specified in nodecnt.
+
 .IP
 
 .SH "PERFORMANCE"

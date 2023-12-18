@@ -50,6 +50,8 @@
 #include "slurm/slurm_errno.h"
 
 #include "src/interfaces/gres.h"
+#include "src/interfaces/select.h"
+
 #include "src/common/log.h"
 #include "src/common/pack.h"
 #include "src/common/read_config.h"
@@ -101,19 +103,14 @@ int main(int argc, char *argv[])
 
 	slurm_init(NULL);
 
-	rc = gres_init();
-	if (rc)
-		fatal("failure: gres_init: %s", slurm_strerror(rc));
+	if (select_g_init(1) != SLURM_SUCCESS)
+		fatal("failed to initialize node selection plugin");
 
 	/*
 	 * Logic normally executed by slurmctld daemon
 	 */
 	orig_config = "gpu:8";
-	rc = gres_init_node_config(orig_config, &node_gres_list);
-	if (rc)
-		fatal("failure: gres_init_node_config: %s",
-		      slurm_strerror(rc));
-
+	gres_init_node_config(orig_config, &node_gres_list);
 	cpu_count = strtol(argv[4], NULL, 10);
 	node_name = "test_node";
 	rc = gres_g_node_config_load(cpu_count, node_name, node_gres_list,
