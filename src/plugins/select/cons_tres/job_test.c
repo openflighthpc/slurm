@@ -5208,6 +5208,16 @@ try_next_nodes_cnt:
 				         p_ptr->part_ptr->name);
 				continue;
 			}
+			/*
+			 * If the partition allows oversubscription we can't
+			 * easily determine if the job can start. It
+			 * may be that it won't be able to start because of
+			 * preemption, but it may be able to start on different
+			 * row.
+			 */
+			if ((p_ptr->part_ptr == jp_ptr->part_ptr) &&
+			    (p_ptr->num_rows > 1))
+				continue;
 			if (!p_ptr->row)
 				continue;
 			for (i = 0; i < p_ptr->num_rows; i++) {
@@ -5660,10 +5670,7 @@ alloc_job:
 				avail_cores, gres_task_limit);
 	if (job_ptr->gres_list_req && (error_code == SLURM_SUCCESS)) {
 		error_code = gres_select_filter_select_and_set(
-			sock_gres_list,
-			job_ptr->job_id, job_res,
-			job_ptr->details->overcommit,
-			tres_mc_ptr);
+			sock_gres_list, job_ptr, tres_mc_ptr);
 	}
 	xfree(gres_task_limit);
 	xfree(node_gres_list);

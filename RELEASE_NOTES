@@ -75,6 +75,9 @@ HIGHLIGHTS
  -- switch/hpe_slingshot - Add support for collectives.
  -- Rename topology/none plugin to topology/default.
  -- Add gpu/nrt plugin for nodes using Trainium/Inferentia devices.
+ -- Disable sorting of dynamic nodes to avoid issues when restarting with
+    heterogenous jobs that cause jobs to abort on restart.
+ -- Don't allow deletion of non-dynamic nodes.
 
 CONFIGURATION FILE CHANGES (see appropriate man page for details)
 =====================================================================
@@ -176,6 +179,7 @@ API CHANGES
     sbatch --wait) to return 1.
  -- "node_list" argument was added to slurm_print_topo_info_msg().
  -- remove slurm_print_topo_record().
+ -- submit filters should use new --tres-per-task format: TRESType/TRESName
 
 SLURMRESTD CHANGES
 ==================

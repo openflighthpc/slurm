@@ -406,6 +406,16 @@ information is cached in memory rather than written to disk when the node fails.
 The interval between state saves being written to disk can be configured at
 build time by defining SAVE_MAX_WAIT to a different value than five.</p>
 
+<p>A backup instance of slurmdbd can also be configured by specifying
+<a href="slurm.conf.html#OPT_AccountingStorageBackupHost">
+AccountingStorageBackupHost</a> in slurm.conf, as well as
+<a href="slurmdbd.conf.html#OPT_DbdBackupHost">DbdBackupHost</a> in
+slurmdbd.conf. The backup host should be on a different machine than the one
+hosting the primary instance of slurmdbd. Both instances of slurmdbd should
+have access to the same database. The
+<a href="network.html#failover">network page</a> has a visual representation
+of how this might look.</p>
+
 <h2 id="infrastructure">Infrastructure
 <a class="slurm_link" href="#infrastructure"></a>
 </h2>
@@ -530,6 +540,17 @@ The parent directories for Slurm's log files, process ID files,
 state save directories, etc. are not created by Slurm.
 They must be created and made writable by <i>SlurmUser</i> as needed prior to
 starting Slurm daemons.</p>
+
+<p>The <b>StateSaveLocation</b> is used to store information about the current
+state of the cluster, including information about queued, running and recently
+completed jobs. The directory used should be on a low-latency local disk to
+prevent file system delays from affecting Slurm performance. If using a backup
+host, the StateSaveLocation should reside on a file system shared by the two
+hosts. We do not recommend using NFS to make the directory accessible to both
+hosts, but do recommend a shared mount that is accessible to the two
+controllers and allows low-latency reads and writes to the disk. If a
+controller comes up without access to the state information, queued and
+running jobs will be cancelled.</p>
 
 <p>A description of the nodes and their grouping into partitions is required.
 A simple node range expression may optionally be used to specify
@@ -801,9 +822,10 @@ is down, but the queue size is limited and you should monitor the DBD Agent
 Queue size with the <b>sdiag</b> command.</p>
 
 <p><b>NOTE</b>: If you have an existing Slurm accounting database and
-plan to upgrade your database server to MariaDB 10.2.1 (or newer) from a
-pre-10.2.1 version or from any version of MySQL, please contact SchedMD
-for assistance.</p>
+plan to upgrade your database server to MariaDB 10.2.1 or later from an older
+version of MariaDB or any version of MySQL, ensure you are running slurmdbd
+22.05.7 or later. These versions will gracefully handle changes to MariaDB
+default values that can cause problems for slurmdbd.</p>
 
 <p>The slurmctld daemon must also be upgraded before or at the same time as
 the client commands and slurmd daemons on the compute nodes.
@@ -955,6 +977,6 @@ cd /usr/ports/sysutils/slurm-wlm && make install
 typical compute nodes.  Installing from source allows the user to enable
 options such as mysql and gui tools via a configuration menu.</p>
 
-<p style="text-align:center;">Last modified 11 December 2023</p>
+<p style="text-align:center;">Last modified 12 January 2024</p>
 
 <!--#include virtual="footer.txt"-->

@@ -3859,6 +3859,12 @@ static int _parse_select_type_param(
 		} else if (!xstrcasecmp(str_parameters,
 					"MULTIPLE_SHARING_GRES_PJ")) {
 			*param |= MULTIPLE_SHARING_GRES_PJ;
+		} else if (!xstrcasecmp(str_parameters,
+					"ENFORCE_BINDING_GRES")) {
+			*param |= ENFORCE_BINDING_GRES;
+		} else if (!xstrcasecmp(str_parameters,
+					"ONE_TASK_PER_SHARING_GRES")) {
+			*param |= ONE_TASK_PER_SHARING_GRES;
 		} else {
 			error("Bad SelectTypeParameter: %s", str_parameters);
 			rc = SLURM_ERROR;

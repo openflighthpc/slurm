@@ -2323,7 +2323,8 @@ static int _dump_coord_list(const parser_t *const parse, void *obj, data_t *dst,
 		.penv = penv,
 	};
 
-	if (list_for_each(*coord_list, _foreach_coordinator, &args) < 0)
+	if (*coord_list &&
+	    (list_for_each(*coord_list, _foreach_coordinator, &args) < 0))
 		return ESLURM_DATA_CONV_FAILED;
 
 	return SLURM_SUCCESS;
@@ -2416,7 +2417,7 @@ static int _dump_job_steps(const parser_t *const parse, void *obj, data_t *dst,
 	};
 	List *steps = (((void *)obj) + parse->field_offset);
 
-	if (list_for_each(*steps, _foreach_step, &args) < 0)
+	if (*steps && list_for_each(*steps, _foreach_step, &args) < 0)
 		return ESLURM_DATA_CONV_FAILED;
 
 	return SLURM_SUCCESS;
@@ -2598,7 +2599,8 @@ static int _dump_stats_rpc_list(const parser_t *const parse, void *obj,
 	xassert(data_get_type(dst) == DATA_TYPE_NULL);
 	args.rpcs = data_set_list(dst);
 
-	if (list_for_each(*rpc_list, _foreach_stats_rpc, &args) < 0)
+	if (*rpc_list &&
+	    list_for_each(*rpc_list, _foreach_stats_rpc, &args) < 0)
 		return ESLURM_DATA_CONV_FAILED;
 
 	return SLURM_SUCCESS;
@@ -2639,7 +2641,8 @@ static int _dump_stats_user_list(const parser_t *const parse, void *obj,
 	xassert(data_get_type(dst) == DATA_TYPE_NULL);
 	args.users = data_set_list(dst);
 
-	if (list_for_each(*user_list, _foreach_stats_user_rpc, &args) < 0)
+	if (*user_list &&
+	    list_for_each(*user_list, _foreach_stats_user_rpc, &args) < 0)
 		return ESLURM_DATA_CONV_FAILED;
 
 	return SLURM_SUCCESS;
@@ -2728,7 +2731,8 @@ static int _dump_clust_acct_rec_list(const parser_t *const parse, void *obj,
 
 	data_set_list(dst);
 
-	if (list_for_each(*acct_list, _foreach_clust_acct_rec, &args) < 0)
+	if (*acct_list &&
+	    list_for_each(*acct_list, _foreach_clust_acct_rec, &args) < 0)
 		return ESLURM_REST_FAIL_PARSING;
 
 	return SLURM_SUCCESS;

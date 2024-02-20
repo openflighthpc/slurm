@@ -5351,11 +5351,14 @@ extern void gres_job_clear_alloc(gres_job_state_t *gres_js)
 			FREE_NULL_BITMAP(gres_js->gres_bit_step_alloc[i]);
 		if (gres_js->gres_per_bit_alloc)
 			xfree(gres_js->gres_per_bit_alloc[i]);
+		if (gres_js->gres_per_bit_step_alloc)
+			xfree(gres_js->gres_per_bit_step_alloc[i]);
 	}
 
 	xfree(gres_js->gres_bit_alloc);
 	xfree(gres_js->gres_bit_step_alloc);
 	xfree(gres_js->gres_per_bit_alloc);
+	xfree(gres_js->gres_per_bit_step_alloc);
 	xfree(gres_js->gres_cnt_step_alloc);
 	xfree(gres_js->gres_cnt_node_alloc);
 	gres_js->node_cnt = 0;
@@ -6406,7 +6409,7 @@ static bool _validate_node_gres_type(uint32_t job_id, List job_gres_list,
 		if ((node_inx >= gres_js->node_cnt) ||
 		    !gres_js->gres_bit_alloc[node_inx])
 			continue;
-		if (gres_js->type_id == NO_VAL)
+		if (!gres_js->type_id || (gres_js->type_id == NO_VAL))
 			continue;
 
 		if (!node_gres_list)

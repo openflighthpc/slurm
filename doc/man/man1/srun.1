@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "November 2023" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "December 2023" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -785,19 +785,20 @@ threads per CPU for a total of two tasks.
 \fBWARNING\fR: When srun is executed from within salloc or sbatch,
 there are configurations and options which can result in inconsistent
 allocations when \-c has a value greater than \-c on salloc or sbatch.
-The number of cpus per task specified for salloc or sbatch is not
-automatically inherited by srun and, if desired, must be requested again,
-either by specifying \-\-cpus\-per\-task when calling srun, or by setting the
-SRUN_CPUS_PER_TASK environment variable.
 
 This option applies to job and step allocations.
 .IP
 
 .TP
 \fB\-\-deadline\fR=<\fIOPT\fR>
-remove the job if no ending is possible before
+Remove the job if no ending is possible before
 this deadline (start > (deadline \- time[\-min])).
-Default is no deadline.  Valid time formats are:
+Default is no deadline. Note that if neither \fBDefaultTime\fR nor
+\fBMaxTime\fR are configured on the partition the job is in, the job will
+need to specify some form of time limit (\-\-time[\-min]) if a deadline
+is to be used.
+
+Valid time formats are:
 .br
 HH:MM[:SS] [AM|PM]
 .br
@@ -1441,22 +1442,22 @@ to "none".
 Specify generic resource task binding options.
 .IP
 .RS
+
+.TP
+.B multiple\-tasks\-per\-sharing
+Negate \fBone\-task\-per\-sharing\fR. This is useful if it is set by default in
+\fBSelectTypeParameters\fR.
+.IP
+
 .TP
 .B disable\-binding
-Disable filtering of CPUs with respect to generic resource locality.
-This option is currently required to use more CPUs than are bound to a GRES
-(i.e. if a GPU is bound to the CPUs on one socket, but resources on more than
-one socket are required to run the job).
-This option may permit a job to be allocated resources sooner than otherwise
-possible, but may result in lower job performance.
-This option applies to job allocations.
-.br
-\fBNOTE\fR: This option is specific to \fBSelectType=cons_tres\fR.
+Negate \fBenforce\-binding\fR. This is useful if it is set by default in
+\fBSelectTypeParameters\fR.
 .IP
 
 .TP
 .B enforce\-binding
-The only CPUs available to the job/step will be those bound to the selected
+The only CPUs available to the job will be those bound to the selected
 GRES (i.e. the CPUs identified in the gres.conf file will be strictly
 enforced). This option may result in delayed initiation of a job.
 For example a job requiring two GPUs and one CPU will be delayed until both
@@ -1465,10 +1466,26 @@ sockets, however, the application performance may be improved due to improved
 communication speed.
 Requires the node to be configured with more than one socket and resource
 filtering will be performed on a per\-socket basis.
-\fBNOTE\fR: Job steps that don't use \fB--exact\fR will not be affected.
+.br
+\fBNOTE\fR: This option can be set by default in \fBSelectTypeParameters\fR.
 .br
 \fBNOTE\fR: This option is specific to \fBSelectType=cons_tres\fR for job
 allocations.
+.IP
+
+.TP
+.B one\-task\-per\-sharing
+Do not allow different tasks in to be allocated shared gres from the same
+sharing gres.
+.br
+\fBNOTE\fR: This flag is only enforced if shared gres are requested with
+\-\-tres\-per\-task.
+.br
+\fBNOTE\fR: This option can be set by default with
+\fBSelectTypeParameters=ONE_TASK_PER_SHARING_GRES\fR.
+.br
+\fBNOTE\fR: This option is specific to
+\fBSelectTypeParameters=MULTIPLE_SHARING_GRES_PJ\fR
 .RE
 .IP
 

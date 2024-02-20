@@ -279,6 +279,17 @@ static void _queue_consolidate_config_list(void)
 	slurm_mutex_unlock(&config_list_update_mutex);
 }
 
+static bool _get_config_list_update(void)
+{
+       bool rc;
+
+       slurm_mutex_lock(&config_list_update_mutex);
+       rc = config_list_update;
+       slurm_mutex_unlock(&config_list_update_mutex);
+
+       return rc;
+}
+
 /*
  * _dump_node_state - dump the state of a specific node to a buffer
  * IN dump_node_ptr - pointer to node for which information is requested
@@ -3770,7 +3781,7 @@ extern int validate_nodes_via_front_end(
 	list_iterator_destroy(job_iterator);
 
 	(void) gres_node_config_unpack(reg_msg->gres_info,
-				       node_record_table_ptr[i]->name);
+				       node_record_table_ptr[0]->name);
 	for (i = 0; (node_ptr = next_node(&i)); i++) {
 		bool acct_updated = false;
 
@@ -5078,10 +5089,10 @@ extern void consolidate_config_list(bool is_locked, bool force)
 	if (is_locked)
 		xassert(verify_lock(NODE_LOCK, WRITE_LOCK));
 
-	slurm_mutex_lock(&config_list_update_mutex);
-	if (force || config_list_update) {
+	if (force || _get_config_list_update()) {
 		if (!is_locked)
 			lock_slurmctld(node_write_lock);
+		slurm_mutex_lock(&config_list_update_mutex);
 
 		config_list_update = false;
 
@@ -5092,10 +5103,10 @@ extern void consolidate_config_list(bool is_locked, bool force)
 		}
 		list_iterator_destroy(iter);
 
+		slurm_mutex_unlock(&config_list_update_mutex);
 		if (!is_locked)
 			unlock_slurmctld(node_write_lock);
 	}
-	slurm_mutex_unlock(&config_list_update_mutex);
 }
 
 extern int create_nodes(char *nodeline, char **err_msg)
@@ -5323,6 +5334,10 @@ static int _delete_node(char *name)
 	if (!node_ptr) {
 		error("Unable to find node %s to delete", name);
 		return ESLURM_INVALID_NODE_NAME;
+	}
+	if (!IS_NODE_DYNAMIC_NORM(node_ptr)) {
+		error("Can't delete non-dynamic node '%s'.", name);
+		return ESLURM_INVALID_NODE_STATE;
 	}
 	if (IS_NODE_ALLOCATED(node_ptr) ||
 	    IS_NODE_COMPLETING(node_ptr)) {

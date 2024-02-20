@@ -190,6 +190,8 @@ static void _add_field(data_t *obj, data_t *required,
 static void _add_param_flag_enum(data_t *param, const parser_t *parser)
 {
 	data_t *fenums = data_set_list(data_key_set(param, "enum"));
+	data_set_string(data_key_set(param, "type"),
+		openapi_type_format_to_type_string(OPENAPI_FORMAT_STRING));
 
 	for (int i = 0; i < parser->flag_bit_array_count; i++)
 		if (!parser->flag_bit_array[i].hidden)
@@ -462,9 +464,12 @@ static data_for_each_cmd_t _convert_dict_entry(const char *key, data_t *data,
 			}
 		}
 
-		if (!parser)
-			fatal_abort("%s: unknown %s",
-				    __func__, data_get_string(data));
+		if (!parser) {
+			debug("%s: skipping unknown %s",
+			      __func__, data_get_string(data));
+			data_set_null(data);
+			return DATA_FOR_EACH_CONT;
+		}
 
 		str = _get_parser_path(parser);
 		data_set_string_own(data, str);

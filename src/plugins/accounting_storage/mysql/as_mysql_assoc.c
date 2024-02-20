@@ -2187,16 +2187,20 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 	 */
 	if (!is_admin && (slurm_conf.private_data & PRIVATE_DATA_USERS)) {
 		int set = 0;
-		query = xstrdup_printf("select lft from \"%s_%s\" where user='%s'",
+		query = xstrdup_printf("select lineage from \"%s_%s\" where user='%s'",
 				       cluster_name, assoc_table, user->name);
-		if (user->coord_accts) {
+		if (user->coord_accts && list_count(user->coord_accts)) {
 			slurmdb_coord_rec_t *coord = NULL;
+			bool added = false;
+			xstrcat(query, " || (user='' && (");
 			itr = list_iterator_create(user->coord_accts);
 			while ((coord = list_next(itr))) {
-				xstrfmtcat(query, " || acct='%s'",
-					   coord->name);
+				xstrfmtcat(query, "%sacct='%s'",
+					   added ? " || " : "", coord->name);
+				added = true;
 			}
 			list_iterator_destroy(itr);
+			xstrcat(query, "))");
 		}
 		DB_DEBUG(DB_ASSOC, mysql_conn->conn, "query\n%s", query);
 		if (!(result = mysql_db_query_ret(
@@ -2210,12 +2214,12 @@ static int _cluster_get_assocs(mysql_conn_t *mysql_conn,
 		while ((row = mysql_fetch_row(result))) {
 			if (set) {
 				xstrfmtcat(extra,
-					   " || (%s between t1.lft and t1.rgt)",
+					   " || (t1.lineage like '%s%%')",
 					   row[0]);
 			} else {
 				set = 1;
 				xstrfmtcat(extra,
-					   " && ((%s between t1.lft and t1.rgt)",
+					   " && ((t1.lineage like '%s%%')",
 					   row[0]);
 			}
 		}
@@ -3187,6 +3191,11 @@ static int _add_assoc_cond_partition(void *x, void *arg)
 	user_assoc.uid = add_assoc_cond->add_assoc->assoc.uid;
 	user_assoc.partition = add_assoc_cond->add_assoc->assoc.partition;
 
+	/*
+	 * We want to look for this exact assoc, not the non-partition version
+	 */
+	user_assoc.flags |= ASSOC_FLAG_EXACT;
+
 	rc = assoc_mgr_fill_in_assoc(add_assoc_cond->mysql_conn,
 				     &user_assoc,
 				     ACCOUNTING_ENFORCE_ASSOCS, NULL, true);
@@ -3921,6 +3930,7 @@ extern char *as_mysql_add_assocs_cond(mysql_conn_t *mysql_conn, uint32_t uid,
 
 		if (!is_user_any_coord_locked(mysql_conn, &user)) {
 			error("Only admins/operators/coordinators can add associations");
+			assoc_mgr_unlock(&locks);
 			errno = ESLURM_ACCESS_DENIED;
 			return NULL;
 		}
