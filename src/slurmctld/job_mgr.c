@@ -2705,7 +2705,7 @@ extern int job_mgr_load_job_state(buf_t *buffer,
 	assoc_mgr_unlock(&locks);
 
 	build_node_details(job_ptr, false);	/* set node_addr */
-	gres_ctld_job_build_details(job_ptr->gres_list_alloc,
+	gres_ctld_job_build_details(job_ptr->gres_list_alloc, job_ptr->nodes,
 				    &job_ptr->gres_detail_cnt,
 				    &job_ptr->gres_detail_str,
 				    &job_ptr->gres_used);
@@ -4242,6 +4242,7 @@ extern int kill_running_job_by_node_name(char *node_name)
 				(void) gs_job_start(job_ptr);
 				gres_ctld_job_build_details(
 					job_ptr->gres_list_alloc,
+					job_ptr->nodes,
 					&job_ptr->gres_detail_cnt,
 					&job_ptr->gres_detail_str,
 					&job_ptr->gres_used);
@@ -7539,6 +7540,14 @@ static int _job_create(job_desc_msg_t *job_desc, int allocate, int will_run,
 		info("Job's requested licenses are invalid: %s",
 		     job_desc->licenses_tot);
 		error_code = ESLURM_INVALID_LICENSES;
+		goto cleanup_fail;
+	}
+
+	if ((job_desc->bitflags & GRES_ONE_TASK_PER_SHARING) &&
+	     (!(slurm_conf.select_type_param & MULTIPLE_SHARING_GRES_PJ))){
+		info("%s: one-task-per-sharing requires MULTIPLE_SHARING_GRES_PJ",
+		     __func__);
+		error_code = ESLURM_INVALID_GRES;
 		goto cleanup_fail;
 	}
 
@@ -12783,6 +12792,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			FREE_NULL_BITMAP(rem_nodes);
 			(void) gs_job_start(job_ptr);
 			gres_ctld_job_build_details(job_ptr->gres_list_alloc,
+						    job_ptr->nodes,
 						    &job_ptr->gres_detail_cnt,
 						    &job_ptr->gres_detail_str,
 						    &job_ptr->gres_used);
@@ -14464,6 +14474,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			update_accounting = false;
 		}
 		gres_ctld_job_build_details(job_ptr->gres_list_alloc,
+					    job_ptr->nodes,
 					    &job_ptr->gres_detail_cnt,
 					    &job_ptr->gres_detail_str,
 					    &job_ptr->gres_used);
@@ -19699,4 +19710,22 @@ extern job_record_t *job_mgr_copy_resv_desc_to_job_record(
 		gres_job_state_log(job_ptr->gres_list_req, job_ptr->job_id);
 	}
 	return job_ptr;
+}
+
+extern slurm_node_alias_addrs_t *build_alias_addrs(job_record_t *job_ptr)
+{
+	slurm_node_alias_addrs_t *alias_addrs;
+
+	if (!job_ptr || !job_ptr->node_addrs)
+		return NULL;
+
+	alias_addrs = xmalloc(sizeof(slurm_node_alias_addrs_t));
+	alias_addrs->node_cnt = job_ptr->node_cnt;
+	alias_addrs->node_addrs = xcalloc(job_ptr->node_cnt,
+					  sizeof(slurm_addr_t));
+	memcpy(alias_addrs->node_addrs, job_ptr->node_addrs,
+	       (sizeof(slurm_addr_t) * job_ptr->node_cnt));
+	alias_addrs->node_list = xstrdup(job_ptr->nodes);
+
+	return alias_addrs;
 }

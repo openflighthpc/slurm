@@ -3305,6 +3305,7 @@ static void _slurm_rpc_shutdown_controller(slurm_msg_t *msg)
 	if (error_code);
 	else if (msg->msg_type == REQUEST_CONTROL) {
 		info("Performing RPC: REQUEST_CONTROL");
+		slurm_mutex_lock(&slurmctld_config.backup_finish_lock);
 		/* resume backup mode */
 		slurmctld_config.resume_backup = true;
 	} else {
@@ -3358,11 +3359,10 @@ static void _slurm_rpc_shutdown_controller(slurm_msg_t *msg)
 		 */
 		ts.tv_sec = now + CONTROL_TIMEOUT - 1;
 
-		slurm_mutex_lock(&slurmctld_config.thread_count_lock);
 		slurm_cond_timedwait(&slurmctld_config.backup_finish_cond,
-				     &slurmctld_config.thread_count_lock,
+				     &slurmctld_config.backup_finish_lock,
 				     &ts);
-		slurm_mutex_unlock(&slurmctld_config.thread_count_lock);
+		slurm_mutex_unlock(&slurmctld_config.backup_finish_lock);
 
 		if (slurmctld_config.resume_backup)
 			error("%s: REQUEST_CONTROL reply but backup not completely done relinquishing control.  Old state possible", __func__);
@@ -3566,6 +3566,14 @@ static void _slurm_rpc_step_layout(slurm_msg_t *msg)
 	while ((step_ptr = list_next(itr))) {
 		if (!verify_step_id(&step_ptr->step_id, req))
 			continue;
+		/*
+		 * Rebuild alias_addrs if need after restart of slurmctld
+		 */
+		 if (job_ptr->node_addrs &&
+		     !step_ptr->step_layout->alias_addrs) {
+			step_ptr->step_layout->alias_addrs =
+				build_alias_addrs(job_ptr);
+		}
 
 		if (step_layout)
 			slurm_step_layout_merge(step_layout,
@@ -6550,6 +6558,7 @@ end_it:
 
 	xfree(alias_addrs.node_addrs);
 	xfree(alias_addrs.node_list);
+	FREE_NULL_BITMAP(node_bitmap);
 }
 
 slurmctld_rpc_t slurmctld_rpcs[] =

@@ -50,6 +50,11 @@
 #include "parsing.h"
 #include "slurmdb_helpers.h"
 
+typedef struct {
+	char *pos;
+	char *str;
+} list_to_str_args_t;
+
 extern int db_query_list_funcname(parse_op_t op, data_parser_type_t type,
 				  args_t *args, List *list,
 				  db_list_query_func_t func, void *cond,
@@ -68,21 +73,17 @@ extern int db_query_list_funcname(parse_op_t op, data_parser_type_t type,
 	if (errno) {
 		FREE_NULL_LIST(l);
 		rc = on_error(op, type, args, errno, func_name,
-			      func_caller_name,
-			      "function 0x%" PRIxPTR " failed",
-			      (uintptr_t) func);
+			      func_caller_name, "Slurmdb query failed");
 	} else if (!l) {
 		rc = on_error(op, type, args, ESLURM_REST_INVALID_QUERY,
 			      func_name, func_caller_name,
-			      "function 0x%" PRIxPTR " returned NULL list",
-			      (uintptr_t) func);
+			      "Slurmdbd query unexpectedly failed without a result");
 	} else if (!list_count(l)) {
 		FREE_NULL_LIST(l);
 
 		rc = on_error(op, type, args, ESLURM_REST_EMPTY_RESULT,
 			      func_name, func_caller_name,
-			      "function 0x%" PRIxPTR " returned empty list",
-			      (uintptr_t) func);
+			      "Slurmdbd query returned with empty list");
 	} else {
 		rc = SLURM_SUCCESS;
 	}
@@ -236,6 +237,72 @@ done:
 	return SLURM_SUCCESS;
 }
 
+static data_for_each_cmd_t _concat_data_to_str(data_t *data, void *arg)
+{
+	list_to_str_args_t *args = arg;
+	char *flag_str = NULL;
+
+	if (args->str)
+		xstrcatat(args->str, &args->pos, ",");
+
+	if (data_get_string_converted(data, &flag_str))
+		error("%s: Could not convert data to string", __func__);
+
+	xstrcatat(args->str, &args->pos, flag_str);
+	xfree(flag_str);
+	return DATA_FOR_EACH_CONT;
+}
+
+static char *_data_list_to_str(data_t *data)
+{
+	list_to_str_args_t args = { 0 };
+
+	xassert(data_get_type(data) == DATA_TYPE_LIST);
+
+	(void) data_list_for_each(data, _concat_data_to_str, &args);
+	return args.str;
+}
+
+static int _prereqs_placeholder(const parser_t *const parser,
+				args_t *args)
+{
+	if (!args->tres_list && (parser->needs & NEED_TRES))
+		args->tres_list = list_create(NULL);
+	if (!args->assoc_list && (parser->needs & NEED_ASSOC))
+		args->assoc_list = list_create(NULL);
+	if (!args->qos_list && (parser->needs & NEED_QOS))
+		args->qos_list = list_create(NULL);
+
+	return SLURM_SUCCESS;
+}
+
+static char *_needs_to_string(need_t needs, args_t *args)
+{
+	char *str = NULL;
+	data_t *d = data_new();
+
+	DUMP(NEED_PREREQS_FLAGS, needs, d, args);
+	str = _data_list_to_str(d);
+	FREE_NULL_DATA(d);
+
+	return str;
+}
+
+static int _slurmdb_query_failed(parse_op_t op, const parser_t *const parser,
+				 args_t *args, int rc, const char *source,
+				 const char *what, const char *func_name)
+{
+	char *needs = _needs_to_string(parser->needs, args);
+
+	on_warn(op, parser->type, args, source, __func__,
+		"%s: Unable to query %s from Slurm accounting storage. Could not query the following [%s]: %s",
+		func_name, what, needs, slurm_strerror(rc));
+
+	xfree(needs);
+
+	return _prereqs_placeholder(parser, args);
+}
+
 extern int load_prereqs_funcname(parse_op_t op, const parser_t *const parser,
 				 args_t *args, const char *func_name)
 {
@@ -245,8 +312,24 @@ extern int load_prereqs_funcname(parse_op_t op, const parser_t *const parser,
 	xassert(args->magic == MAGIC_ARGS);
 	xassert((op == PARSING) || (op == DUMPING) || (op == QUERYING));
 
+	if (parser->needs && !slurm_conf.accounting_storage_type) {
+		char *needs = _needs_to_string(parser->needs, args);
+
+		on_warn(op, parser->type, args, NULL, __func__,
+			"Slurm accounting storage is disabled. Could not query the following: [%s].",
+			needs);
+
+		xfree(needs);
+
+		return _prereqs_placeholder(parser, args);
+	}
+
 	if (parser->needs && !args->db_conn) {
-		args->db_conn = slurmdb_connection_get(NULL);
+		errno = SLURM_ERROR;
+		if (!(args->db_conn = slurmdb_connection_get(NULL)))
+			return _slurmdb_query_failed(op, parser, args, errno,
+						     "slurmdb_connection_get",
+						     "connection", func_name);
 		args->close_db_conn = true;
 	}
 
@@ -258,11 +341,9 @@ extern int load_prereqs_funcname(parse_op_t op, const parser_t *const parser,
 		if ((rc = _db_query_list(QUERYING, parser->type, args,
 					 &args->tres_list, slurmdb_tres_get,
 					 &cond))) {
-			error("%s: loading TRES for parser 0x%" PRIxPTR
-			      " failed[%d]: %s",
-			      __func__, (uintptr_t) args, rc,
-			      slurm_strerror(rc));
-			return rc;
+			return _slurmdb_query_failed(op, parser, args, errno,
+						     "slurmdb_tres_get", "TRES",
+						     func_name);
 		}
 
 		log_flag(DATA, "loaded %u TRES for parser 0x%" PRIxPTR,
@@ -277,11 +358,9 @@ extern int load_prereqs_funcname(parse_op_t op, const parser_t *const parser,
 		if ((rc = _db_query_list(QUERYING, parser->type, args,
 					 &args->qos_list, slurmdb_qos_get,
 					 &cond))) {
-			error("%s: loading QOS for parser 0x%" PRIxPTR
-			      " failed[%d]: %s",
-			      __func__, (uintptr_t) args, rc,
-			      slurm_strerror(rc));
-			return rc;
+			return _slurmdb_query_failed(op, parser, args, errno,
+						     "slurmdb_qos_get", "QOS",
+						     func_name);
 		}
 
 		log_flag(DATA, "loaded %u QOS for parser 0x%" PRIxPTR,
@@ -296,11 +375,9 @@ extern int load_prereqs_funcname(parse_op_t op, const parser_t *const parser,
 		if ((rc = _db_query_list(QUERYING, parser->type, args,
 					 &args->assoc_list,
 					 slurmdb_associations_get, &cond))) {
-			error("%s: loading ASSOCS for parser 0x%" PRIxPTR
-			      " failed[%d]: %s",
-			      __func__, (uintptr_t) args, rc,
-			      slurm_strerror(rc));
-			return rc;
+			return _slurmdb_query_failed(op, parser, args, errno,
+						     "slurmdb_associations_get",
+						     "Associations", func_name);
 		}
 
 		log_flag(DATA, "loaded %u ASSOCS for parser 0x%" PRIxPTR,
