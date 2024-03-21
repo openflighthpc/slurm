@@ -2120,13 +2120,31 @@ extern int job_mgr_load_job_state(buf_t *buffer,
 		safe_unpackstr(&job_ptr->origin_cluster, buffer);
 
 		safe_unpackstr(&job_ptr->cpus_per_tres, buffer);
+		xstrsubstituteall(job_ptr->cpus_per_tres,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->mem_per_tres, buffer);
+		xstrsubstituteall(job_ptr->mem_per_tres,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->tres_bind, buffer);
 		safe_unpackstr(&job_ptr->tres_freq, buffer);
+
 		safe_unpackstr(&job_ptr->tres_per_job, buffer);
+		xstrsubstituteall(job_ptr->tres_per_job,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->tres_per_node, buffer);
+		xstrsubstituteall(job_ptr->tres_per_node,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->tres_per_socket, buffer);
+		xstrsubstituteall(job_ptr->tres_per_socket,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->tres_per_task, buffer);
+		xstrsubstituteall(job_ptr->tres_per_task,
+				  "gres:", "gres/");
 
 		safe_unpackstr(&job_ptr->selinux_context, buffer);
 	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
@@ -2340,13 +2358,31 @@ extern int job_mgr_load_job_state(buf_t *buffer,
 		safe_unpackstr(&job_ptr->origin_cluster, buffer);
 
 		safe_unpackstr(&job_ptr->cpus_per_tres, buffer);
+		xstrsubstituteall(job_ptr->cpus_per_tres,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->mem_per_tres, buffer);
+		xstrsubstituteall(job_ptr->mem_per_tres,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->tres_bind, buffer);
 		safe_unpackstr(&job_ptr->tres_freq, buffer);
+
 		safe_unpackstr(&job_ptr->tres_per_job, buffer);
+		xstrsubstituteall(job_ptr->tres_per_job,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->tres_per_node, buffer);
+		xstrsubstituteall(job_ptr->tres_per_node,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->tres_per_socket, buffer);
+		xstrsubstituteall(job_ptr->tres_per_socket,
+				  "gres:", "gres/");
+
 		safe_unpackstr(&job_ptr->tres_per_task, buffer);
+		xstrsubstituteall(job_ptr->tres_per_task,
+				  "gres:", "gres/");
 
 		safe_unpackstr(&job_ptr->selinux_context, buffer);
 	} else {
@@ -8699,7 +8735,7 @@ static int _calc_arbitrary_tpn(job_record_t *job_ptr)
 			if (cur_node >= num_nodes) {
 				free(host);
 				free(prev_host);
-				error("Minimum number of nodes (%d) for %pJ is not sufficent for the requested arbitrary node list (%s).",
+				error("Minimum number of nodes (%d) for %pJ is not sufficient for the requested arbitrary node list (%s).",
 				      num_nodes, job_ptr, job_ptr->details->req_nodes);
 				rc = ESLURM_INVALID_NODE_COUNT;
 				goto cleanup;
@@ -9955,7 +9991,8 @@ static int _validate_job_desc(job_desc_msg_t *job_desc_msg, int allocate,
 		debug("%s: job failed to specify group", __func__);
 		return ESLURM_GROUP_ID_MISSING;
 	}
-	if (!job_desc_msg->work_dir || !job_desc_msg->work_dir[0]) {
+	if (!job_desc_msg->container_id && !job_desc_msg->container &&
+	    (!job_desc_msg->work_dir || !job_desc_msg->work_dir[0])) {
 		debug("%s: job working directory has to be set", __func__);
 		return ESLURM_MISSING_WORK_DIR;
 	}
@@ -11774,6 +11811,12 @@ void purge_old_job(void)
 			continue;
 		if (!IS_JOB_PENDING(job_ptr))
 			continue;
+
+		if ((job_ptr->deadline) && (job_ptr->deadline != NO_VAL) &&
+		    (job_ptr->priority != 0) &&
+		    !deadline_ok(job_ptr, "purge_old_job"))
+			continue;
+
 		/*
 		 * If the dependency is already invalid there's no reason to
 		 * keep checking it.

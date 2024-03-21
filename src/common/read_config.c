@@ -2694,12 +2694,8 @@ static void _reset_hostname(names_ll_t *p, char *node_hostname)
 	old_hostname_idx = _get_hash_idx(p->hostname);
 	new_hostname_idx = _get_hash_idx(node_hostname);
 
-	/* reset hostname */
-	xfree(p->hostname);
-	p->hostname = xstrdup(node_hostname);
-
 	if (old_hostname_idx == new_hostname_idx)
-		return;
+		goto end_it;
 
 	/* remove old link */
 	_remove_host_to_node_link(p);
@@ -2713,6 +2709,11 @@ static void _reset_hostname(names_ll_t *p, char *node_hostname)
 	} else {
 		host_to_node_hashtbl[new_hostname_idx] = p;
 	}
+
+end_it:
+	/* reset hostname */
+	xfree(p->hostname);
+	p->hostname = xstrdup(node_hostname);
 }
 
 /*
@@ -5504,6 +5505,10 @@ static int _validate_and_set_defaults(slurm_conf_t *conf,
 	if (!conf->topology_plugin)
 		conf->topology_plugin = xstrdup("topology/default");
 
+	if (!xstrcasecmp(conf->select_type, "select/linear") &&
+	    !xstrcasecmp(conf->topology_plugin, "topology/tree"))
+		error_in_daemon("select/linear with topology/tree will not be supported in the next major release. Please switch to select/cons_tres or stop using topology/tree.");
+
 	if (((conf->tree_width = (getenv("SLURM_TREE_WIDTH") ?
 				  atoi(getenv("SLURM_TREE_WIDTH")) : 0)) > 0) ||
 	    (s_p_get_uint16(&conf->tree_width, "TreeWidth", hashtbl))) {
@@ -5836,6 +5841,11 @@ extern char * debug_flags2str(uint64_t debug_flags)
 			xstrcat(rc, ",");
 		xstrcat(rc, "Gang");
 	}
+	if (debug_flags & DEBUG_FLAG_GLOB_SILENCE) {
+                if (rc)
+                        xstrcat(rc, ",");
+                xstrcat(rc, "GLOB_SILENCE");
+        }
 	if (debug_flags & DEBUG_FLAG_GRES) {
 		if (rc)
 			xstrcat(rc, ",");
@@ -6042,6 +6052,8 @@ extern int debug_str2flags(const char *debug_flags, uint64_t *flags_out)
 			(*flags_out) |= DEBUG_FLAG_FRONT_END;
 		else if (xstrcasecmp(tok, "Gang") == 0)
 			(*flags_out) |= DEBUG_FLAG_GANG;
+		else if (!xstrcasecmp(tok, "GLOB_SILENCE"))
+			(*flags_out) |= DEBUG_FLAG_GLOB_SILENCE;
 		else if (xstrcasecmp(tok, "Gres") == 0)
 			(*flags_out) |= DEBUG_FLAG_GRES;
 		else if (xstrcasecmp(tok, "Hetjob") == 0)

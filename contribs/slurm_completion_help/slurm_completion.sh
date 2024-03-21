@@ -1427,8 +1427,11 @@ function __slurm_comp_common_flags() {
 		"highm1"
 	)
 	local gres_flags=(
+		"allow-task-sharing"
 		"disable-binding"
 		"enforce-binding"
+		"multiple-tasks-per-sharing"
+		"one-task-per-sharing"
 	)
 	local hints=(
 		"compute_bound"
@@ -4609,7 +4612,6 @@ function _scontrol() {
 
 	local comp_cmd="$1"
 	local subcmds=(
-		"abort"
 		"cancel_reboot"
 		"create"
 		"completing"

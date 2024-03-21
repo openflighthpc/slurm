@@ -329,6 +329,8 @@ extern int slurm_step_launch(slurm_step_ctx_t *ctx,
 		launch.flags |= LAUNCH_OVERCOMMIT;
 	if (ctx->step_req->flags & SSF_EXT_LAUNCHER)
 		launch.flags |= LAUNCH_EXT_LAUNCHER;
+	if (ctx->step_req->flags & SSF_GRES_ALLOW_TASK_SHARING)
+		launch.flags |= LAUNCH_GRES_ALLOW_TASK_SHARING;
 
 	launch.task_dist	= params->task_dist;
 	if (params->pty)
@@ -1171,6 +1173,7 @@ _launch_handler(struct step_launch_state *sls, slurm_msg_t *resp)
 			bit_set(sls->tasks_started, msg->task_ids[i]);
 			bit_set(sls->tasks_exited, msg->task_ids[i]);
 		}
+		sls->ret_code = 1;
 	} else {
 		for (i = 0; i < msg->count_of_pids; i++)
 			bit_set(sls->tasks_started, msg->task_ids[i]);

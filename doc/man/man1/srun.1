@@ -1,4 +1,4 @@
-.TH srun "1" "Slurm Commands" "December 2023" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "February 2024" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -890,12 +890,16 @@ exit code of zero).
 \fBafternotok:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have terminated
 in some failed state (non\-zero exit code, node failure, timed out, etc).
+This job must be submitted while the specified job is still active or within
+\fBMinJobAge\fR seconds after the specified job has ended.
 .IP
 
 .TP
 \fBafterok:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have successfully
 executed (ran to completion with an exit code of zero).
+This job must be submitted while the specified job is still active or within
+\fBMinJobAge\fR seconds after the specified job has ended.
 .IP
 
 .TP
@@ -1442,6 +1446,16 @@ to "none".
 Specify generic resource task binding options.
 .IP
 .RS
+
+.TP
+.B allow\-task\-sharing
+Allow tasks access to each GPU within the job's allocation that is on the same
+node as the task. This is useful when using \-\-gpu\-bind or
+\-\-tres\-bind=gres/gpu to bind GPUs to specific tasks, but GPU communication
+between tasks is also desired.
+.br
+\fBNOTE\fR: This option is specific to srun.
+.IP
 
 .TP
 .B multiple\-tasks\-per\-sharing
@@ -3157,8 +3171,10 @@ a terminal is not possible.
 .PP
 This behavior may be changed with the
 \fB\-\-output\fR, \fB\-\-error\fR, and \fB\-\-input\fR
-(\fB\-o\fR, \fB\-e\fR, \fB\-i\fR) options. Valid format specifications
-for these options are
+(\fB\-o\fR, \fB\-e\fR, \fB\-i\fR) options.
+Note that \fB\-\-error\fR won't redirect the stderr of srun itself, only the
+stderr from the tasks.
+Valid format specifications for these options are
 
 .TP 10
 \fBall\fR
@@ -3569,7 +3585,7 @@ as the name of each job step.
 .TP
 \fBSLURM_JOB_NUM_NODES\fR
 Same as \fB\-N, \-\-nodes\fR.
-Total number of nodes in the job’s resource allocation.
+Total number of nodes in the job's resource allocation.
 .IP
 
 .TP
@@ -3615,7 +3631,7 @@ Same as \fB\-\-network\fR
 
 .TP
 \fBSLURM_NNODES\fR
-Same as \fB\-N, \-\-nodes\fR. Total number of nodes in the job’s resource
+Same as \fB\-N, \-\-nodes\fR. Total number of nodes in the job's resource
 allocation. See \fBSLURM_JOB_NUM_NODES\fR. Included for backwards
 compatibility.
 .IP
