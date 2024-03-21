@@ -4286,8 +4286,8 @@ static void _slurm_rpc_create_node(slurm_msg_t *msg)
 	START_TIMER;
 	if (!validate_super_user(msg->auth_uid)) {
 		error_code = ESLURM_USER_ID_MISSING;
-		error("Security violation, DELETE_NODE RPC from uid=%u",
-		      msg->auth_uid);
+		error("Security violation, %s RPC from uid=%u",
+		      rpc_num2string(msg->msg_type), msg->auth_uid);
 	}
 
 	if (error_code == SLURM_SUCCESS) {
@@ -5106,10 +5106,15 @@ static void _slurm_rpc_trigger_set(slurm_msg_t *msg)
 	trigger_info_msg_t *trigger_ptr = msg->data;
 	bool allow_user_triggers = xstrcasestr(slurm_conf.slurmctld_params,
 	                                       "allow_user_triggers");
+	bool disable_triggers = xstrcasestr(slurm_conf.slurmctld_params,
+					    "disable_triggers");
 	DEF_TIMERS;
 
 	START_TIMER;
-	if (validate_slurm_user(msg->auth_uid) || allow_user_triggers) {
+	if (disable_triggers) {
+		rc = ESLURM_DISABLED;
+		error("Request to set trigger, but disable_triggers is set.");
+	} else if (validate_slurm_user(msg->auth_uid) || allow_user_triggers) {
 		rc = trigger_set(msg->auth_uid, msg->auth_gid, trigger_ptr);
 	} else {
 		rc = ESLURM_ACCESS_DENIED;

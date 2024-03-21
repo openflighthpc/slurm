@@ -110,6 +110,7 @@ typedef struct {
 					      directly requested */
 #define GRES_CONF_FROM_STATE SLURM_BIT(13) /* Flags from state, blow away once
 					      node checks in. */
+#define GRES_CONF_GLOBAL_INDEX SLURM_BIT(14) /* devices use global index */
 
 #define GRES_CONF_ENV_SET    0x000008E0   /* Easy check if any of
 					   * GRES_CONF_ENV_* are set. */
@@ -186,7 +187,7 @@ typedef struct {
 
 /* Current GRES state information managed by slurmctld daemon */
 typedef struct gres_node_state {
-	struct gres_node_state *alt_gres_ns;
+	struct gres_state *alt_gres;
 	/* Actual hardware found */
 	uint64_t gres_cnt_found;
 

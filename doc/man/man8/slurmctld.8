@@ -1,4 +1,4 @@
-.TH slurmctld "8" "Slurm Daemon" "November 2023" "Slurm Daemon"
+.TH slurmctld "8" "Slurm Daemon" "February 2024" "Slurm Daemon"
 
 .SH "NAME"
 slurmctld \- The central management daemon of Slurm.
@@ -26,12 +26,14 @@ jobs will be killed.
 
 .TP
 \fB\-d\fR
-Run \fBslurmctld\fR in the background.
+Run \fBslurmctld\fR in the background. This is the default behavior.
 .IP
 
 .TP
 \fB\-D\fR
 Run \fBslurmctld\fR in the foreground with logging copied to stdout.
+This limits the resilience of 'scontrol reconfigure' and should be
+avoided in production.
 .IP
 
 .TP
@@ -128,8 +130,6 @@ log file, provided SlurmUser has write permission on the directory.
 Otherwise the core file will be written to the \fBStateSaveLocation\fR,
 or "/var/tmp/" as a last resort. If none of the above directories have
 write permission for SlurmUser, no core file will be produced.
-The command "scontrol abort" can be used to abort the slurmctld daemon and
-generate a core file.
 
 .SH "SIGNALS"
 

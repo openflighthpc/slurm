@@ -313,6 +313,14 @@ extern uint32_t slurm_xlate_job_id(char *job_id_str)
 				job_id = job_ptr->job_id;
 				break;
 			}
+			if (job_ptr->array_bitmap) {
+				int array_len = bit_size(job_ptr->array_bitmap);
+				if (array_id < array_len &&
+				    bit_test(job_ptr->array_bitmap, array_id)) {
+					job_id = job_ptr->job_id;
+					break;
+				}
+			}
 		}
 
 		slurm_free_job_info_msg(resp);
@@ -1042,6 +1050,8 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 	     GRES_ONE_TASK_PER_SHARING | KILL_INV_DEP | NO_KILL_INV_DEP |
 	     SPREAD_JOB)) {
 		xstrcat(out, line_end);
+		if (job_ptr->bitflags & GRES_ALLOW_TASK_SHARING)
+			xstrcat(out, "GresAllowTaskSharing=Yes,");
 		if (job_ptr->bitflags & GRES_DISABLE_BIND)
 			xstrcat(out, "GresEnforceBind=No,");
 		if (job_ptr->bitflags & GRES_ENFORCE_BIND)

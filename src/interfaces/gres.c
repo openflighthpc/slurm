@@ -238,6 +238,8 @@ static volatile uint32_t autodetect_flags = GRES_AUTODETECT_UNSET;
 static buf_t *gres_context_buf = NULL;
 static buf_t *gres_conf_buf = NULL;
 static bool reset_prev = true;
+static bool use_local_index = false;
+static bool dev_index_mode_set = false;
 
 /* Local functions */
 static void _accumulate_job_gres_alloc(gres_job_state_t *gres_js,
@@ -285,6 +287,7 @@ static int	_parse_gres_config(void **dest, slurm_parser_enum_t type,
 static int	_parse_gres_config_node(void **dest, slurm_parser_enum_t type,
 					const char *key, const char *value,
 					const char *line, char **leftover);
+static int	_post_plugin_gres_conf(void *x, void *arg);
 static void *	_step_state_dup(gres_step_state_t *gres_ss);
 static void *	_step_state_dup2(gres_step_state_t *gres_ss, int node_index);
 static void	_step_state_log(gres_step_state_t *gres_ss,
@@ -405,12 +408,10 @@ extern int gres_find_step_by_key(void *x, void *key)
 extern bool gres_use_local_device_index(void)
 {
 	bool use_cgroup = false;
-	static bool use_local_index = false;
-	static bool is_set = false;
 
-	if (is_set)
+	if (dev_index_mode_set)
 		return use_local_index;
-	is_set = true;
+	dev_index_mode_set = true;
 
 	if (!slurm_conf.task_plugin)
 		return use_local_index;
@@ -1005,6 +1006,21 @@ static int _log_gres_slurmd_conf(void *x, void *arg)
 	}
 
 	return 0;
+}
+
+
+static int _post_plugin_gres_conf(void *x, void *arg)
+{
+	gres_slurmd_conf_t *gres_slurmd_conf = x;
+	slurm_gres_context_t *gres_ctx = arg;
+
+	if (gres_slurmd_conf->plugin_id != gres_ctx->plugin_id)
+		return 0;
+
+	if (gres_slurmd_conf->config_flags & GRES_CONF_GLOBAL_INDEX)
+		gres_ctx->config_flags |= GRES_CONF_GLOBAL_INDEX;
+
+	return 1;
 }
 
 /* Make sure that specified file name exists, wait up to 20 seconds or generate
@@ -2498,12 +2514,13 @@ extern int gres_g_node_config_load(uint32_t cpu_cnt, char *node_name,
 		{"NodeName", S_P_ARRAY, _parse_gres_config_node, NULL},
 		{NULL}
 	};
+	list_t *tmp_gres_conf_list = NULL;
 
 	int count = 0, i, rc, rc2;
 	struct stat config_stat;
 	s_p_hashtbl_t *tbl;
 	gres_slurmd_conf_t **gres_array;
-	char *gres_conf_file;
+	char *gres_conf_file = NULL;
 	char *autodetect_string = NULL;
 	bool in_slurmd = running_in_slurmd();
 
@@ -2531,8 +2548,7 @@ extern int gres_g_node_config_load(uint32_t cpu_cnt, char *node_name,
 		goto fini;
 	}
 
-	FREE_NULL_LIST(gres_conf_list);
-	gres_conf_list = list_create(destroy_gres_slurmd_conf);
+	tmp_gres_conf_list = list_create(destroy_gres_slurmd_conf);
 	gres_conf_file = get_extra_conf_path("gres.conf");
 	if (stat(gres_conf_file, &config_stat) < 0) {
 		info("Can not stat gres.conf file (%s), using slurm.conf data",
@@ -2559,27 +2575,33 @@ extern int gres_g_node_config_load(uint32_t cpu_cnt, char *node_name,
 		if (running_in_slurmctld() &&
 		    autodetect_flags &&
 		    !((autodetect_flags & GRES_AUTODETECT_GPU_FLAGS) &
-		      GRES_AUTODETECT_GPU_OFF))
-			fatal("Cannot use AutoDetect on cloud node \"%s\"",
+		      GRES_AUTODETECT_GPU_OFF)) {
+			rc = ESLURM_UNSUPPORTED_GRES;
+			error("Cannot use AutoDetect on cloud/dynamic node \"%s\"",
 			      gres_node_name);
+			s_p_hashtbl_destroy(tbl);
+			goto fini;
+		}
 
 		if (s_p_get_array((void ***) &gres_array,
 				  &count, "Name", tbl)) {
 			for (i = 0; i < count; i++) {
-				list_append(gres_conf_list, gres_array[i]);
+				list_append(tmp_gres_conf_list, gres_array[i]);
 				gres_array[i] = NULL;
 			}
 		}
 		if (s_p_get_array((void ***) &gres_array,
 				  &count, "NodeName", tbl)) {
 			for (i = 0; i < count; i++) {
-				list_append(gres_conf_list, gres_array[i]);
+				list_append(tmp_gres_conf_list, gres_array[i]);
 				gres_array[i] = NULL;
 			}
 		}
 		s_p_hashtbl_destroy(tbl);
 	}
-	xfree(gres_conf_file);
+	FREE_NULL_LIST(gres_conf_list);
+	gres_conf_list = tmp_gres_conf_list;
+	tmp_gres_conf_list = NULL;
 
 	/* Validate gres.conf and slurm.conf somewhat before merging */
 	for (i = 0; i < gres_context_cnt; i++) {
@@ -2592,8 +2614,9 @@ extern int gres_g_node_config_load(uint32_t cpu_cnt, char *node_name,
 	/* Merge slurm.conf and gres.conf together into gres_conf_list */
 	_merge_config(&node_conf, gres_conf_list, gres_list);
 
-	if ((rc = _load_specific_gres_plugins()) != SLURM_SUCCESS)
-		return rc;
+	if ((rc = _load_specific_gres_plugins()) != SLURM_SUCCESS) {
+		goto fini;
+	}
 
 	for (i = 0; i < gres_context_cnt; i++) {
 		node_conf.gres_name = gres_context[i].gres_name;
@@ -2619,7 +2642,14 @@ extern int gres_g_node_config_load(uint32_t cpu_cnt, char *node_name,
 
 	list_for_each(gres_conf_list, _log_gres_slurmd_conf, NULL);
 
+	for (i = 0; i < gres_context_cnt; i++) {
+		list_for_each(gres_conf_list, _post_plugin_gres_conf,
+			      &gres_context[i]);
+	}
+
 fini:
+	xfree(gres_conf_file);
+	FREE_NULL_LIST(tmp_gres_conf_list);
 	_pack_context_buf();
 	_pack_gres_conf();
 	slurm_mutex_unlock(&gres_context_lock);
@@ -3274,8 +3304,8 @@ extern void gres_init_node_config(char *orig_config, List *gres_list)
 				gres_state_node_shared->gres_data;
 			gres_node_state_t *gres_ns_sharing =
 				gres_state_node_sharing->gres_data;
-			gres_ns_shared->alt_gres_ns = gres_ns_sharing;
-			gres_ns_sharing->alt_gres_ns = gres_ns_shared;
+			gres_ns_shared->alt_gres = gres_state_node_sharing;
+			gres_ns_sharing->alt_gres = gres_state_node_shared;
 		}
 	}
 }
@@ -3911,10 +3941,11 @@ static void _sync_node_shared_to_sharing(gres_state_t *sharing_gres_state_node)
 		return;
 
 	sharing_gres_ns = sharing_gres_state_node->gres_data;
-	shared_gres_ns = sharing_gres_ns->alt_gres_ns;
 
-	if (!shared_gres_ns)
+	if (!sharing_gres_ns->alt_gres)
 		return;
+
+	shared_gres_ns = sharing_gres_ns->alt_gres->gres_data;
 
 	sharing_cnt = sharing_gres_ns->gres_cnt_avail;
 	if (shared_gres_ns->gres_bit_alloc) {
@@ -9839,6 +9870,25 @@ static int _get_usable_gres(int context_inx, int proc_id,
 		sep += 8;
 		if (flags)
 			*flags |= GRES_INTERNAL_FLAG_VERBOSE;
+	}
+
+	if (step->flags & LAUNCH_GRES_ALLOW_TASK_SHARING) {
+		if (get_devices)
+			return SLURM_SUCCESS;
+		/*
+		* Overwrite device index setting to use the global node GRES
+		* index, rather than the index local to the task. This ensures
+		* that the GRES environment variable is set correctly on the
+		* task when multiple devices are constrained to the task, and
+		* only the environment variables are bound to specific GRES.
+		*/
+		use_local_index = false;
+		dev_index_mode_set = true;
+	}
+
+	if (gres_context[context_inx].config_flags & GRES_CONF_GLOBAL_INDEX) {
+		use_local_index = false;
+		dev_index_mode_set = true;
 	}
 
 	if (!gres_id_shared(gres_context[context_inx].config_flags)) {
