@@ -14,6 +14,7 @@ import pytest
 import re
 import shutil
 import stat
+import socket
 import subprocess
 import sys
 import time
@@ -29,6 +30,26 @@ default_polling_timeout = 15
 default_sql_cmd_timeout = 120
 
 PERIODIC_TIMEOUT = 30
+
+
+def get_open_port():
+    """Finds an open port
+
+    Warning: Race conditions abound so be ready to retry calling function;
+
+    Example:
+        >>> while not some_test(port):
+        >>>     port = get_open_port()
+
+    Shamelessly based on:
+    https://stackoverflow.com/questions/2838244/get-open-tcp-port-in-python
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("", 0))
+    s.listen(1)
+    port = s.getsockname()[1]
+    s.close()
+    return port
 
 
 def node_range_to_list(node_expression):
@@ -844,10 +865,12 @@ def get_config_parameter(name, default=None, **get_config_kwargs):
     config_dict = get_config(**get_config_kwargs)
 
     # Convert keys to lower case so we can do a case-insensitive search
-    lower_dict = dict((key.lower(), value) for key, value in config_dict.items())
+    lower_dict = dict(
+        (key.casefold(), str(value).casefold()) for key, value in config_dict.items()
+    )
 
-    if name.lower() in lower_dict:
-        return lower_dict[name.lower()]
+    if name.casefold() in lower_dict:
+        return lower_dict[name.casefold()]
     else:
         return default
 
@@ -876,10 +899,10 @@ def config_parameter_includes(name, value, **get_config_kwargs):
     config_dict = get_config(**get_config_kwargs)
 
     # Convert keys to lower case so we can do a case-insensitive search
-    lower_dict = dict((key.lower(), value) for key, value in config_dict.items())
+    lower_dict = dict((key.casefold(), value) for key, value in config_dict.items())
 
-    if name.lower() in lower_dict and value.lower() in map(
-        str.lower, lower_dict[name.lower()].split(",")
+    if name.casefold() in lower_dict and value.lower() in map(
+        str.lower, lower_dict[name.casefold()].split(",")
     ):
         return True
     else:
@@ -1046,7 +1069,7 @@ def remove_config_parameter_value(name, value, source="slurm"):
     value_list = get_config_parameter(
         name, live=False, quiet=True, source=source
     ).split(",")
-    value_list.remove(value)
+    value_list.remove(value.casefold())
     if value_list:
         set_config_parameter(name, ",".join(value_list), source=source)
     else:
@@ -1138,9 +1161,25 @@ def require_config_parameter(
         >>> require_config_parameter("PartitionName", {"primary": {"Nodes": "ALL"}, "dynamic1": {"Nodes": "ns1"}, "dynamic2": {"Nodes": "ns2"}, "dynamic3": {"Nodes": "ns1,ns2"}})
     """
 
+    if isinstance(parameter_value, dict):
+        tmp1_dict = dict()
+        for k1, v1 in parameter_value.items():
+            tmp2_dict = dict()
+            for k2, v2 in v1.items():
+                if isinstance(v2, str):
+                    tmp2_dict[k2.casefold()] = v2.casefold()
+                else:
+                    tmp2_dict[k2.casefold()] = v2
+            tmp1_dict[k1.casefold()] = tmp2_dict
+
+        parameter_value = tmp1_dict
+    elif isinstance(parameter_value, str):
+        parameter_value = parameter_value.casefold()
+
     observed_value = get_config_parameter(
         parameter_name, live=False, source=source, quiet=True
     )
+
     condition_satisfied = False
     if condition is None:
         condition = lambda observed, desired: observed == desired
@@ -1407,7 +1446,7 @@ def get_nodes(live=True, quiet=False, **run_command_kwargs):
 
     if live:
         output = run_command_output(
-            "scontrol show nodes -o", fatal=True, quiet=quiet, **run_command_kwargs
+            "scontrol show nodes -oF", fatal=True, quiet=quiet, **run_command_kwargs
         )
 
         node_dict = {}
@@ -1989,6 +2028,58 @@ def get_jobs(job_id=None, **run_command_kwargs):
     return jobs_dict
 
 
+def get_steps(step_id=None, **run_command_kwargs):
+    """Returns the steps as a dictionary of dictionaries.
+
+    Args*:
+
+    * run_command arguments are also accepted (e.g. quiet) and will be
+        supplied to the underlying run_command call.
+
+    Returns: A dictionary of dictionaries where the first level keys are the
+        step ids and with the their values being a dictionary of configuration
+        parameters for the respective step.
+    """
+
+    steps_dict = {}
+
+    command = "scontrol -d -o show steps"
+    if step_id is not None:
+        command += f" {step_id}"
+    output = run_command_output(command, fatal=True, **run_command_kwargs)
+
+    step_dict = {}
+    for line in output.splitlines():
+        if line == "":
+            continue
+
+        while match := re.search(r"^ *([^ =]+)=(.*?)(?= +[^ =]+=| *$)", line):
+            param_name, param_value = match.group(1), match.group(2)
+
+            # Remove the consumed parameter from the line
+            line = re.sub(r"^ *([^ =]+)=(.*?)(?= +[^ =]+=| *$)", "", line)
+
+            # Reformat the value if necessary
+            if is_integer(param_value):
+                param_value = int(param_value)
+            elif is_float(param_value):
+                param_value = float(param_value)
+            elif param_value == "(null)":
+                param_value = None
+
+            # Add it to the temporary job dictionary
+            step_dict[param_name] = param_value
+
+        # Add the job dictionary to the jobs dictionary
+        if step_dict:
+            steps_dict[str(step_dict["StepId"])] = step_dict
+
+            # Clear the job dictionary for use by the next job
+            step_dict = {}
+
+    return steps_dict
+
+
 def get_job(job_id, quiet=False):
     """Returns job information for a specific job as a dictionary.
 
@@ -2031,6 +2122,33 @@ def get_job_parameter(job_id, parameter_name, default=None, quiet=False):
         return default
 
 
+def get_step_parameter(step_id, parameter_name, default=None, quiet=False):
+    """Obtains the value for a step parameter.
+
+    Args:
+        step_id (integer): The step id.
+        parameter_name (string): The parameter name.
+        default (string or None): This value is returned if the parameter
+            is not found.
+        quiet (boolean): If True, logging is performed at the TRACE log level.
+
+    Returns: The value of the specified step parameter, or the default if not
+        found.
+    """
+
+    steps_dict = get_steps(quiet=quiet)
+
+    if step_id not in steps_dict:
+        logging.debug(f"Step ({step_id}) was not found in the step list")
+        return default
+
+    step_dict = steps_dict[step_id]
+    if parameter_name in step_dict:
+        return step_dict[parameter_name]
+    else:
+        return default
+
+
 def wait_for_node_state(
     nodename,
     desired_node_state,
@@ -2052,6 +2170,8 @@ def wait_for_node_state(
             polls.
         fatal (boolean): If True, a timeout will result in the test failing.
         reverse (boolean): If True, wait for the node to lose the desired_node_state.
+
+    Returns: If the node ever reached the desired state or not as a boolean.
     """
 
     # Figure out if we're waiting for the desired_node_state to be present or to be gone

@@ -317,6 +317,8 @@ typedef enum {
 	RESPONSE_CONTROL_STATUS,
 	REQUEST_BURST_BUFFER_STATUS,
 	RESPONSE_BURST_BUFFER_STATUS,
+	REQUEST_JOB_STATE,
+	RESPONSE_JOB_STATE,
 
 	REQUEST_CRONTAB = 2200,
 	RESPONSE_CRONTAB,
@@ -702,6 +704,11 @@ typedef struct job_info_request_msg {
 } job_info_request_msg_t;
 
 typedef struct {
+	uint32_t count;
+	slurm_selected_step_t *job_ids;
+} job_state_request_msg_t;
+
+typedef struct {
 	uint16_t show_flags;
 	char *container_id;
 	uint32_t uid; /* optional filter by UID */
@@ -1073,13 +1080,11 @@ typedef struct kill_job_msg {
 } kill_job_msg_t;
 
 typedef struct reattach_tasks_request_msg {
+	char *io_key;
 	uint16_t     num_resp_port;
 	uint16_t    *resp_port; /* array of available response ports */
 	uint16_t     num_io_port;
 	uint16_t    *io_port;   /* array of available client IO ports */
-	slurm_cred_t *cred;      /* used only a weak authentication mechanism
-				   for the slurmstepd to use when connecting
-				   back to the client */
 	slurm_step_id_t step_id;
 } reattach_tasks_request_msg_t;
 
@@ -1642,6 +1647,7 @@ extern void slurm_free_container_id_request_msg(
 extern void slurm_free_container_id_response_msg(
 	container_id_response_msg_t *msg);
 extern void slurm_free_job_info_request_msg(job_info_request_msg_t *msg);
+extern void slurm_free_job_state_request_msg(job_state_request_msg_t *msg);
 extern void slurm_free_job_step_info_request_msg(
 		job_step_info_request_msg_t *msg);
 extern void slurm_free_front_end_info_request_msg(
@@ -1987,6 +1993,42 @@ extern void slurm_array16_to_value_reps(uint16_t *array, uint32_t array_cnt,
  */
 extern int slurm_get_rep_count_inx(
 	uint32_t *rep_count, uint32_t rep_count_size, int inx);
+
+/*
+ * slurm_format_tres_string - given a TRES type and a tres-per-* string,
+ *			      will modifiy the string from the original
+ *			      colon-separated tres request format to the new
+ *			      '/' separating the TRES type from the tres
+ *			      request. This will work even if the request name
+ *			      or grestype with the TRES type.
+ * IN s - tres-per-* tres request string. This will be modified to fit the new
+ *	  format.
+ * IN tres_type - the type of tres to replace in the tres request string
+ *
+ * If *s is non-NULL, it must be an xmalloc'd string.
+ *
+ * Input:
+ * license:testing_license:3
+ * Output:
+ * license/testing_license:3
+ *
+ * This function will not modify correctly formatted tres request strings
+ * Input:
+ * license/testing_license:3
+ * Output:
+ * license/testing_license:3
+ *
+ * Input:
+ * gres:gres1:type1:3,gres:gres2:type2:6
+ * Output:
+ * gres:gres1/type1:3,gres/gres2:type2:6
+ *
+ * Input
+ * gres:gres1_gres:type1_gres:3,gres:gres2_gres:type2_gres:6
+ * Output:
+ * gres/gres1_gres:type1_gres:3,gres/gres2_gres:type2_gres:6
+ */
+extern void slurm_format_tres_string(char **s, char *tres_type);
 
 /*
  * Reentrant TRES specification parse logic
