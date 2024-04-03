@@ -1289,6 +1289,27 @@ extern void slurm_free_job_info_request_msg(job_info_request_msg_t *msg)
 	}
 }
 
+extern void slurm_free_job_state_request_msg(job_state_request_msg_t *msg)
+{
+	if (!msg)
+		return;
+
+	xfree(msg->job_ids);
+	xfree(msg);
+}
+
+extern void slurm_free_job_state_response_msg(job_state_response_msg_t *msg)
+{
+	if (!msg)
+		return;
+
+	for (int i = 0; i < msg->jobs_count; i++)
+		FREE_NULL_BITMAP(msg->jobs[i].array_task_id_bitmap);
+
+	xfree(msg->jobs);
+	xfree(msg);
+}
+
 extern void slurm_free_job_step_info_request_msg(job_step_info_request_msg_t *msg)
 {
 	xfree(msg);
@@ -1898,8 +1919,8 @@ extern void slurm_free_reattach_tasks_request_msg(
 {
 	if (msg) {
 		xfree(msg->resp_port);
+		xfree(msg->io_key);
 		xfree(msg->io_port);
-		slurm_cred_destroy(msg->cred);
 		xfree(msg);
 	}
 }
@@ -5496,6 +5517,12 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_JOB_INFO:
 		slurm_free_job_info_request_msg(data);
 		break;
+	case REQUEST_JOB_STATE:
+		slurm_free_job_state_request_msg(data);
+		break;
+	case RESPONSE_JOB_STATE:
+		slurm_free_job_state_response_msg(data);
+		break;
 	case REQUEST_NODE_INFO:
 		slurm_free_node_info_request_msg(data);
 		break;
@@ -6208,6 +6235,10 @@ rpc_num2string(uint16_t opcode)
 		return "REQUEST_BURST_BUFFER_STATUS";
 	case RESPONSE_BURST_BUFFER_STATUS:
 		return "RESPONSE_BURST_BUFFER_STATUS";
+	case REQUEST_JOB_STATE:
+		return "REQUEST_JOB_STATE";
+	case RESPONSE_JOB_STATE:
+		return "RESPONSE_JOB_STATE";
 
 	case REQUEST_CRONTAB:					/* 2200 */
 		return "REQUEST_CRONTAB";
@@ -6967,6 +6998,43 @@ extern int slurm_get_rep_count_inx(
 	}
 
 	return -1;
+}
+
+extern void slurm_format_tres_string(char **s, char *tres_type)
+{
+	char *tmp, *save_ptr = NULL, *pos = NULL;
+	char *ret_str = NULL;
+	char *prefix = NULL;
+	size_t tres_prefix_len;
+	int colon_inx;
+
+	if (!*s)
+		return;
+	/* Prime the tres_type */
+	prefix = xstrdup_printf("%s:", tres_type);
+
+	if (!xstrstr(*s, prefix)) {
+		/* The tres string is already correctly formatted */
+		xfree(prefix);
+		return;
+	}
+
+	tres_prefix_len = strlen(prefix);
+	colon_inx = tres_prefix_len - 1;
+
+	for (tmp = strtok_r(*s, ",", &save_ptr); tmp;
+	     tmp = strtok_r(NULL, ",", &save_ptr)) {
+		if (!xstrncmp(tmp, prefix, tres_prefix_len))
+			tmp[colon_inx] = '/';
+		if (ret_str)
+			xstrfmtcatat(ret_str, &pos, ",%s", tmp);
+		else
+			xstrcatat(ret_str, &pos, tmp);
+	}
+	xassert(ret_str);
+	xfree(*s);
+	*s = ret_str;
+	xfree(prefix);
 }
 
 extern int slurm_get_next_tres(
