@@ -1,6 +1,64 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 23.11.6
+==========================
+ -- Avoid limiting sockets per node to one when using gres enforce-binding.
+ -- slurmrestd - Avoid permission denied errors when attempting to listen on
+    the same port multiple times.
+ -- Fix GRES reservations where the GRES has no topology
+    (no cores= in gres.conf).
+ -- Ensure that thread_id_rpc is gone before priority_g_fini().
+ -- Fix scontrol reboot timeout removing drain state from nodes.
+ -- squeue - Print header on empty reponse to `--only-job-state`.
+ -- Fix slurmrestd not ending job properly when xauth is not present and a x11
+    job is sent.
+ -- Add experimental job state caching with
+    SchedulerParameters=enable_job_state_cache to speed up querying job states
+    with squeue --only-job-state.
+ -- slurmrestd - Correct dumping of invalid ArrayJobIds returned from
+    'GET /slurm/v0.0.40/jobs/state'.
+ -- squeue - Correct dumping of invalid ArrayJobIds returned from
+    `squeue --only-job-state --{json|yaml}`.
+ -- If scancel --ctld is not used with --interactive, --sibling, or specific
+    step ids, then this option issues a single request to the slurmctld to
+    signal all jobs matching the specified filters. This greatly improves
+    the performance of slurmctld and scancel. The updated --ctld option also
+    fixes issues with the --partition or --reservation scancel options for jobs
+    that requested multiple partitions or reservations.
+ -- slurmrestd - Give EINVAL error when failing to parse signal name to numeric
+    signal.
+ -- slurmrestd - Allow ContentBody for all methods per RFC7230 even if ignored.
+ -- slurmrestd - Add 'DELETE /slurm/v0.0.40/jobs' endpoint to allow bulk job
+    signaling via slurmctld.
+ -- Fix combination of --nodelist and --exclude not always respecting the
+    excluded node list.
+ -- Fix jobs incorrectly allocating nodes exclusively when started on a
+    partition that doesn't enforce it. This could happen if a multi-partition
+    job doesn't specify --exclusive and is evaluated first on a partition
+    configured with OverSubscribe=EXCLUSIVE but ends up starting in a partition
+    configured with OverSubscribe!=EXCLUSIVE evaluated afterwards.
+ -- Setting GLOB_SILENCE flag no longer exposes old bugged behavior.
+ -- Fix associations AssocGrpCPURunMinutes being incorrectly computed for
+    running jobs after a controller reconfiguration/restart.
+ -- Fix scheduling jobs that request --gpus and nodes have different node
+    weights and different numbers of gpus.
+ -- slurmrestd - Add "NO_CRON_JOBS" as possible flag value to the following:
+      'DELETE /slurm/v0.0.40/jobs' flags field.
+      'DELETE /slurm/v0.0.40/job/{job_id}?flags=' flags query parameter.
+ -- Fix scontrol segfault/assert failure if the TRESPerNode parameter is used
+    when creating reservations.
+ -- Avoid checking for wsrep_on when restoring streaming replication settings.
+ -- Clarify in the logs that error "1193 Unknown system variable 'wsrep_on'" is
+    innocuous.
+ -- accounting_storage/mysql - Fix problem when loading reservations from an
+    archive dump.
+ -- slurmdbd - Fix minor race condition when sending updates to a shutdown
+    slurmctld.
+ -- slurmctld - Fix invalid refusal of a reservation update.
+ -- openapi - Fix memory leak of /meta/slurm/cluster response field.
+ -- Fix memory leak when using auth/slurm and AuthInfo=use_client_ids.
+
 * Changes in Slurm 23.11.5
 ==========================
  -- Fix Debian package build on systems that are not able to query the systemd
