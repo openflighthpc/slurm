@@ -3348,7 +3348,7 @@ static void _rpc_acct_gather_energy(slurm_msg_t *msg)
 			rc = SLURM_PROTOCOL_VERSION_ERROR;
 			if (slurm_send_rc_msg(msg, rc) < 0)
 				error("Error responding to energy request: %m");
-			return;
+			goto fini;
 		}
 
 		acct_gather_energy_g_get_data(req->context_id,
