@@ -3325,7 +3325,7 @@ static void _rpc_acct_gather_energy(slurm_msg_t *msg)
 	 * anyways, so dying early isn't much worse here.
 	 */
 	slurm_mutex_lock(&req_cnt_mutex);
-	if (req_cnt < 10) {
+	if (req_cnt < 64) {
 		req_cnt++;
 	} else {
 		error("%s: Too many pending requests", __func__);
@@ -3336,6 +3336,7 @@ static void _rpc_acct_gather_energy(slurm_msg_t *msg)
 	if (rc != SLURM_SUCCESS) {
 		if (slurm_send_rc_msg(msg, rc) < 0)
 			error("Error responding to energy request: %m");
+                return;
 	} else {
 		slurm_msg_t resp_msg;
 		acct_gather_node_resp_msg_t acct_msg;
