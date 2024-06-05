@@ -1,7 +1,7 @@
 Name:		flight-slurm
 Version:	23.11.7
 %define rel	1
-%define flrel 1
+%define flrel 2
 Release:	%{rel}.flight%{flrel}%{?dist}
 Summary:	Slurm Workload Manager
 
