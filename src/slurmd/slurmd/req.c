@@ -3603,6 +3603,7 @@ static void _rpc_acct_gather_energy(slurm_msg_t *msg)
 		acct_gather_energy_destroy(acct_msg.energy);
 	}
 
+fini:
 	slurm_mutex_lock(&req_cnt_mutex);
 	req_cnt--;
 	slurm_mutex_unlock(&req_cnt_mutex);
