@@ -2197,7 +2197,7 @@ static int PARSE_FUNC(JOB_STATE_ID_STRING)(const parser_t *const parser,
 {
 	int rc = SLURM_SUCCESS;
 	char **dst = obj;
-	uint32_t state;
+	uint32_t state = 0;
 
 	if (data_get_type(src) == DATA_TYPE_INT_64)
 		state = data_get_int(src);
@@ -2215,7 +2215,7 @@ static int DUMP_FUNC(JOB_STATE_ID_STRING)(const parser_t *const parser,
 {
 	int rc;
 	char **src = obj;
-	uint32_t state;
+	uint32_t state = 0;
 	data_t *parent_path, *dsrc;
 
 	parent_path = data_set_list(data_new());
@@ -4101,8 +4101,9 @@ static int _dump_node_res(data_t *dst, job_resources_t *j,
 	node.sockets = xcalloc((j->sockets_per_node[sock_inx] + 1),
 			       sizeof(*node.sockets));
 	for (uint32_t i = 0; i < j->sockets_per_node[sock_inx]; i++)
-		node.sockets[i].cores = xcalloc((j->cores_per_socket[i] + 1),
-						sizeof(*node.sockets[i].cores));
+		node.sockets[i].cores =
+			xcalloc((j->cores_per_socket[sock_inx] + 1),
+				sizeof(*node.sockets[i].cores));
 
 	for (uint32_t i = 0; i < bit_reps; i++) {
 		uint32_t socket_inx = i / j->cores_per_socket[sock_inx];
@@ -8795,6 +8796,7 @@ static const flag_bit_t PARSER_FLAG_ARRAY(FLAGS)[] = {
 	add_flag_bit(FLAG_SPEC_ONLY, "SPEC_ONLY"),
 	add_flag_bit(FLAG_FAST, "FAST"),
 	add_flag_bit(FLAG_COMPLEX_VALUES, "COMPLEX"),
+	add_flag_bit(FLAG_PREFER_REFS, "PREFER_REFS"),
 };
 
 #define add_flag(flag_value, mask, flag_string, hidden, desc)               \
