@@ -1,6 +1,43 @@
 This file describes changes in recent versions of Slurm. It primarily
 documents those changes that are of interest to users and administrators.
 
+* Changes in Slurm 24.05.3
+==========================
+ -- data_parser/v0.0.40 - Added field descriptions
+ -- slurmrestd - Avoid creating new slurmdbd connection per request to
+    '* /slurm/slurmctld/*/*' endpoints.
+ -- Fix compilation issue with switch/hpe_slingshot plugin.
+ -- Fix gres per task allocation with threads-per-core.
+ -- data_parser/v0.0.41 - Added field descriptions
+ -- slurmrestd - Change back generated OpenAPI schema for
+    `DELETE /slurm/v0.0.40/jobs/` to RequestBody instead of using parameters
+    for request. slurmrestd will continue accept endpoint requests via
+    RequestBody or HTTP query.
+ -- topology/tree - Fix issues with switch distance optimization.
+ -- Fix potential segfault of secondary slurmctld when falling back to the
+    primary when running with a JobComp plugin.
+ -- Enable --json/--yaml=v0.0.39 options on client commands to dump data using
+    data_parser/v0.0.39 instead or outputting nothing.
+ -- switch/hpe_slingshot - Fix issue that could result in a 0 length state file.
+ -- Fix unnecessary message protocol downgrade for unregistered nodes.
+ -- Fix unnecessarily packing alias addrs when terminating jobs with a mix of
+    non-cloud/dynamic nodes and powered down cloud/dynamic nodes.
+ -- accounting_storage/mysql - Fix issue when deleting a qos that could remove
+    too many commas from the qos and/or delta_qos fields of the assoc table.
+ -- slurmctld - Fix memory leak when using RestrictedCoresPerGPU.
+ -- Fix allowing access to reservations without MaxStartDelay set.
+ -- Fix regression introduced in 24.05.0rc1 breaking srun --send-libs parsing.
+ -- Fix slurmd vsize memory leak when using job submission/allocation commands
+    that implicitly or explicitly use --get-user-env.
+ -- slurmd - Fix node going into invalid state when using CPUSpecList and
+    setting CPUs to the # of cores on a multithreaded node
+ -- Fix reboot asap nodes being considered in backfill after a restart.
+ -- Fix --clusters/-M queries for clusters outside of a federation when
+    fed_display is configured.
+ -- Fix scontrol allowing updating job with bad cpus-per-task value.
+ -- sattach - Fix regression from 24.05.2 security fix leading to crash.
+ -- mpi/pmix - Fix assertion when built under --enable-debug.
+
 * Changes in Slurm 24.05.2
 ==========================
  -- Fix energy gathering rpc counter underflow in _rpc_acct_gather_energy when
@@ -80,7 +117,9 @@ documents those changes that are of interest to users and administrators.
     --json or --yaml if there is an error retrieving reservations from the
     slurmctld.
  -- switch/hpe_slingshot - Fix security issue around managing VNI access.
+    CVE-2024-42511.
  -- switch/nvidia_imex - Fix security issue managing IMEX channel access.
+    CVE-2024-42511.
  -- switch/nvidia_imex - Allow for compatibility with job_container/tmpfs.
 
 * Changes in Slurm 24.05.1
@@ -521,8 +560,18 @@ documents those changes that are of interest to users and administrators.
  -- slurmrestd - Fix possible memory leak from failed job allocation requests to
     'POST /slurm/v0.0.{39,40,41}/job/allocate'.
 
+* Changes in Slurm 23.11.11
+===========================
+
 * Changes in Slurm 23.11.10
 ===========================
+ -- switch/hpe_slingshot - Fix issue that could result in a 0 length state file.
+ -- Fix unnecessary message protocol downgrade for unregistered nodes.
+ -- Fix unnecessarily packing alias addrs when terminating jobs with a mix of
+    non-cloud/dynamic nodes and powered down cloud/dynamic nodes.
+ -- Fix allowing access to reservations without MaxStartDelay set.
+ -- Fix scontrol allowing updating job with bad cpus-per-task value.
+ -- sattach - Fix regression from 23.11.9 security fix leading to crash.
 
 * Changes in Slurm 23.11.9
 ==========================
@@ -562,6 +611,7 @@ documents those changes that are of interest to users and administrators.
     or wckey. This affects the following endpoints:
       'GET /slurmdb/v0.0.39/jobs'
  -- switch/hpe_slingshot - Fix security issue around managing VNI access.
+    CVE-2024-42511.
 
 * Changes in Slurm 23.11.8
 ==========================
@@ -1392,6 +1442,7 @@ documents those changes that are of interest to users and administrators.
 
 * Changes in Slurm 23.02.9
 ==========================
+ -- sattach - Fix regression from 23.02.8 security fix leading to crash.
 
 * Changes in Slurm 23.02.8
 ==========================
@@ -1399,6 +1450,7 @@ documents those changes that are of interest to users and administrators.
     once per minute background task occurs.
  -- Fix assertion in developer mode on a failed message unpack.
  -- switch/hpe_slingshot - Fix security issue around managing VNI access.
+    CVE-2024-42511.
 
 * Changes in Slurm 23.02.7
 ==========================

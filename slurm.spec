@@ -1,5 +1,5 @@
 Name:		slurm
-Version:	24.05.2
+Version:	24.05.3
 %define rel	1
 Release:	%{rel}.flight1%{?dist}
 Summary:	Slurm Workload Manager
