@@ -68,7 +68,7 @@ typedef struct slurm_preempt_ops {
 
 typedef struct {
 	job_record_t *preemptor;
-	List preemptee_job_list;
+	list_t *preemptee_job_list;
 } preempt_candidates_t;
 
 /*
@@ -135,9 +135,12 @@ static uint16_t _job_preempt_mode_internal(job_record_t *job_ptr)
 {
 	uint16_t data = (uint16_t)PREEMPT_MODE_OFF;
 
-	if ((*(ops.get_data))(job_ptr, PREEMPT_DATA_MODE, &data) !=
-	    SLURM_SUCCESS)
-		return data;
+	(void) (*(ops.get_data))(job_ptr, PREEMPT_DATA_MODE, &data);
+
+	/* --signal=R jobs must be requeue or cancel */
+	if ((job_ptr->warn_flags & KILL_JOB_RESV) &&
+	    (data != PREEMPT_MODE_REQUEUE))
+		data = PREEMPT_MODE_CANCEL;
 
 	return data;
 }
@@ -277,7 +280,7 @@ extern int preempt_g_fini(void)
 	return rc;
 }
 
-extern List slurm_find_preemptable_jobs(job_record_t *job_ptr)
+extern list_t *slurm_find_preemptable_jobs(job_record_t *job_ptr)
 {
 	preempt_candidates_t candidates	= { .preemptor = job_ptr };
 

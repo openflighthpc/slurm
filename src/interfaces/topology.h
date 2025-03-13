@@ -118,6 +118,15 @@ extern int topology_g_build_config(void);
 extern int topology_g_eval_nodes(topology_eval_t *topo_eval);
 
 extern int topology_g_whole_topo(bitstr_t *node_mask);
+
+/*
+ * topology_g_get_bitmap - Get bitmap of nodes in topo group
+ *
+ * IN name of topo group
+ * RET bitmap of nodes from _record_table (do not free)
+ */
+extern bitstr_t *topology_g_get_bitmap(char *name);
+
 /*
  * topology_g_generate_node_ranking  -  populate node_rank fields
  * NOTE: This operation is only supported by those topology plugins for
@@ -143,7 +152,7 @@ extern int topology_g_get_node_addr(char *node_name, char **addr,
  * OUT: sp_hl - hostlist_t *** - The array of hostlists that will be malloced
  * OUT: count - int * - The count of created hostlists
  * IN: tree_width - int - Max width of each branch on the tree.
- * RET: SLURM_SUCCESS - int
+ * RET: int - the number of levels opened in the tree, or SLURM_ERROR
  *
  * Note: Created hostlist will have to be freed independently using
  *       hostlist_destroy by the caller.
@@ -192,4 +201,9 @@ extern int topology_g_topology_unpack(dynamic_plugin_data_t **topoinfo,
  */
 extern int topology_g_topology_free(dynamic_plugin_data_t *topoinfo);
 
+/* Return fragmentation score of given bitmap
+ * IN node_mask - aviabled nodes
+ * RET: fragmentation
+ */
+extern uint32_t topology_g_get_fragmentation(bitstr_t *node_mask);
 #endif

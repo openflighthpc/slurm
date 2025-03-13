@@ -149,6 +149,7 @@ enum {
 	LONG_OPT_NTASKSPERNODE,
 	LONG_OPT_NTASKSPERSOCKET,
 	LONG_OPT_NTASKSPERTRES,
+	LONG_OPT_OOMKILLSTEP,
 	LONG_OPT_OPEN_MODE,
 	LONG_OPT_OVERLAP,
 	LONG_OPT_HET_GROUP,
@@ -291,7 +292,6 @@ typedef struct {
 typedef struct {
 	bool set;			/* Has the option been set */
 	bool set_by_env;		/* Has the option been set by env var */
-	bool set_by_data;		/* Has the option been set by data_t */
 } slurm_opt_state_t;
 
 typedef struct {
@@ -380,6 +380,7 @@ typedef struct {
 	uint64_t mem_per_cpu;		/* --mem-per-cpu		*/
 	uint64_t mem_per_gpu;		/* --mem-per-gpu		*/
 	uint64_t pn_min_memory;		/* --mem			*/
+	uint16_t oom_kill_step;		/* --oom-kill-step=0,1		*/
 	uint64_t pn_min_tmp_disk;	/* --tmp			*/
 	char *prefer;			/* --prefer			*/
 	char *constraint;		/* --constraint			*/
@@ -484,16 +485,6 @@ extern void slurm_process_option_or_exit(slurm_opt_t *opt, int optval,
 					 bool early_pass);
 
 /*
- * Process incoming single component of Job data entry
- * IN opt - options to populate from job chunk
- * IN job - data containing job request
- * IN/OUT errors - data dictionary to populate with detailed errors
- * RET SLURM_SUCCESS or error
- */
-extern int slurm_process_option_data(slurm_opt_t *opt, int optval,
-				     const data_t *arg, data_t *errors);
-
-/*
  * Print all options that have been set through slurm_process_option()
  * in a form suitable for use with the -v flag to salloc/sbatch/srun.
  */
@@ -520,11 +511,6 @@ extern bool slurm_option_set_by_cli(slurm_opt_t *opt, int optval);
  * Was the option set by an env var?
  */
 extern bool slurm_option_set_by_env(slurm_opt_t *opt, int optval);
-
-/*
- * Was the option set by an data_t value?
- */
-extern bool slurm_option_set_by_data(slurm_opt_t *opt, int optval);
 
 /*
  * Get option value by common option name.
@@ -569,23 +555,9 @@ extern bool slurm_option_get_next_set(slurm_opt_t *opt, char **name,
 extern int validate_hint_option(slurm_opt_t *opt);
 
 /*
- * Validate --threads-per-core option and set --cpu-bind=threads if
- * not already set by user.
- */
-extern int validate_threads_per_core_option(slurm_opt_t *opt);
-
-/*
  * Validate options that are common to salloc, sbatch, and srun.
  */
 extern void validate_options_salloc_sbatch_srun(slurm_opt_t *opt);
-
-/*
- * Validate that two spec cores options (-S/--core-spec and --thread-spec)
- * are not used together.
- *
- * This function follows approach of validate_memory_options.
- */
-extern void validate_spec_cores_options(slurm_opt_t *opt);
 
 /*
  * Return the argv options in a string.

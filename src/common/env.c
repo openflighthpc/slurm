@@ -100,6 +100,7 @@ typedef struct {
 	char *cmdstr;
 	int *fildes;
 	int mode;
+	bool perform_mount;
 	int rlimit;
 	char **tmp_env;
 	const char *username;
@@ -401,6 +402,7 @@ int setup_env(env_t *env, bool preserve_env)
 	    (env->stepid != SLURM_INTERACTIVE_STEP)) {
 		char *str_verbose, *str_bind1 = NULL, *str_bind2 = NULL;
 		char *str_bind_list, *str_bind_type = NULL, *str_bind = NULL;
+		bool append_cpu_bind = false;
 
 		unsetenvp(env->env, "SLURM_CPU_BIND");
 		unsetenvp(env->env, "SLURM_CPU_BIND_LIST");
@@ -424,21 +426,23 @@ int setup_env(env_t *env, bool preserve_env)
 
 		if (env->cpu_bind_type & CPU_BIND_NONE) {
 			str_bind2 = "none";
-		} else if (env->cpu_bind_type & CPU_BIND_RANK) {
-			str_bind2 = "rank";
 		} else if (env->cpu_bind_type & CPU_BIND_MAP) {
 			str_bind2 = "map_cpu:";
+			append_cpu_bind = true;
 		} else if (env->cpu_bind_type & CPU_BIND_MASK) {
 			str_bind2 = "mask_cpu:";
+			append_cpu_bind = true;
 		} else if (env->cpu_bind_type & CPU_BIND_LDRANK) {
 			str_bind2 = "rank_ldom";
 		} else if (env->cpu_bind_type & CPU_BIND_LDMAP) {
 			str_bind2 = "map_ldom:";
+			append_cpu_bind = true;
 		} else if (env->cpu_bind_type & CPU_BIND_LDMASK) {
 			str_bind2 = "mask_ldom:";
+			append_cpu_bind = true;
 		}
 
-		if (env->cpu_bind)
+		if (env->cpu_bind && append_cpu_bind)
 			str_bind_list = env->cpu_bind;
 		else
 			str_bind_list = "";
@@ -617,6 +621,12 @@ int setup_env(env_t *env, bool preserve_env)
 	if (env->overcommit
 	    && (setenvf(&env->env, "SLURM_OVERCOMMIT", "%s", "1"))) {
 		error("Unable to set SLURM_OVERCOMMIT environment variable");
+		rc = SLURM_ERROR;
+	}
+
+	if (env->oom_kill_step != NO_VAL16 &&
+	    setenvf(&env->env, "SLURM_OOM_KILL_STEP", "%u", env->oom_kill_step)) {
+		error("Unable to set SLURM_OOM_KILL_STEP environment");
 		rc = SLURM_ERROR;
 	}
 
@@ -1231,6 +1241,7 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	slurm_step_layout_req_t step_layout_req;
 	uint16_t cpus_per_task_array[1];
 	uint32_t cpus_task_reps[1];
+	char *tres_per_task = NULL;
 
 	if (!batch)
 		return SLURM_ERROR;
@@ -1313,6 +1324,15 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	if (getenvp(*dest, "SLURM_CPUS_PER_TASK"))
 		env_array_overwrite_fmt(dest, "SLURM_CPUS_PER_TASK", "%u",
 					cpus_per_task);
+	if ((tres_per_task = getenvp(*dest, "SLURM_TRES_PER_TASK")) &&
+	    xstrstr(tres_per_task, "cpu=")) {
+		char *new_tres_per_task = xstrdup(tres_per_task);
+		slurm_option_update_tres_per_task(cpus_per_task, "cpu",
+						  &new_tres_per_task);
+		env_array_overwrite_fmt(dest, "SLURM_TRES_PER_TASK", "%s",
+					new_tres_per_task);
+		xfree(new_tres_per_task);
+	}
 
 	if (step_layout_req.num_tasks) {
 		env_array_overwrite_fmt(dest, "SLURM_NTASKS", "%u",
@@ -2101,11 +2121,13 @@ static int _child_fn(void *arg)
 	 * have coherent /proc contents with their virtual PIDs.
 	 * Check _clone_env_child to see namespace flags used in clone.
 	 */
-	if (mount("none", "/proc", NULL, MS_PRIVATE|MS_REC, NULL))
-		_exit(1);
-	if (mount("proc", "/proc", "proc",
-		  MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL))
-		_exit(1);
+	if (child_args->perform_mount) {
+		if (mount("none", "/proc", NULL, MS_PRIVATE|MS_REC, NULL))
+			_exit(1);
+		if (mount("proc", "/proc", "proc",
+			  MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL))
+			_exit(1);
+	}
 #endif
 
 	if ((devnull = open("/dev/null", O_RDWR)) != -1) {
@@ -2161,6 +2183,64 @@ static int _clone_env_child(child_args_t *child_args)
 	if (munmap(child_stack, STACK_SIZE))
 		error("%s: failed to munmap child stack: %m", __func__);
 	return rc;
+}
+
+static bool _ns_path_disabled(const char *ns_path)
+{
+	FILE *fp = NULL;
+	size_t line_sz = 0;
+	ssize_t nbytes = 0;
+	int ns_value;
+	char *line = NULL;
+	bool ns_disabled = false;
+
+	/* We will assume not having these files as having no limits. */
+	fp = fopen(ns_path, "r");
+	if (!fp) {
+		debug2("%s: could not open %s, assuming no pid namespace limits. Reason: %m",
+		       __func__, ns_path);
+	} else {
+		nbytes = getline(&line, &line_sz, fp);
+		if (nbytes < 0) {
+			debug2("%s: could not read contents of %s. Assuming no namespace limits. Reason: %m",
+			       __func__, ns_path);
+		} else if (nbytes == 0) {
+			debug2("%s: read 0 bytes from %s. Assuming no namespace limits",
+			       __func__, ns_path);
+		} else {
+			ns_value = xstrntol(line, NULL, nbytes, 10);
+			if (ns_value == 0)
+				ns_disabled = true;
+		}
+		fclose(fp);
+		free(line);
+		line = NULL;
+	}
+
+	return ns_disabled;
+}
+
+/*
+ * Returns a boolean indicating if the required namespaces for the clone
+ * calls are disabled. This is performed by checking the contents of
+ * "/proc/sys/max_[mnt|pid]_namespaces" and ensuring they are not 0.
+ */
+static bool _ns_disabled()
+{
+	static int disabled = -1;
+	char *pid_ns_path = "/proc/sys/user/max_pid_namespaces";
+	char *mnt_ns_path = "/proc/sys/user/max_mnt_namespaces";
+
+	if (disabled != -1)
+		return disabled;
+
+	disabled = false;
+
+	if (_ns_path_disabled(pid_ns_path) ||
+	    _ns_path_disabled(mnt_ns_path))
+		disabled = true;
+
+	return disabled;
 }
 #endif
 
@@ -2237,6 +2317,7 @@ char **env_array_user_default(const char *username, int timeout, int mode,
 	child_args.username = username;
 	child_args.cmdstr = cmdstr;
 	child_args.tmp_env = env_array_create();
+	child_args.perform_mount = true;
 	env_array_overwrite(&child_args.tmp_env, "ENVIRONMENT", "BATCH");
 	if (getrlimit(RLIMIT_NOFILE, &rlim) < 0) {
 		error("getrlimit(RLIMIT_NOFILE): %m");
@@ -2253,9 +2334,27 @@ char **env_array_user_default(const char *username, int timeout, int mode,
 	if (child == 0)
 		_child_fn(&child_args);
 #else
-	if ((child = _clone_env_child(&child_args)) == -1) {
-		fatal("clone: %m");
-		return NULL;
+	/*
+	 * Since we will be using namespaces in the clone calls (CLONE_NEWPID,
+	 * CLONE_NEWNS), we need to know if they are disabled . If they are,
+	 * we must fall back to fork and warn the user about the risks.
+	 */
+	if (_ns_disabled()) {
+		warning("%s: pid or mnt namespaces are disabled, avoiding clone and falling back to fork. This can produce orphan/unconstrained processes!",
+			__func__);
+		child_args.perform_mount = false;
+		child = fork();
+		if (child == -1) {
+			fatal("fork: %m");
+			return NULL;
+		}
+		if (child == 0)
+			_child_fn(&child_args);
+	} else {
+		if ((child = _clone_env_child(&child_args)) == -1) {
+			fatal("clone: %m");
+			return NULL;
+		}
 	}
 #endif
 	close(fildes[1]);

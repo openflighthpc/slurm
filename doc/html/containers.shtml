@@ -30,7 +30,23 @@ what applications see and can interact with at any given time. For HPC
 Workloads, these are usually restricted to the
 <a href="http://man7.org/linux/man-pages/man7/mount_namespaces.7.html">mount namespace</a>.
 Slurm natively supports the requesting of unprivileged OCI Containers for jobs
-and steps.
+and steps.</p>
+
+<p>Setting up containers requires several steps:
+<ol>
+<li>Set up the <a href="#prereq">kernel</a> and a
+    <a href="#software">container runtime</a>.</li>
+<li>Deploy a suitable <a href="oci.conf.html">oci.conf</a> file accessible to
+    the compute nodes (<a href="#example">examples below</a>).</li>
+<li>Restart or reconfigure slurmd on the compute nodes.</li>
+<li>Generate <a href="#bundle">OCI bundles</a> for containers that are needed
+    and place them on the compute nodes.</li>
+<li>Verify that you can <a href="#testing">run containers directly</a> through
+    the chosen OCI runtime.</li>
+<li>Verify that you can <a href="#request">request a container</a> through
+    Slurm.</li>
+</ol>
+</p>
 
 <h2 id="limitations">Known limitations
 <a class="slurm_link" href="#limitations"></a>
@@ -62,7 +78,11 @@ job or any given plugin).</li>
 
 <h2 id="prereq">Prerequisites<a class="slurm_link" href="#prereq"></a></h2>
 <p>The host kernel must be configured to allow user land containers:</p>
-<pre>$ sudo sysctl -w kernel.unprivileged_userns_clone=1</pre>
+<pre>
+sudo sysctl -w kernel.unprivileged_userns_clone=1
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+</pre>
 
 <p>Docker also provides a tool to verify the kernel configuration:
 <pre>$ dockerd-rootless-setuptool.sh check --force
@@ -337,6 +357,62 @@ exit $rc
 </pre>
 </p>
 
+<h3 id="multiple-runtimes">Handling multiple runtimes
+<a class="slurm_link" href="#multiple-runtimes"></a>
+</h3>
+
+<p>If you wish to accommodate multiple runtimes in your environment,
+it is possible to do so with a bit of extra setup. This section outlines one
+possible way to do so:</p>
+
+<ol>
+<li>Create a generic oci.conf that calls a wrapper script
+<pre>
+IgnoreFileConfigJson=true
+RunTimeRun="/opt/slurm-oci/run %b %m %u %U %n %j %s %t %@"
+RunTimeKill="kill -s SIGTERM %p"
+RunTimeDelete="kill -s SIGKILL %p"
+</pre>
+</li>
+<li>Create the wrapper script to check for user-specific run configuration
+(e.g., /opt/slurm-oci/run)
+<pre>
+#!/bin/bash
+if [[ -e ~/.slurm-oci-run ]]; then
+	~/.slurm-oci-run "$@"
+else
+	/opt/slurm-oci/slurm-oci-run-default "$@"
+fi
+</pre>
+</li>
+<li>Create a generic run configuration to use as the default
+(e.g., /opt/slurm-oci/slurm-oci-run-default)
+<pre>
+#!/bin/bash --login
+# Parse
+CONTAINER="$1"
+SPOOL_DIR="$2"
+USER_NAME="$3"
+USER_ID="$4"
+NODE_NAME="$5"
+JOB_ID="$6"
+STEP_ID="$7"
+TASK_ID="$8"
+shift 8 # subsequent arguments are the command to run in the container
+# Run
+apptainer run --bind /var/spool --containall "$CONTAINER" "$@"
+</pre>
+</li>
+<li>Add executable permissions to both scripts
+<pre>chmod +x /opt/slurm-oci/run /opt/slurm-oci/slurm-oci-run-default</pre>
+</li>
+</ol>
+
+<p>Once this is done, users may create a script at '~/.slurm-oci-run' if
+they wish to customize the container run process, such as using a different
+container runtime. Users should model this file after the default
+'/opt/slurm-oci/slurm-oci-run-default'</p>
+
 <h2 id="testing">Testing OCI runtime outside of Slurm
 <a class="slurm_link" href="#testing"></a>
 </h2>
@@ -442,11 +518,16 @@ scrun being isolated from the network and not being able to communicate with
 the Slurm controller. The container is run by Slurm on the compute nodes which
 makes having Docker setup a network isolation layer ineffective for the
 container.</li>
-<li><pre>docker exec</pre> command is not supported.</li>
-<li><pre>docker compose</pre> command is not supported.</li>
-<li><pre>docker pause</pre> command is not supported.</li>
-<li><pre>docker unpause</pre> command is not supported.</li>
-<li><pre>docker swarm</pre> command is not supported.</li>
+<li><code>docker exec</code> command is not supported.</li>
+<li><code>docker swarm</code> command is not supported.</li>
+<li><code>docker compose</code>/<code>docker-compose</code> command is not
+	supported.</li>
+<li><code>docker pause</code> command is not supported.</li>
+<li><code>docker unpause</code> command is not supported.</li>
+<li><code>docker swarm</code> command is not supported.</li>
+<li>All <code>docker</code> commands are not supported inside of containers.</li>
+<li><a href="https://docs.docker.com/reference/api/engine/">Docker API</a> is
+	not supported inside of containers.</li>
 </ol>
 
 <h3>Setup procedure</h3>
@@ -541,7 +622,7 @@ to run containers as jobs. No special user permissions are required and
 </p>
 <h3>Prerequisites</h3>
 <ol>
-<li>Slurm must be fully configured and running on host running dockerd.</li>
+<li>Slurm must be fully configured and running on host running podman.</li>
 <li><a href="slurm.conf.html">slurm.conf</a> must be configured to use Munge
 authentication.<pre>AuthType=auth/munge</pre></li>
 <li><a href="scrun.html">scrun.lua</a> must be configured for site storage
@@ -564,29 +645,50 @@ configuration.</li>
 <li>All containers must use
 <a href="https://github.com/containers/podman/blob/main/docs/tutorials/basic_networking.md">
 host networking</a></li>
-<li><pre>podman exec</pre> command is not supported.</li>
-<li><pre>podman kube</pre> command is not supported.</li>
-<li><pre>podman pod</pre> command is not supported.</li>
+<li><code>podman exec</code> command is not supported.</li>
+<li><code>podman-compose</code> command is not supported, due to only being
+	partially implemented. Some compositions may work but each container
+	may be run on different nodes. The network for all containers must be
+	the <code>network_mode: host</code> device.</li>
+<li><code>podman kube</code> command is not supported.</li>
+<li><code>podman pod</code> command is not supported.</li>
+<li><code>podman farm</code> command is not supported.</li>
+<li>All <code>podman</code> commands are not supported inside of containers.</li>
+<li>Podman REST API is not supported inside of containers.</li>
 </ol>
 
 <h3>Setup procedure</h3>
 <ol>
-<li>
-<a href="https://podman.io/docs/installation"> Install and configure
-Podman</a><br>Podman must be fully operational and able to run containers
-before continuing.</li>
-<li>
-<a href="https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md">
-Configure rootless Podman</a><br>Podman must be in rootless mode to be able
-to interact with Slurm via scrun.</li>
+<li><a href="https://podman.io/docs/installation">Install Podman</li>
+<li><a href="https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md">
+Configure rootless Podman</a></li>
+<li>Verify rootless podman is configured
+	<pre>$ podman info --format '{{.Host.Security.Rootless}}'
+true</pre></li>
+<li>Verify rootless Podman is fully functional before adding Slurm support:
+<ul>
+	<li>The value printed by the following commands should be the same:
+	<pre>$ id
+$ podman run --userns keep-id alpine id</pre>
+	<pre>$ sudo id
+$ podman run --userns nomap alpine id</pre></li>
+</ul></li>
 <li>
 Configure Podman to call scrun instead of the <a
 href="https://github.com/opencontainers/runtime-spec"> default OCI runtime</a>.
+See <a href="https://github.com/containers/common/blob/main/docs/containers.conf.5.md">
+upstream documentation</a> for details on configuration locations and loading
+order for containers.conf.
 <ul>
-<li>To configure for all users: <pre>/etc/containers/containers.conf</pre></li>
-<li>To configure per user: <pre>~/.config/containers/containers.conf</pre></li>
+<li>To configure for all users:
+<code>/etc/containers/containers.conf</code></li>
+<li>To configure per user:
+<code>$XDG_CONFIG_HOME/containers/containers.conf</code>
+or
+<code>~/.config/containers/containers.conf</code>
+(if <code>$XDG_CONFIG_HOME</code> is not defined).</li>
 </ul>
-Set the following configuration parameters to configure Podman:
+Set the following configuration parameters to configure Podman's containers.conf:
 <pre>[containers]
 apparmor_profile = "unconfined"
 cgroupns = "host"
@@ -598,16 +700,18 @@ no_hosts = true
 pidns = "host"
 utsns = "host"
 userns = "host"
+log_driver = "journald"
 
 [engine]
 cgroup_manager = "systemd"
 runtime = "slurm"
-runtime_supports_nocgroups = [ "slurm" ]
-runtime_supports_json = [ "slurm" ]
 remote = false
 
 [engine.runtimes]
-slurm = [ "/usr/local/bin/scrun" ]</pre>
+slurm = [
+	"/usr/local/bin/scrun",
+	"/usr/bin/scrun"
+]</pre>
 Correct path to scrun as if installation prefix was configured.</li>
 <li>The "cgroup_manager" field will need to be swapped to "cgroupfs" on systems
 not running systemd.</li>
@@ -618,7 +722,7 @@ massive performance penalty. Using a shared filesystem will avoid moving these
 files around.<br>
 <ul>
 <li>To configure for all users: <pre>/etc/containers/storage.conf</pre></li>
-<li>To configure per user: <pre>~/.config/containers/storage.conf</pre></li>
+<li>To configure per user: <pre>$XDG_CONFIG_HOME/containers/storage.conf</pre></li>
 </ul>
 Possible configuration additions to storage.conf to use a shared filesystem with
 <a href="https://docs.podman.io/en/latest/markdown/podman.1.html#storage-driver-value">
@@ -843,6 +947,6 @@ Overview slides of Sarus are
 
 <hr size=4 width="100%">
 
-<p style="text-align:center;">Last modified 04 June 2024</p>
+<p style="text-align:center;">Last modified 27 November 2024</p>
 
 <!--#include virtual="footer.txt"-->

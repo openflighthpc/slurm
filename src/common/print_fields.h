@@ -85,7 +85,7 @@ extern int print_fields_have_header;
 extern char *fields_delimiter;
 
 extern void destroy_print_field(void *object);
-extern void print_fields_header(List print_fields_list);
+extern void print_fields_header(list_t *print_fields_list);
 extern void print_fields_date(print_field_t *field, void *input, int last);
 extern void print_fields_str(print_field_t *field, void *input, int last);
 extern void print_fields_double(print_field_t *field, void *input, int last);
@@ -99,6 +99,7 @@ extern void print_fields_time_from_mins(print_field_t *field,
 					void *input, int last);
 extern void print_fields_time_from_secs(print_field_t *field,
 					void *input, int last);
+extern void print_fields_sluid(print_field_t *field, void *input, int last);
 extern void print_fields_char_list(print_field_t *field, void *input, int last);
 extern char *expand_stdio_fields(char *stdio_path, job_std_pattern_t *job);
 

@@ -47,7 +47,11 @@ bitstr_t *blocks_nodes_bitmap = NULL;	/* nodes on any bblock */
 block_record_t *block_record_table = NULL;
 uint16_t bblock_node_cnt = 0;
 bitstr_t *block_levels = NULL;
+uint32_t block_sizes[MAX_BLOCK_LEVELS] = {0};
+uint16_t block_sizes_cnt = 0;
+uint32_t blocks_nodes_cnt = 0;
 int block_record_cnt = 0;
+int ablock_record_cnt = 0;
 
 static s_p_hashtbl_t *conf_hashtbl = NULL;
 
@@ -117,7 +121,7 @@ static int _read_topo_file(slurm_conf_block_t **ptr_array[])
 	}
 
 	FREE_NULL_BITMAP(block_levels);
-	block_levels = bit_alloc(16);
+	block_levels = bit_alloc(MAX_BLOCK_LEVELS);
 
 	if (!s_p_get_string(&tmp_str, "BlockSizes", conf_hashtbl)) {
 		bit_nset(block_levels, 0, 4);
@@ -153,9 +157,9 @@ static int _read_topo_file(slurm_conf_block_t **ptr_array[])
 
 			str_bsize = strtok_r(NULL, ",", &save_ptr);
 		}
-		if (bsize < 0) {
+		if (bsize <= 0) {
 			s_p_hashtbl_destroy(conf_hashtbl);
-			fatal("Invalid BlockLevels");
+			fatal("Invalid BlockSizes value: %s", str_bsize);
 		}
 	}
 	xfree(tmp_str);
@@ -179,60 +183,11 @@ static void _log_blocks(void)
 		debug("Block name:%s nodes:%s",
 		      block_ptr->name, block_ptr->nodes);
 	}
-}
 
-/*
- * _node_name2bitmap - given a node name regular expression, build a bitmap
- *	representation, any invalid hostnames are added to a hostlist
- * IN node_names  - set of node namess
- * OUT bitmap     - set to bitmap, may not have all bits set on error
- * IN/OUT invalid_hostlist - hostlist of invalid host names, initialize to NULL
- * RET 0 if no error, otherwise EINVAL
- * NOTE: call FREE_NULL_BITMAP(bitmap) and hostlist_destroy(invalid_hostlist)
- *       to free memory when variables are no longer required
- */
-static int _node_name2bitmap(char *node_names, bitstr_t **bitmap,
-			     hostlist_t **invalid_hostlist)
-{
-	char *this_node_name;
-	bitstr_t *my_bitmap;
-	hostlist_t *host_list;
-
-	my_bitmap = bit_alloc(node_record_count);
-	*bitmap = my_bitmap;
-
-	if (!node_names) {
-		error("_node_name2bitmap: node_names is NULL");
-		return EINVAL;
+	for (i = 0; i < ablock_record_cnt; i++, block_ptr++) {
+		debug("Aggregated Block name:%s nodes:%s",
+		      block_ptr->name, block_ptr->nodes);
 	}
-
-	if (!(host_list = hostlist_create(node_names))) {
-		/* likely a badly formatted hostlist */
-		error("_node_name2bitmap: hostlist_create(%s) error",
-		      node_names);
-		return EINVAL;
-	}
-
-	while ((this_node_name = hostlist_shift(host_list)) ) {
-		node_record_t *node_ptr;
-		node_ptr = find_node_record(this_node_name);
-		if (node_ptr) {
-			bit_set(my_bitmap, node_ptr->index);
-		} else {
-			debug2("invalid node specified %s", this_node_name);
-			if (*invalid_hostlist) {
-				hostlist_push_host(*invalid_hostlist,
-						   this_node_name);
-			} else {
-				*invalid_hostlist =
-					hostlist_create(this_node_name);
-			}
-		}
-		free(this_node_name);
-	}
-	hostlist_destroy(host_list);
-
-	return SLURM_SUCCESS;
 }
 
 extern void block_record_table_destroy(void)
@@ -240,13 +195,26 @@ extern void block_record_table_destroy(void)
 	if (!block_record_table)
 		return;
 
-	for (int i = 0; i < block_record_cnt; i++) {
+	for (int i = 0; i < block_record_cnt + ablock_record_cnt; i++) {
 		xfree(block_record_table[i].name);
 		xfree(block_record_table[i].nodes);
 		FREE_NULL_BITMAP(block_record_table[i].node_bitmap);
 	}
 	xfree(block_record_table);
 	block_record_cnt = 0;
+	block_sizes_cnt = 0;
+	ablock_record_cnt = 0;
+}
+
+static int _cmp_block_level(const void *x, const void *y)
+{
+	const block_record_t *b1 = x, *b2 = y;
+
+	if (b1->level > b2->level)
+		return 1;
+	else if (b1->level < b2->level)
+		return -1;
+	return 0;
 }
 
 extern void block_record_validate(void)
@@ -256,6 +224,9 @@ extern void block_record_validate(void)
 	block_record_t *block_ptr, *prior_ptr;
 	hostlist_t *invalid_hl = NULL;
 	char *buf;
+	int level = 0;
+	int record_inx = 0;
+	int *aggregated_inx;
 
 	block_record_table_destroy();
 
@@ -265,8 +236,10 @@ extern void block_record_validate(void)
 		s_p_hashtbl_destroy(conf_hashtbl);
 		return;
 	}
-
-	block_record_table = xcalloc(block_record_cnt,
+	/*
+	 *  Allocate more than enough space for all aggregated blocks
+	 */
+	block_record_table = xcalloc((2 * block_record_cnt + MAX_BLOCK_LEVELS),
 				     sizeof(block_record_t));
 	block_ptr = block_record_table;
 	for (i = 0; i < block_record_cnt; i++, block_ptr++) {
@@ -285,11 +258,10 @@ extern void block_record_validate(void)
 
 		if (ptr->nodes) {
 			block_ptr->nodes = xstrdup(ptr->nodes);
-			if (_node_name2bitmap(ptr->nodes,
-					      &block_ptr->node_bitmap,
-					      &invalid_hl)) {
-				fatal("Invalid node name (%s) in block "
-				      "config (%s)",
+			if (node_name2bitmap(ptr->nodes, true,
+					     &block_ptr->node_bitmap,
+					     &invalid_hl)) {
+				fatal("Invalid node name (%s) in block config (%s)",
 				      ptr->nodes, ptr->block_name);
 			}
 			if (blocks_nodes_bitmap) {
@@ -312,7 +284,8 @@ extern void block_record_validate(void)
 			      ptr->block_name);
 		}
 	}
-
+	if (!bblock_node_cnt)
+		fatal("Block not contains any nodes");
 	if (blocks_nodes_bitmap) {
 		i = bit_clear_count(blocks_nodes_bitmap);
 		if (i > 0) {
@@ -335,6 +308,72 @@ extern void block_record_validate(void)
 		hostlist_destroy(invalid_hl);
 	}
 
+	while ((level = bit_ffs_from_bit(block_levels, level)) >= 0) {
+		if ((block_sizes[block_sizes_cnt++] = (1 << level)) >=
+		    block_record_cnt)
+			break;
+
+		level++;
+	}
+
+	blocks_nodes_cnt = bit_set_count(blocks_nodes_bitmap);
+
 	s_p_hashtbl_destroy(conf_hashtbl);
+
+	aggregated_inx = xcalloc(block_sizes_cnt, sizeof(int));
+	record_inx = block_record_cnt;
+
+	for (i = 0; i < block_record_cnt; i++) {
+		for (j = 1; j < block_sizes_cnt; j++) {
+			if (!(i % block_sizes[j])) {
+				int remaining_blocks = (block_record_cnt - i);
+
+				if ((block_sizes[j] > remaining_blocks) &&
+				    (block_sizes[j - 1] >= remaining_blocks)) {
+					aggregated_inx[j] = -1;
+					continue;
+				}
+				block_record_table[record_inx].block_index =
+					record_inx;
+				block_record_table[record_inx].name =
+					xstrdup(block_record_table[i].name);
+				block_record_table[record_inx].node_bitmap =
+					bit_copy(block_record_table[i].
+						 node_bitmap);
+				block_record_table[record_inx].level = j;
+				aggregated_inx[j] = record_inx;
+				record_inx++;
+			} else {
+				int tmp = aggregated_inx[j];
+				if (tmp < 0)
+					continue;
+				xstrfmtcat(block_record_table[tmp].name,
+					   ",%s", block_record_table[i].name);
+				bit_or(block_record_table[tmp].node_bitmap,
+				       block_record_table[i].node_bitmap);
+			}
+		}
+	}
+	xfree(aggregated_inx);
+
+	ablock_record_cnt = (record_inx - block_record_cnt);
+
+	qsort(block_record_table + block_record_cnt, ablock_record_cnt,
+	      sizeof(block_record_t), _cmp_block_level);
+
+	for (i = block_record_cnt; i < record_inx; i++) {
+		char *tmp_list = block_record_table[i].name;
+		hostlist_t *hl = hostlist_create(tmp_list);
+
+		if (hl == NULL)
+			fatal("Invalide BlockName: %s", tmp_list);
+
+		block_record_table[i].name = hostlist_ranged_string_xmalloc(hl);
+		block_record_table[i].nodes =
+			bitmap2node_name(block_record_table[i].node_bitmap);
+
+		hostlist_destroy(hl);
+		xfree(tmp_list);
+	}
 	_log_blocks();
 }

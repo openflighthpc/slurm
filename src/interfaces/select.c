@@ -52,7 +52,7 @@ typedef struct {
 	uint32_t	(*plugin_id);
 	int		(*state_save)		(char *dir_name);
 	int		(*state_restore)	(char *dir_name);
-	int		(*job_init)		(List job_list);
+	int		(*job_init)		(list_t *job_list);
 	int		(*node_init)		(void);
 	int		(*job_test)		(job_record_t *job_ptr,
 						 bitstr_t *bitmap,
@@ -60,9 +60,10 @@ typedef struct {
 						 uint32_t max_nodes,
 						 uint32_t req_nodes,
 						 uint16_t mode,
-						 List preeemptee_candidates,
-						 List *preemptee_job_list,
-						 resv_exc_t *resv_exc_ptr);
+						 list_t *preeemptee_candidates,
+						 list_t **preemptee_job_list,
+						 resv_exc_t *resv_exc_ptr,
+						 will_run_data_t *will_run_ptr);
 	int		(*job_begin)		(job_record_t *job_ptr);
 	int		(*job_ready)		(job_record_t *job_ptr);
 	int		(*job_expand)		(job_record_t *from_job_ptr,
@@ -237,7 +238,7 @@ extern int select_g_init(bool only_default)
 	int retval = SLURM_SUCCESS;
 	int i, j, plugin_cnt;
 	char *plugin_type = "select";
-	List plugin_names = NULL;
+	list_t *plugin_names = NULL;
 	_plugin_args_t plugin_args = {0};
 
 	slurm_mutex_lock( &select_context_lock );
@@ -407,6 +408,26 @@ extern char *select_type_param_string(uint16_t select_type_param)
 			strcat(select_str, ",");
 		strcat(select_str, "CR_PACK_NODES");
 	}
+	if (select_type_param & LL_SHARED_GRES) {
+		if (select_str[0])
+			strcat(select_str, ",");
+		strcat(select_str, "LL_SHARED_GRES");
+	}
+	if (select_type_param & MULTIPLE_SHARING_GRES_PJ) {
+		if (select_str[0])
+			strcat(select_str, ",");
+		strcat(select_str, "MULTIPLE_SHARING_GRES_PJ");
+	}
+	if (select_type_param & ENFORCE_BINDING_GRES) {
+		if (select_str[0])
+			strcat(select_str, ",");
+		strcat(select_str, "ENFORCE_BINDING_GRES");
+	}
+	if (select_type_param & ONE_TASK_PER_SHARING_GRES) {
+		if (select_str[0])
+			strcat(select_str, ",");
+		strcat(select_str, "ONE_TASK_PER_SHARING_GRES");
+	}
 	if (select_str[0] == '\0')
 		strcat(select_str, "NONE");
 
@@ -449,7 +470,7 @@ extern int select_g_state_restore(char *dir_name)
  * Note the initialization of job records, issued upon restart of
  * slurmctld and used to synchronize any job state.
  */
-extern int select_g_job_init(List job_list)
+extern int select_g_job_init(list_t *job_list)
 {
 	xassert(select_context_cnt >= 0);
 
@@ -487,14 +508,16 @@ extern int select_g_node_init(void)
  *		if mode=SELECT_MODE_TEST_ONLY or input pointer is NULL.
  *		Existing list is appended to.
  * IN resv_exc_ptr - Various TRES which the job can NOT use.
- * RET zero on success, EINVAL otherwise
+ * IN will_run_ptr - Pointer to data specific to WILL_RUN mode
+ * RET SLURM_SUCCESS on success, rc otherwise
  */
 extern int select_g_job_test(job_record_t *job_ptr, bitstr_t *bitmap,
 			     uint32_t min_nodes, uint32_t max_nodes,
 			     uint32_t req_nodes, uint16_t mode,
-			     List preemptee_candidates,
-			     List *preemptee_job_list,
-			     resv_exc_t *resv_exc_ptr)
+			     list_t *preemptee_candidates,
+			     list_t **preemptee_job_list,
+			     resv_exc_t *resv_exc_ptr,
+			     will_run_data_t *will_run_ptr)
 {
 	xassert(select_context_cnt >= 0);
 
@@ -503,7 +526,8 @@ extern int select_g_job_test(job_record_t *job_ptr, bitstr_t *bitmap,
 		 min_nodes, max_nodes,
 		 req_nodes, mode,
 		 preemptee_candidates, preemptee_job_list,
-		 resv_exc_ptr);
+		 resv_exc_ptr,
+		 will_run_ptr);
 }
 
 /*

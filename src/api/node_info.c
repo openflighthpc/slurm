@@ -65,7 +65,7 @@ typedef struct load_node_req_struct {
 	slurmdb_cluster_rec_t *cluster;
 	int cluster_inx;
 	slurm_msg_t *req_msg;
-	List resp_msg_list;
+	list_t *resp_msg_list;
 	uint16_t show_flags;
 } load_node_req_struct_t;
 
@@ -478,6 +478,10 @@ static void _set_node_mixed_op(node_info_t *node_ptr)
 
 	xassert(node_ptr);
 
+	/* Node is blank/hidden (e.g. blank dynamic node) */
+	if (!node_ptr->name)
+		return;
+
 	select_g_select_nodeinfo_get(node_ptr->select_nodeinfo,
 				     SELECT_NODEDATA_SUBCNT,
 				     NODE_STATE_ALLOCATED, &alloc_cpus);
@@ -607,7 +611,7 @@ static int _load_fed_nodes(slurm_msg_t *req_msg,
 	int pthread_count = 0;
 	pthread_t *load_thread = 0;
 	load_node_req_struct_t *load_args;
-	List resp_msg_list;
+	list_t *resp_msg_list;
 
 	*node_info_msg_pptr = NULL;
 

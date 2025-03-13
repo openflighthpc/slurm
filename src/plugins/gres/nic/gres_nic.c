@@ -85,7 +85,7 @@ const char	plugin_name[]		= "Gres NIC plugin";
 const char	plugin_type[]		= "gres/nic";
 const uint32_t	plugin_version		= SLURM_VERSION_NUMBER;
 
-static List gres_devices = NULL;
+static list_t *gres_devices = NULL;
 
 static void _set_env(common_gres_env_t *gres_env)
 {
@@ -149,7 +149,7 @@ extern int fini(void)
  * This only validates that the configuration was specified in gres.conf.
  * In the general case, no code would need to be changed.
  */
-extern int gres_p_node_config_load(List gres_conf_list,
+extern int gres_p_node_config_load(list_t *gres_conf_list,
 				   node_config_load_t *config)
 {
 	int rc = SLURM_SUCCESS;
@@ -242,45 +242,10 @@ extern void gres_p_recv_stepd(buf_t *buffer)
 }
 
 /*
- * get data from a job's GRES data structure
- * IN job_gres_data  - job's GRES data structure
- * IN node_inx - zero-origin index of the node within the job's allocation
- *	for which data is desired
- * IN data_type - type of data to get from the job's data
- * OUT data - pointer to the data from job's GRES data structure
- *            DO NOT FREE: This is a pointer into the job's data structure
- * RET - SLURM_SUCCESS or error code
- */
-extern int gres_p_get_job_info(gres_job_state_t *gres_js,
-			       uint32_t node_inx,
-			       enum gres_job_data_type data_type, void *data)
-{
-	return EINVAL;
-}
-
-/*
- * get data from a step's GRES data structure
- * IN gres_ss  - step's GRES data structure
- * IN node_inx - zero-origin index of the node within the job's allocation
- *	for which data is desired. Note this can differ from the step's
- *	node allocation index.
- * IN data_type - type of data to get from the step's data
- * OUT data - pointer to the data from step's GRES data structure
- *            DO NOT FREE: This is a pointer into the step's data structure
- * RET - SLURM_SUCCESS or error code
- */
-extern int gres_p_get_step_info(gres_step_state_t *gres_ss,
-				uint32_t node_inx,
-				enum gres_step_data_type data_type, void *data)
-{
-	return EINVAL;
-}
-
-/*
  * Return a list of devices of this type. The list elements are of type
  * "gres_device_t" and the list should be freed using FREE_NULL_LIST().
  */
-extern List gres_p_get_devices(void)
+extern list_t *gres_p_get_devices(void)
 {
 	return gres_devices;
 }

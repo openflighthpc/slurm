@@ -94,12 +94,14 @@ slurm_opt_t opt = {
 	.usage_func = _usage,
 	.autocomplete_func = _autocomplete,
 };
-List 	opt_list = NULL;
+list_t *opt_list = NULL;
 int	pass_number = 0;
 time_t	srun_begin_time = 0;
 bool local_het_step = false;
 
 /*---- forward declarations of static variables and functions  ----*/
+
+static bool is_step = false;
 
 static slurm_opt_t *_get_first_opt(int het_job_offset);
 static slurm_opt_t *_get_next_opt(int het_job_offset, slurm_opt_t *opt_last);
@@ -342,6 +344,8 @@ extern int initialize_and_process_args(int argc, char **argv, int *argc_off)
 	bool opt_found = false;
 	static bool check_het_step = false;
 
+	is_step = getenv("SLURM_JOB_ID") ? true : false;
+
 	het_grp_bits = _get_het_group(argc, argv, default_het_job_offset++,
 				      &opt_found);
 	/*
@@ -371,7 +375,7 @@ extern int initialize_and_process_args(int argc, char **argv, int *argc_off)
 		_opt_default();
 
 		/* do not set adjust defaults in an active allocation */
-		if (!getenv("SLURM_JOB_ID")) {
+		if (!is_step) {
 			bool first = (pass_number == 1);
 			if (cli_filter_g_setup_defaults(&opt, first)) {
 				error("cli_filter plugin terminated with error");
@@ -409,7 +413,7 @@ extern int initialize_and_process_args(int argc, char **argv, int *argc_off)
 			 * trying to use the whole allocation.
 			 */
 			if (!getenv("SLURM_HET_SIZE") &&
-			    getenv("SLURM_JOB_ID") &&
+			    is_step &&
 			    (optind >= 0) && (optind < argc)) {
 				for (int i2 = optind; i2 < argc; i2++) {
 					if (!xstrcmp(argv[i2], ":")) {
@@ -589,6 +593,7 @@ env_vars_t env_vars[] = {
   { "SLURM_NTASKS_PER_NODE", LONG_OPT_NTASKSPERNODE },
   { "SLURM_NTASKS_PER_GPU", LONG_OPT_NTASKSPERGPU },
   { "SLURM_NTASKS_PER_TRES", LONG_OPT_NTASKSPERTRES },
+  { "SLURM_OOM_KILL_STEP", LONG_OPT_OOMKILLSTEP },
   { "SLURM_OPEN_MODE", LONG_OPT_OPEN_MODE },
   { "SLURM_OVERCOMMIT", 'O' },
   { "SLURM_OVERLAP", LONG_OPT_OVERLAP },
@@ -814,10 +819,6 @@ static void _opt_args(int argc, char **argv, int het_job_offset)
 	if (!rest && !sropt.test_only)
 		fatal("No command given to execute.");
 
-	if (launch_init() != SLURM_SUCCESS) {
-		fatal("Unable to load launch plugin, check LaunchType "
-		      "configuration");
-	}
 	command_pos = launch_g_setup_srun_opt(rest, &opt);
 
 	/* make sure we have allocated things correctly */
@@ -916,6 +917,14 @@ static bool _opt_verify(void)
 		if (slurm_option_set_by_env(&opt, 'N'))
 			opt.nodes_set = false;
 	}
+
+	/*
+	 * Specifying --gpus should override SLURM_GPUS_PER_NODE env if present
+	 * in step request.
+	 */
+	if (slurm_option_set_by_env(&opt, LONG_OPT_GPUS_PER_NODE) &&
+	    slurm_option_set_by_cli(&opt, 'G') && is_step)
+		slurm_option_reset(&opt, "gpus-per-node");
 
 	validate_options_salloc_sbatch_srun(&opt);
 
@@ -1051,7 +1060,8 @@ static bool _opt_verify(void)
 
 	/* set proc and node counts based on the arbitrary list of nodes */
 	if (((opt.distribution & SLURM_DIST_STATE_BASE) == SLURM_DIST_ARBITRARY)
-	   && (!opt.nodes_set || !opt.ntasks_set)) {
+	   && (!opt.nodes_set || !opt.ntasks_set)
+	   && !xstrchr(opt.nodelist, '{')) {
 		hostlist_t *hl = hostlist_create(opt.nodelist);
 
 		if (!hl)
@@ -1143,7 +1153,7 @@ static bool _opt_verify(void)
 	}
 
 	/* massage the numbers */
-	if (opt.nodelist && !opt.nodes_set) {
+	if (opt.nodelist && !opt.nodes_set && !xstrchr(opt.nodelist, '{')) {
 		hl = hostlist_create(opt.nodelist);
 		if (!hl)
 			fatal("Invalid node list specified");
@@ -1248,7 +1258,7 @@ static bool _opt_verify(void)
 			if (opt.max_nodes &&
 			    (opt.ntasks > max_ntasks) &&
 			    !mpack_reset_nodes &&
-			    getenv("SLURM_JOB_ID")) {
+			    is_step) {
 				warning("can't honor --ntasks-per-node set to %u which doesn't match the requested tasks %u with the maximum number of requested nodes %u. Ignoring --ntasks-per-node.",
 					opt.ntasks_per_node, opt.ntasks,
 					opt.max_nodes);
@@ -1361,7 +1371,7 @@ extern char *spank_get_job_env(const char *name)
 
 	if ((name == NULL) || (name[0] == '\0') ||
 	    (strchr(name, (int)'=') != NULL)) {
-		slurm_seterrno(EINVAL);
+		errno = EINVAL;
 		return NULL;
 	}
 
@@ -1387,7 +1397,7 @@ extern int   spank_set_job_env(const char *name, const char *value,
 
 	if ((name == NULL) || (name[0] == '\0') ||
 	    (strchr(name, (int)'=') != NULL)) {
-		slurm_seterrno(EINVAL);
+		errno = EINVAL;
 		return -1;
 	}
 
@@ -1421,7 +1431,7 @@ extern int   spank_unset_job_env(const char *name)
 
 	if ((name == NULL) || (name[0] == '\0') ||
 	    (strchr(name, (int)'=') != NULL)) {
-		slurm_seterrno(EINVAL);
+		errno = EINVAL;
 		return -1;
 	}
 
@@ -1495,6 +1505,7 @@ static void _usage(void)
 "            [--cpus-per-gpu=n] [--gpus=n] [--gpu-bind=...] [--gpu-freq=...]\n"
 "            [--gpus-per-node=n] [--gpus-per-socket=n] [--gpus-per-task=n]\n"
 "            [--mem-per-gpu=MB] [--tres-bind=...] [--tres-per-task=list]\n"
+"            [--oom-kill-step[=0|1]]\n"
 "            executable [args...]\n");
 
 }
@@ -1563,6 +1574,7 @@ static void _help(void)
 "      --nice[=value]          decrease scheduling priority by value\n"
 "      --ntasks-per-node=n     number of tasks to invoke on each node\n"
 "  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
+"      --oom-kill-step[=0|1]   set the OOMKillStep behaviour\n"
 "  -o, --output=out            location of stdout redirection\n"
 "  -O, --overcommit            overcommit resources\n"
 "      --overlap               Allow other steps to overlap this step\n"
@@ -1645,7 +1657,7 @@ static void _help(void)
 "      --sockets-per-node=S    number of sockets per node to allocate\n"
 "      --cores-per-socket=C    number of cores per socket to allocate\n"
 "      --threads-per-core=T    number of threads per core to allocate\n"
-"  -B  --extra-node-info=S[:C[:T]]  combine request of sockets per node,\n"
+"  -B, --extra-node-info=S[:C[:T]]  combine request of sockets per node,\n"
 "                              cores per socket and threads per core.\n"
 "                              Specify an asterisk (*) as a placeholder,\n"
 "                              a minimum value, or a min-max range.\n"

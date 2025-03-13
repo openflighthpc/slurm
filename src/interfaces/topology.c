@@ -59,6 +59,7 @@ typedef struct slurm_topo_ops {
 	int (*eval_nodes) (topology_eval_t *topo_eval);
 
 	int (*whole_topo) (bitstr_t *node_mask);
+	bitstr_t *(*get_bitmap)(char *name);
 	bool		(*node_ranking)		( void );
 	int		(*get_node_addr)	( char* node_name,
 						  char** addr,
@@ -75,6 +76,7 @@ typedef struct slurm_topo_ops {
 			       char **out);
 	int (*topoinfo_unpack) (void **topoinfo_pptr, buf_t *buffer,
 				uint16_t protocol_version);
+	uint32_t (*get_fragmentation) (bitstr_t *node_mask);
 } slurm_topo_ops_t;
 
 /*
@@ -85,6 +87,7 @@ static const char *syms[] = {
 	"topology_p_build_config",
 	"topology_p_eval_nodes",
 	"topology_p_whole_topo",
+	"topology_p_get_bitmap",
 	"topology_p_generate_node_ranking",
 	"topology_p_get_node_addr",
 	"topology_p_split_hostlist",
@@ -93,6 +96,7 @@ static const char *syms[] = {
 	"topology_p_topology_pack",
 	"topology_p_topology_print",
 	"topology_p_topology_unpack",
+	"topology_p_get_fragmentation",
 };
 
 static slurm_topo_ops_t ops;
@@ -190,6 +194,20 @@ extern int topology_g_whole_topo(bitstr_t *node_mask)
 	return (*(ops.whole_topo))(node_mask);
 }
 
+
+/*
+ * topology_g_get_bitmap - Get bitmap of nodes in topo group
+ *
+ * IN name of topo group
+ * RET bitmap of nodes from _record_table (do not free)
+ */
+extern bitstr_t *topology_g_get_bitmap(char *name)
+{
+	xassert(plugin_inited);
+
+	return (*(ops.get_bitmap))(name);
+}
+
 /*
  * This operation is only supported by those topology plugins for
  * which the node ordering between slurmd and slurmctld is invariant.
@@ -214,12 +232,14 @@ extern int topology_g_split_hostlist(hostlist_t *hl,
 				     int *count,
 				     uint16_t tree_width)
 {
-	int rc;
-	int j, nnodes, nnodex;
+	int depth, j, nnodes, nnodex;
 	char *buf;
 
 	nnodes = nnodex = 0;
 	xassert(g_context);
+
+	if (!tree_width)
+		tree_width = slurm_conf.tree_width;
 
 	if (slurm_conf.debug_flags & DEBUG_FLAG_ROUTE) {
 		/* nnodes has to be set here as the hl is empty after the
@@ -231,12 +251,9 @@ extern int topology_g_split_hostlist(hostlist_t *hl,
 		xfree(buf);
 	}
 
-	if (!tree_width)
-		tree_width = slurm_conf.tree_width;
-
-	rc = (*(ops.split_hostlist))(hl, sp_hl, count, tree_width);
-	if (!rc && !(*count))
-		rc = SLURM_ERROR;
+	depth = (*(ops.split_hostlist))(hl, sp_hl, count, tree_width);
+	if (!depth && !(*count))
+		goto end;
 
 	if (slurm_conf.debug_flags & DEBUG_FLAG_ROUTE) {
 		/* Sanity check to make sure all nodes in msg list are in
@@ -252,7 +269,8 @@ extern int topology_g_split_hostlist(hostlist_t *hl,
 		}
 	}
 
-	return rc;
+end:
+	return depth;
 }
 
 extern int topology_g_get(topology_data_t type, void *data)
@@ -341,4 +359,11 @@ extern int topology_g_topology_free(dynamic_plugin_data_t *topoinfo)
 		xfree(topoinfo);
 	}
 	return rc;
+}
+
+extern uint32_t topology_g_get_fragmentation(bitstr_t *node_mask)
+{
+	xassert(plugin_inited);
+
+	return (*(ops.get_fragmentation))(node_mask);
 }

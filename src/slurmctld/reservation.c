@@ -66,6 +66,7 @@
 #include "src/common/parse_time.h"
 #include "src/common/run_command.h"
 #include "src/common/slurm_time.h"
+#include "src/common/state_save.h"
 #include "src/common/uid.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
@@ -124,8 +125,8 @@ static const char *select_node_bitmap_tags[] = {
 };
 
 time_t    last_resv_update = (time_t) 0;
-List      resv_list = (List) NULL;
-static List magnetic_resv_list = NULL;
+list_t *resv_list = NULL;
+static list_t *magnetic_resv_list = NULL;
 uint32_t  top_suffix = 0;
 
 typedef struct constraint_slot {
@@ -149,6 +150,7 @@ static int  _build_account_list(char *accounts, int *account_cnt,
 static int  _build_uid_list(char *users, int *user_cnt, uid_t **user_list,
 			    bool *user_not, bool strict);
 static void _clear_job_resv(slurmctld_resv_t *resv_ptr);
+static int _cmp_resv_id(void *x, void *y);
 static slurmctld_resv_t *_copy_resv(slurmctld_resv_t *resv_orig_ptr);
 static void _del_resv_rec(void *x);
 static void _dump_resv_req(resv_desc_msg_t *resv_ptr, char *mode);
@@ -164,7 +166,7 @@ static bool _is_resv_used(slurmctld_resv_t *resv_ptr);
 static bool _job_overlap(time_t start_time, uint64_t flags,
 			 bitstr_t *node_bitmap, char *resv_name);
 static int _job_resv_check(void *x, void *arg);
-static List _list_dup(List license_list);
+static list_t *_list_dup(list_t *license_list);
 static buf_t *_open_resv_state_file(char **state_file);
 static void _pack_resv(slurmctld_resv_t *resv_ptr, buf_t *buffer,
 		       bool internal, uint16_t protocol_version);
@@ -180,7 +182,7 @@ static void _pick_nodes_by_feature_node_cnt(bitstr_t *avail_bitmap,
 					    resv_desc_msg_t *resv_desc_ptr,
 					    resv_select_t *resv_select_ret,
 					    int total_node_cnt,
-					    List feature_list);
+					    list_t *feature_list);
 static bitstr_t *_pick_node_cnt(resv_desc_msg_t *resv_desc_ptr,
 				resv_select_t *resv_select,
 				uint32_t node_cnt);
@@ -218,7 +220,7 @@ static int  _valid_job_access_resv(job_record_t *job_ptr,
 static bool _validate_one_reservation(slurmctld_resv_t *resv_ptr);
 static void _validate_node_choice(slurmctld_resv_t *resv_ptr);
 static bool _validate_user_access(slurmctld_resv_t *resv_ptr,
-				  List user_assoc_list, uid_t uid);
+				  list_t *user_assoc_list, uid_t uid);
 
 static void _free_resv_select_members(resv_select_t *resv_select)
 {
@@ -351,7 +353,8 @@ static bitstr_t *_resv_select(resv_desc_msg_t *resv_desc_ptr,
 		job_ptr->details->max_nodes,
 		job_ptr->details->min_nodes,
 		SELECT_MODE_WILL_RUN, NULL, NULL,
-		&resv_exc);
+		&resv_exc,
+		NULL);
 
 	free_core_array(&resv_exc.exc_cores);
 
@@ -410,11 +413,11 @@ static void _advance_time(time_t *res_time, int day_cnt, int hour_cnt)
 	}
 }
 
-static List _list_dup(List license_list)
+static list_t *_list_dup(list_t *license_list)
 {
 	list_itr_t *iter;
 	licenses_t *license_src, *license_dest;
-	List lic_list = (List) NULL;
+	list_t *lic_list = NULL;
 
 	if (!license_list)
 		return lic_list;
@@ -537,6 +540,8 @@ static void _restore_resv(slurmctld_resv_t *dest_resv,
 	free_job_resources(&dest_resv->core_resrcs);
 	dest_resv->core_resrcs = src_resv->core_resrcs;
 	src_resv->core_resrcs = NULL;
+
+	dest_resv->ctld_flags = src_resv->ctld_flags;
 
 	dest_resv->duration = src_resv->duration;
 	dest_resv->end_time = src_resv->end_time;
@@ -693,6 +698,18 @@ static int _queue_magnetic_resv(void *x, void *key)
 	job_queue_req->resv_ptr = resv_ptr;
 	job_queue_append_internal(job_queue_req);
 
+	return 0;
+}
+
+static int _cmp_resv_id(void *x, void *y)
+{
+	slurmctld_resv_t *resv_ptr1 = *(slurmctld_resv_t **) x;
+	slurmctld_resv_t *resv_ptr2 = *(slurmctld_resv_t **) y;
+
+	if (resv_ptr1->resv_id < resv_ptr2->resv_id)
+		return -1;
+	if (resv_ptr1->resv_id > resv_ptr2->resv_id)
+		return 1;
 	return 0;
 }
 
@@ -962,7 +979,7 @@ static bool _is_account_valid(char *account)
  * associations must be set before calling this function and while
  * handling it after a return.
  */
-static int _append_acct_to_assoc_list(List assoc_list,
+static int _append_acct_to_assoc_list(list_t *assoc_list,
 				      slurmdb_assoc_rec_t *assoc)
 {
 	int rc = ESLURM_INVALID_ACCOUNT;
@@ -996,7 +1013,8 @@ static int _append_acct_to_assoc_list(List assoc_list,
 static int _set_assoc_list(slurmctld_resv_t *resv_ptr)
 {
 	int rc = SLURM_SUCCESS, i = 0, j = 0;
-	List assoc_list_allow = NULL, assoc_list_deny = NULL, assoc_list;
+	list_t *assoc_list_allow = NULL, *assoc_list_deny = NULL;
+	list_t *assoc_list = NULL;
 	slurmdb_assoc_rec_t assoc, *assoc_ptr = NULL;
 	assoc_mgr_lock_t locks = { .assoc = READ_LOCK, .user = READ_LOCK };
 
@@ -1276,6 +1294,207 @@ static int _post_resv_update(slurmctld_resv_t *resv_ptr,
 	return rc;
 }
 
+static void _remove_name_from_str(char *name, char *str)
+{
+	int k = strlen(name);
+	char *tmp = str, *tok;
+
+	while ((tok = xstrstr(tmp, name))) {
+		if (((tok != str) &&
+		     (tok[-1] != ',') && (tok[-1] != '-')) ||
+		    ((tok[k] != '\0') && (tok[k] != ','))) {
+			tmp = tok + 1;
+			continue;
+		}
+		if (tok[-1] == '-') {
+			tok--;
+			k++;
+		}
+		if (tok[-1] == ',') {
+			tok--;
+			k++;
+		} else if (tok[k] == ',')
+			k++;
+		for (int j=0; ; j++) {
+			tok[j] = tok[j + k];
+			if (tok[j] == '\0')
+				break;
+		}
+	}
+}
+
+static bool _check_uid(uid_t x, uid_t arg)
+{
+	return (x == arg);
+}
+
+static bool _check_char(char *x, char *arg)
+{
+	if (x[0] == '-')
+		x++;
+	return !xstrcmp(x, arg);
+}
+
+static int _handle_add_remove_names(
+	slurmctld_resv_t *resv_ptr, uint32_t not_flag,
+	int alter_cnt, char **alter_list, uid_t *uid_list, int *alter_types,
+	bool minus, bool plus)
+{
+	int *object_cnt;
+	char **object_str;
+	int i, j, k;
+	bool found_it;
+
+	switch (not_flag) {
+	case RESV_CTLD_USER_NOT:
+		object_cnt = &resv_ptr->user_cnt;
+		object_str = &resv_ptr->users;
+		break;
+	case RESV_CTLD_ACCT_NOT:
+		object_cnt = &resv_ptr->account_cnt;
+		object_str = &resv_ptr->accounts;
+		break;
+	default:
+		return SLURM_ERROR;
+	}
+
+	/*
+	 * If: The update sets a new list (it was previously empty).
+	 * All accounts are negated, so this is a new exclusion list.
+	 * NOTE: An empty list is always of type "inclusion".
+	 */
+	if (!*object_cnt && minus && !plus)
+		resv_ptr->ctld_flags |= not_flag;
+
+	if (resv_ptr->ctld_flags & not_flag) {
+		/*
+		 * change minus to plus (add to NOT list) and
+		 * change plus to minus (remove from NOT list)
+		 */
+		for (i = 0; i < alter_cnt; i++) {
+			if (alter_types[i] == 1)
+				alter_types[i] = 2;
+			else if (alter_types[i] == 2)
+				alter_types[i] = 1;
+		}
+		if (minus && !plus) {
+			minus = false;
+			plus = true;
+		} else if (!minus && plus) {
+			minus = true;
+			plus = false;
+		}
+	}
+
+	/*
+	 * At this point, minus/plus mean removing/adding literally to the list.
+	 * If "RESV_CTLD_*_NOT" was previously set, it means the list is of
+	 * type "exclusion", otherwise it means "inclusion"
+	 */
+	if (minus) {
+		if (!*object_cnt)
+			return SLURM_ERROR;
+		for (i=0; i < alter_cnt; i++) {
+			if (alter_types[i] != 1) /* not minus */
+				continue;
+			found_it = false;
+			for (j=0; j < *object_cnt; j++) {
+				switch (not_flag) {
+				case RESV_CTLD_USER_NOT:
+					found_it = _check_uid(
+						resv_ptr->user_list[j],
+						uid_list[i]);
+					break;
+				case RESV_CTLD_ACCT_NOT:
+					found_it = _check_char(
+						resv_ptr->account_list[j],
+						alter_list[i]);
+					break;
+				default:
+					break;
+				}
+				if (found_it)
+					break;
+			}
+			if (!found_it)
+				return SLURM_ERROR;
+
+			_remove_name_from_str(alter_list[i], *object_str);
+			if (!*object_str[0])
+				xfree(*object_str);
+
+			(*object_cnt)--;
+			for (k=j; k<*object_cnt; k++) {
+				switch (not_flag) {
+				case RESV_CTLD_USER_NOT:
+					resv_ptr->user_list[k] =
+						resv_ptr->user_list[k+1];
+					break;
+				case RESV_CTLD_ACCT_NOT:
+					resv_ptr->account_list[k] =
+						resv_ptr->account_list[k+1];
+					break;
+				default:
+					break;
+				}
+			}
+		}
+	}
+
+	if (plus) {
+		for (i=0; i<alter_cnt; i++) {
+			if (alter_types[i] != 2) /* not plus */
+				continue;
+			found_it = false;
+			for (j=0; j<*object_cnt; j++) {
+				switch (not_flag) {
+				case RESV_CTLD_USER_NOT:
+					found_it = _check_uid(
+						resv_ptr->user_list[j],
+						uid_list[i]);
+					break;
+				case RESV_CTLD_ACCT_NOT:
+					found_it = _check_char(
+						resv_ptr->account_list[j],
+						alter_list[i]);
+					break;
+				default:
+					break;
+				}
+				if (found_it)
+					break;
+			}
+			if (found_it)
+				continue; /* duplicate entry */
+
+			if (*object_str && *object_str[0])
+				xstrcat(*object_str, ",");
+			if (resv_ptr->ctld_flags & not_flag)
+				xstrcat(*object_str, "-");
+			xstrcat(*object_str, alter_list[i]);
+
+			switch (not_flag) {
+			case RESV_CTLD_USER_NOT:
+				xrecalloc(resv_ptr->user_list,
+					  (*object_cnt + 1), sizeof(uid_t));
+				resv_ptr->user_list[(*object_cnt)++] =
+					uid_list[i];
+				break;
+			case RESV_CTLD_ACCT_NOT:
+				xrecalloc(resv_ptr->account_list,
+					  (*object_cnt + 1), sizeof(char *));
+				resv_ptr->account_list[(*object_cnt)++] =
+					xstrdup(alter_list[i]);
+				break;
+			default:
+				break;
+			}
+		}
+	}
+
+	return SLURM_SUCCESS;
+}
+
 /*
  * Validate a comma delimited list of account names and build an array of
  *	them
@@ -1351,10 +1570,9 @@ static int  _update_account_list(slurmctld_resv_t *resv_ptr,
 				 char *accounts)
 {
 	char *last = NULL, *ac_cpy, *tok;
-	int ac_cnt = 0, i, j, k;
+	int ac_cnt = 0, i, rc = SLURM_ERROR;
 	int *ac_type, minus_account = 0, plus_account = 0;
 	char **ac_list;
-	bool found_it;
 
 	if (!accounts)
 		return ESLURM_INVALID_ACCOUNT;
@@ -1395,6 +1613,8 @@ static int  _update_account_list(slurmctld_resv_t *resv_ptr,
 		xfree(resv_ptr->accounts);
 		if (accounts[0] != '\0')
 			resv_ptr->accounts = xstrdup(accounts);
+		for (i = 0; i < resv_ptr->account_cnt; i++)
+			xfree(resv_ptr->account_list[i]);
 		xfree(resv_ptr->account_list);
 		resv_ptr->account_list = ac_list;
 		resv_ptr->account_cnt  = ac_cnt;
@@ -1404,108 +1624,20 @@ static int  _update_account_list(slurmctld_resv_t *resv_ptr,
 		return SLURM_SUCCESS;
 	}
 
-	/* Modification of existing account list */
-	if ((resv_ptr->account_cnt == 0) && minus_account)
-		resv_ptr->ctld_flags |= RESV_CTLD_ACCT_NOT;
-	else
-		resv_ptr->ctld_flags &= (~RESV_CTLD_ACCT_NOT);
+	rc = _handle_add_remove_names(resv_ptr, RESV_CTLD_ACCT_NOT,
+				      ac_cnt, ac_list, NULL, ac_type,
+				      minus_account, plus_account);
 
-	if (resv_ptr->ctld_flags & RESV_CTLD_ACCT_NOT) {
-		/* change minus_account to plus_account (add to NOT list) and
-		 * change plus_account to minus_account (remove from NOT list) */
-		for (i = 0; i < ac_cnt; i++) {
-			if (ac_type[i] == 1)
-				ac_type[i] = 2;
-			else if (ac_type[i] == 2)
-				ac_type[i] = 1;
-		}
-		if (minus_account && !plus_account) {
-			minus_account = false;
-			plus_account  = true;
-		} else if (!minus_account && plus_account) {
-			minus_account = true;
-			plus_account  = false;
-		}
-	}
-	if (minus_account) {
-		if (resv_ptr->account_cnt == 0)
-			goto inval;
-		for (i=0; i<ac_cnt; i++) {
-			if (ac_type[i] != 1)	/* not minus */
-				continue;
-			found_it = false;
-			for (j=0; j<resv_ptr->account_cnt; j++) {
-				char *test_name = resv_ptr->account_list[j];
-				if (test_name[0] == '-')
-					test_name++;
-				if (xstrcmp(test_name, ac_list[i]))
-					continue;
-				found_it = true;
-				xfree(resv_ptr->account_list[j]);
-				resv_ptr->account_cnt--;
-				for (k=j; k<resv_ptr->account_cnt; k++) {
-					resv_ptr->account_list[k] =
-						resv_ptr->account_list[k+1];
-				}
-				break;
-			}
-			if (!found_it)
-				goto inval;
-		}
-		xfree(resv_ptr->accounts);
-		for (i=0; i<resv_ptr->account_cnt; i++) {
-			if (i)
-				xstrcat(resv_ptr->accounts, ",");
-			if (resv_ptr->ctld_flags & RESV_CTLD_ACCT_NOT)
-				xstrcat(resv_ptr->accounts, "-");
-			xstrcat(resv_ptr->accounts, resv_ptr->account_list[i]);
-		}
-	}
-
-	if (plus_account) {
-		for (i=0; i<ac_cnt; i++) {
-			if (ac_type[i] != 2)	/* not plus */
-				continue;
-			found_it = false;
-			for (j=0; j<resv_ptr->account_cnt; j++) {
-				char *test_name = resv_ptr->account_list[j];
-				if (test_name[0] == '-')
-					test_name++;
-				if (xstrcmp(test_name, ac_list[i]))
-					continue;
-				found_it = true;
-				break;
-			}
-			if (found_it)
-				continue;	/* duplicate entry */
-			xrealloc(resv_ptr->account_list,
-				 sizeof(char *) * (resv_ptr->account_cnt + 1));
-			resv_ptr->account_list[resv_ptr->account_cnt++] =
-					xstrdup(ac_list[i]);
-		}
-		xfree(resv_ptr->accounts);
-		for (i=0; i<resv_ptr->account_cnt; i++) {
-			if (i)
-				xstrcat(resv_ptr->accounts, ",");
-			if (resv_ptr->ctld_flags & RESV_CTLD_ACCT_NOT)
-				xstrcat(resv_ptr->accounts, "-");
-			xstrcat(resv_ptr->accounts, resv_ptr->account_list[i]);
-		}
-	}
-
+inval:
 	for (i=0; i<ac_cnt; i++)
 		xfree(ac_list[i]);
 	xfree(ac_list);
 	xfree(ac_type);
 	xfree(ac_cpy);
-	return SLURM_SUCCESS;
 
- inval:	for (i=0; i<ac_cnt; i++)
-		xfree(ac_list[i]);
-	xfree(ac_list);
-	xfree(ac_type);
-	xfree(ac_cpy);
-	return ESLURM_INVALID_ACCOUNT;
+	if (rc != SLURM_SUCCESS)
+		rc = ESLURM_INVALID_ACCOUNT;
+	return rc;
 }
 
 /*
@@ -1583,12 +1715,11 @@ static int _build_uid_list(char *users, int *user_cnt, uid_t **user_list,
  */
 static int _update_uid_list(slurmctld_resv_t *resv_ptr, char *users)
 {
-	char *last = NULL, *u_cpy = NULL, *tmp = NULL, *tok;
-	int u_cnt = 0, i, j, k;
+	char *last = NULL, *u_cpy = NULL, *tok;
+	int u_cnt = 0, i;
 	uid_t *u_list, u_tmp;
-	int *u_type, minus_user = 0, plus_user = 0;
+	int *u_type, minus_user = 0, plus_user = 0, rc = ESLURM_USER_ID_MISSING;
 	char **u_name;
-	bool found_it;
 
 	if (!users)
 		return ESLURM_USER_ID_MISSING;
@@ -1642,116 +1773,18 @@ static int _update_uid_list(slurmctld_resv_t *resv_ptr, char *users)
 		return SLURM_SUCCESS;
 	}
 
-	/* Modification of existing user list */
-	if ((resv_ptr->user_cnt == 0) && minus_user)
-		resv_ptr->ctld_flags |= RESV_CTLD_USER_NOT;
-	else
-		resv_ptr->ctld_flags &= (~RESV_CTLD_USER_NOT);
-	if (resv_ptr->ctld_flags & RESV_CTLD_USER_NOT) {
-		/* change minus_user to plus_user (add to NOT list) and
-		 * change plus_user to minus_user (remove from NOT list) */
-		for (i = 0; i < u_cnt; i++) {
-			if (u_type[i] == 1)
-				u_type[i] = 2;
-			else if (u_type[i] == 2)
-				u_type[i] = 1;
-		}
-		if (minus_user && !plus_user) {
-			minus_user = false;
-			plus_user  = true;
-		} else if (!minus_user && plus_user) {
-			minus_user = true;
-			plus_user  = false;
-		}
-	}
-
-	if (minus_user) {
-		for (i=0; i<u_cnt; i++) {
-			if (u_type[i] != 1)	/* not minus */
-				continue;
-			found_it = false;
-			for (j=0; j<resv_ptr->user_cnt; j++) {
-				if (resv_ptr->user_list[j] != u_list[i])
-					continue;
-				found_it = true;
-				resv_ptr->user_cnt--;
-				for (k=j; k<resv_ptr->user_cnt; k++) {
-					resv_ptr->user_list[k] =
-						resv_ptr->user_list[k+1];
-				}
-				break;
-			}
-			if (!found_it)
-				continue;
-
-			/* Now we need to remove from users string */
-			k = strlen(u_name[i]);
-			tmp = resv_ptr->users;
-			while ((tok = xstrstr(tmp, u_name[i]))) {
-				if (((tok != resv_ptr->users) &&
-				     (tok[-1] != ',') && (tok[-1] != '-')) ||
-				    ((tok[k] != '\0') && (tok[k] != ','))) {
-					tmp = tok + 1;
-					continue;
-				}
-				if (tok[-1] == '-') {
-					tok--;
-					k++;
-				}
-				if (tok[-1] == ',') {
-					tok--;
-					k++;
-				} else if (tok[k] == ',')
-					k++;
-				for (j=0; ; j++) {
-					tok[j] = tok[j+k];
-					if (tok[j] == '\0')
-						break;
-				}
-			}
-		}
-		if ((resv_ptr->users == NULL) ||
-		    (strlen(resv_ptr->users) == 0)) {
-			resv_ptr->ctld_flags &= (~RESV_CTLD_USER_NOT);
-			xfree(resv_ptr->users);
-		}
-	}
-
-	if (plus_user) {
-		for (i=0; i<u_cnt; i++) {
-			if (u_type[i] != 2)	/* not plus */
-				continue;
-			found_it = false;
-			for (j=0; j<resv_ptr->user_cnt; j++) {
-				if (resv_ptr->user_list[j] != u_list[i])
-					continue;
-				found_it = true;
-				break;
-			}
-			if (found_it)
-				continue;	/* duplicate entry */
-			if (resv_ptr->users && resv_ptr->users[0])
-				xstrcat(resv_ptr->users, ",");
-			if (resv_ptr->ctld_flags & RESV_CTLD_USER_NOT)
-				xstrcat(resv_ptr->users, "-");
-			xstrcat(resv_ptr->users, u_name[i]);
-			xrealloc(resv_ptr->user_list,
-				 sizeof(uid_t) * (resv_ptr->user_cnt + 1));
-			resv_ptr->user_list[resv_ptr->user_cnt++] =
-				u_list[i];
-		}
-	}
+	rc = _handle_add_remove_names(resv_ptr, RESV_CTLD_USER_NOT,
+				      u_cnt, u_name, u_list, u_type,
+				      minus_user, plus_user);
+inval:
 	xfree(u_cpy);
 	xfree(u_list);
 	xfree(u_name);
 	xfree(u_type);
-	return SLURM_SUCCESS;
 
- inval:	xfree(u_cpy);
-	xfree(u_list);
-	xfree(u_name);
-	xfree(u_type);
-	return ESLURM_USER_ID_MISSING;
+	if (rc != SLURM_SUCCESS)
+		rc = ESLURM_USER_ID_MISSING;
+	return rc;
 }
 
 /*
@@ -1880,7 +1913,7 @@ static int _get_core_resrcs(slurmctld_resv_t *resv_ptr)
 	FREE_NULL_BITMAP(resv_ptr->core_resrcs->node_bitmap);
 	if (resv_ptr->core_resrcs->nodes &&
 	    (node_name2bitmap(resv_ptr->core_resrcs->nodes, false,
-			      &resv_ptr->core_resrcs->node_bitmap))) {
+			      &resv_ptr->core_resrcs->node_bitmap, NULL))) {
 		error("Invalid nodes (%s) for reservation %s",
 		      resv_ptr->core_resrcs->nodes, resv_ptr->name);
 		return SLURM_ERROR;
@@ -2649,9 +2682,9 @@ static void _set_tres_cnt(slurmctld_resv_t *resv_ptr,
  * _license_validate2 - A variant of license_validate which considers the
  * licenses used by overlapping reservations
  */
-static List _license_validate2(resv_desc_msg_t *resv_desc_ptr, bool *valid)
+static list_t *_license_validate2(resv_desc_msg_t *resv_desc_ptr, bool *valid)
 {
-	List license_list, merged_list;
+	list_t *license_list = NULL, *merged_list = NULL;
 	list_itr_t *iter;
 	slurmctld_resv_t *resv_ptr;
 	char *merged_licenses;
@@ -2727,8 +2760,8 @@ static bitstr_t *_get_update_node_bitmap(slurmctld_resv_t *resv_ptr,
 				     resv_ptr->name, node_list);
 				FREE_NULL_BITMAP(node_bitmap);
 			} else
-				(void)node_name2bitmap(node_list,
-						       false, &node_bitmap);
+				(void)node_name2bitmap(node_list, false,
+						       &node_bitmap, NULL);
 			break;
 		}
 
@@ -2813,7 +2846,7 @@ extern int create_resv(resv_desc_msg_t *resv_desc_ptr, char **err_msg)
 	int account_cnt = 0, user_cnt = 0;
 	char **account_list = NULL;
 	uid_t *user_list = NULL;
-	List license_list = (List) NULL;
+	list_t *license_list = NULL;
 	uint32_t total_node_cnt = 0;
 	bool account_not = false, user_not = false;
 	resv_select_t resv_select = { 0 };
@@ -3031,8 +3064,8 @@ extern int create_resv(resv_desc_msg_t *resv_desc_ptr, char **err_msg)
 				bitmap2node_name(resv_select.node_bitmap);
 		} else {
 			resv_desc_ptr->flags &= (~RESERVE_FLAG_PART_NODES);
-			if (node_name2bitmap(resv_desc_ptr->node_list,
-					    false, &resv_select.node_bitmap)) {
+			if (node_name2bitmap(resv_desc_ptr->node_list, false,
+					     &resv_select.node_bitmap, NULL)) {
 				rc = ESLURM_INVALID_NODE_NAME;
 				goto bad_parse;
 			}
@@ -3321,6 +3354,19 @@ static int _validate_reservation_access_update(void *x, void *y)
 	return 0;
 }
 
+static int _validate_and_set_partition(part_record_t **part_ptr,
+				       char **partition)
+{
+	if (*part_ptr == NULL) {
+		*part_ptr = default_part_loc;
+		if (*part_ptr == NULL)
+			return ESLURM_DEFAULT_PARTITION_NOT_SET;
+	}
+	xfree(*partition);
+	*partition = xstrdup((*part_ptr)->name);
+	return SLURM_SUCCESS;
+}
+
 /* Update an exiting resource reservation */
 extern int update_resv(resv_desc_msg_t *resv_desc_ptr, char **err_msg)
 {
@@ -3361,8 +3407,10 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr, char **err_msg)
 	     ((resv_desc_ptr->node_cnt != NO_VAL) ||
 	      resv_desc_ptr->node_list)) ||
 	    (resv_desc_ptr->core_cnt != NO_VAL)) {
-		info("Core-based reservation %s can not be updated",
-		     resv_desc_ptr->name);
+		char *err_str = "Updating core/node TRES not supported for core-based reservations";
+		info("%s(%s): %s", __func__, resv_desc_ptr->name, err_str);
+		if (err_msg)
+			*err_msg = xstrdup(err_str);
 		return ESLURM_CORE_RESERVATION_UPDATE;
 	}
 
@@ -3415,8 +3463,9 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr, char **err_msg)
 			 * updated to have multiple reoccurring flags, then
 			 * reject the update
 			 */
-			if (((resv_ptr->flags & RESERVE_REOCCURRING) !=
-			     (resv_desc_ptr->flags & RESERVE_REOCCURRING)) ||
+			if (((resv_ptr->flags & RESERVE_REOCCURRING) &&
+			     ((resv_ptr->flags & RESERVE_REOCCURRING) !=
+			      (resv_desc_ptr->flags & RESERVE_REOCCURRING))) ||
 			    (_has_multiple_reoccurring(resv_desc_ptr))) {
 				info("Cannot update reservation to have multiple reoccurring flags. Please specify only one reoccurring flag");
 				if (err_msg)
@@ -3623,7 +3672,7 @@ extern int update_resv(resv_desc_msg_t *resv_desc_ptr, char **err_msg)
 
 	if (resv_desc_ptr->licenses) {
 		bool valid = true;
-		List license_list;
+		list_t *license_list = NULL;
 		license_list = _license_validate2(resv_desc_ptr, &valid);
 		if (!valid) {
 			info("Reservation %s invalid license update (%s)",
@@ -3958,7 +4007,7 @@ static void _clear_job_resv(slurmctld_resv_t *resv_ptr)
 	list_for_each(job_list, _foreach_clear_job_resv, resv_ptr);
 }
 
-static bool _match_user_assoc(char *assoc_str, List assoc_list, bool deny)
+static bool _match_user_assoc(char *assoc_str, list_t *assoc_list, bool deny)
 {
 	list_itr_t *itr;
 	bool found = 0;
@@ -4056,7 +4105,7 @@ extern buf_t *show_resv(uid_t uid, uint16_t protocol_version)
 	int tmp_offset;
 	buf_t *buffer;
 	time_t now = time(NULL);
-	List assoc_list = NULL;
+	list_t *assoc_list = NULL;
 	bool check_permissions = false;
 	assoc_mgr_lock_t locks = { .assoc = READ_LOCK };
 
@@ -4124,8 +4173,7 @@ extern int dump_all_resv_state(void)
 {
 	list_itr_t *iter;
 	slurmctld_resv_t *resv_ptr;
-	int error_code = 0, log_fd;
-	char *old_file, *new_file, *reg_file;
+	int error_code = 0;
 	/* Locks: Read node */
 	slurmctld_lock_t resv_read_lock = {
 		.conf = READ_LOCK,
@@ -4149,61 +4197,13 @@ extern int dump_all_resv_state(void)
 	while ((resv_ptr = list_next(iter)))
 		_pack_resv(resv_ptr, buffer, true, SLURM_PROTOCOL_VERSION);
 	list_iterator_destroy(iter);
-
-	old_file = xstrdup(slurm_conf.state_save_location);
-	xstrcat(old_file, "/resv_state.old");
-	reg_file = xstrdup(slurm_conf.state_save_location);
-	xstrcat(reg_file, "/resv_state");
-	new_file = xstrdup(slurm_conf.state_save_location);
-	xstrcat(new_file, "/resv_state.new");
 	unlock_slurmctld(resv_read_lock);
 
-	/* write the buffer to file */
-	lock_state_files();
-	log_fd = creat(new_file, 0600);
-	if (log_fd < 0) {
-		error("Can't save state, error creating file %s, %m",
-		      new_file);
-		error_code = errno;
-	} else {
-		int pos = 0, nwrite = get_buf_offset(buffer), amount, rc;
-		char *data = (char *)get_buf_data(buffer);
-
-		while (nwrite > 0) {
-			amount = write(log_fd, &data[pos], nwrite);
-			if ((amount < 0) && (errno != EINTR)) {
-				error("Error writing file %s, %m", new_file);
-				error_code = errno;
-				break;
-			}
-			nwrite -= amount;
-			pos    += amount;
-		}
-		rc = fsync_and_close(log_fd, "reservation");
-		if (rc && !error_code)
-			error_code = rc;
-	}
-	if (error_code)
-		(void) unlink(new_file);
-	else {			/* file shuffle */
-		(void) unlink(old_file);
-		if (link(reg_file, old_file))
-			debug4("unable to create link for %s -> %s: %m",
-			       reg_file, old_file);
-		(void) unlink(reg_file);
-		if (link(new_file, reg_file))
-			debug4("unable to create link for %s -> %s: %m",
-			       new_file, reg_file);
-		(void) unlink(new_file);
-	}
-	xfree(old_file);
-	xfree(reg_file);
-	xfree(new_file);
-	unlock_state_files();
+	error_code = save_buf_to_state("resv_state", buffer, NULL);
 
 	FREE_NULL_BUFFER(buffer);
 	END_TIMER2(__func__);
-	return 0;
+	return error_code;
 }
 
 /* Validate one reservation record, return true if good */
@@ -4340,7 +4340,7 @@ static bool _validate_one_reservation(slurmctld_resv_t *resv_ptr)
 		 */
 		FREE_NULL_BITMAP(resv_ptr->node_bitmap);
 		if (node_name2bitmap(resv_ptr->node_list, false,
-				     &resv_ptr->node_bitmap)) {
+				     &resv_ptr->node_bitmap, NULL)) {
 			char *new_node_list;
 			resv_ptr->node_cnt = bit_set_count(
 				resv_ptr->node_bitmap);
@@ -4486,6 +4486,7 @@ static void _resv_node_replace(slurmctld_resv_t *resv_ptr)
 	resv_desc_msg_t resv_desc;
 	int i, add_nodes, new_nodes, preserve_nodes, busy_nodes_needed;
 	bool log_it = true;
+	bool replaced = false;
 	resv_select_t resv_select = { 0 };
 
 	/* Identify nodes which can be preserved in this reservation */
@@ -4544,6 +4545,7 @@ static void _resv_node_replace(slurmctld_resv_t *resv_ptr)
 		if (i == SLURM_SUCCESS) {
 			job_record_t *job_ptr = resv_desc.job_ptr;
 
+			replaced = true;
 			new_nodes = bit_set_count(resv_select.node_bitmap);
 			busy_nodes_needed = resv_ptr->node_cnt - new_nodes
 					    - preserve_nodes;
@@ -4616,8 +4618,10 @@ static void _resv_node_replace(slurmctld_resv_t *resv_ptr)
 		_free_resv_select_members(&resv_select);
 	}
 	FREE_NULL_BITMAP(preserve_bitmap);
-	last_resv_update = time(NULL);
-	schedule_resv_save();
+	if (replaced) {
+		last_resv_update = time(NULL);
+		schedule_resv_save();
+	}
 }
 
 /*
@@ -4710,7 +4714,7 @@ static void _validate_node_choice(slurmctld_resv_t *resv_ptr)
  * Validate if the user has access to this reservation.
  */
 static bool _validate_user_access(slurmctld_resv_t *resv_ptr,
-				  List user_assoc_list, uid_t uid)
+				  list_t *user_assoc_list, uid_t uid)
 {
 	/* Determine if we have access */
 	if ((accounting_enforce & ACCOUNTING_ENFORCE_ASSOCS) &&
@@ -4881,7 +4885,7 @@ static int _validate_job_resv_internal(job_record_t *job_ptr,
  * get_resv_list - find record for named reservation(s)
  * IN name - reservation name(s) in a comma separated char
  * OUT err_part - The first invalid reservation name.
- * RET List of pointers to the reservations or NULL if not found
+ * RET list of pointers to the reservations or NULL if not found
  * NOTE: Caller must free the returned list
  * NOTE: Caller must free err_part
  */
@@ -4932,6 +4936,9 @@ static int _get_resv_list(job_record_t *job_ptr, char **err_resv)
 		token = strtok_r(NULL, ",", &last);
 	}
 	xfree(tmp_name);
+
+	if (rc == SLURM_SUCCESS)
+		list_sort(job_ptr->resv_list, _cmp_resv_id);
 
 	return rc;
 }
@@ -4990,7 +4997,7 @@ extern int validate_job_resv(job_record_t *job_ptr)
 static int  _resize_resv(slurmctld_resv_t *resv_ptr, uint32_t node_cnt)
 {
 	bitstr_t *tmp2_bitmap = NULL;
-	int delta_node_cnt, i;
+	int delta_node_cnt, i, rc;
 	resv_desc_msg_t resv_desc;
 	resv_select_t resv_select = { 0 };
 
@@ -5035,10 +5042,9 @@ static int  _resize_resv(slurmctld_resv_t *resv_ptr, uint32_t node_cnt)
 	}
 
 	/* Ensure if partition exists in reservation otherwise use default */
-	if (!resv_ptr->part_ptr) {
-		resv_ptr->part_ptr = default_part_loc;
-		if (!resv_ptr->part_ptr)
-			return ESLURM_DEFAULT_PARTITION_NOT_SET;
+	if ((rc = _validate_and_set_partition(&resv_ptr->part_ptr,
+					      &resv_ptr->partition))) {
+		return rc;
 	}
 
 	/* Must increase node count. Make this look like new request so
@@ -5060,10 +5066,10 @@ static int  _resize_resv(slurmctld_resv_t *resv_ptr, uint32_t node_cnt)
 		bit_and_not(resv_select.node_bitmap, resv_ptr->node_bitmap);
 	}
 
-	i = _select_nodes(&resv_desc, &resv_ptr->part_ptr, &resv_select);
+	rc = _select_nodes(&resv_desc, &resv_ptr->part_ptr, &resv_select);
 	xfree(resv_desc.node_list);
 	xfree(resv_desc.partition);
-	if (i == SLURM_SUCCESS) {
+	if (rc == SLURM_SUCCESS) {
 		job_record_t *job_ptr = resv_desc.job_ptr;
 		/*
 		 * If the reservation was 0 node count before (ANY_NODES) this
@@ -5095,7 +5101,7 @@ static int  _resize_resv(slurmctld_resv_t *resv_ptr, uint32_t node_cnt)
 	}
 	job_record_delete(resv_desc.job_ptr);
 
-	return i;
+	return rc;
 }
 
 static int _feature_has_node_cnt(void *x, void *key)
@@ -5291,12 +5297,9 @@ static int _select_nodes(resv_desc_msg_t *resv_desc_ptr,
 	list_itr_t *itr;
 	job_record_t *job_ptr;
 
-	if (*part_ptr == NULL) {
-		*part_ptr = default_part_loc;
-		if (*part_ptr == NULL)
-			return ESLURM_DEFAULT_PARTITION_NOT_SET;
-		xfree(resv_desc_ptr->partition);	/* should be no-op */
-		resv_desc_ptr->partition = xstrdup((*part_ptr)->name);
+	if ((rc = _validate_and_set_partition(part_ptr,
+					      &resv_desc_ptr->partition))) {
+		return rc;
 	}
 
 	xassert(resv_desc_ptr->job_ptr);
@@ -5362,7 +5365,7 @@ static int _select_nodes(resv_desc_msg_t *resv_desc_ptr,
 			     &resv_select[SELECT_NOT_RSVD], true);
 
 		_filter_resv(resv_desc_ptr, resv_ptr,
-			     &resv_select[SELECT_OVR_RSVD], true);
+			     &resv_select[SELECT_OVR_RSVD], false);
 	}
 	list_iterator_destroy(itr);
 
@@ -5485,7 +5488,7 @@ static void _pick_nodes_by_feature_node_cnt(bitstr_t *avail_bitmap,
 					    resv_desc_msg_t *resv_desc_ptr,
 					    resv_select_t *resv_select_ret,
 					    int total_node_cnt,
-					    List feature_list)
+					    list_t *feature_list)
 {
 	bitstr_t *tmp_bitmap = NULL;
 	bitstr_t *feature_bitmap;
@@ -6329,12 +6332,12 @@ extern int job_test_resv_now(job_record_t *job_ptr)
 }
 
 /*
- * Note that a job is starting execution. If that job is associated with a
- * reservation having the "Replace" flag, then remove that job's nodes from
- * the reservation. Additional nodes will be added to the reservation from
+ * Note that a job is starting or finishing execution. If that job is associated
+ * with a reservation having the "Replace" flag, then remove that job's nodes
+ * from the reservation. Additional nodes will be added to the reservation from
  * those currently available.
  */
-extern void job_claim_resv(job_record_t *job_ptr)
+extern void resv_replace_update(job_record_t *job_ptr)
 {
 	slurmctld_resv_t *resv_ptr;
 
@@ -6398,7 +6401,7 @@ extern void job_time_adj_resv(job_record_t *job_ptr)
  * For a given license_list, return the total count of licenses of the
  * specified name
  */
-static int _license_cnt(List license_list, char *lic_name)
+static int _license_cnt(list_t *license_list, char *lic_name)
 {
 	int lic_cnt = 0;
 	list_itr_t *iter;
@@ -6759,6 +6762,8 @@ extern int job_test_resv(job_record_t *job_ptr, time_t *when,
 				*node_bitmap = bit_copy(resv_ptr->node_bitmap);
 			}
 		}
+		/* The job can only run on nodes in the partition */
+		bit_and(*node_bitmap, job_ptr->part_ptr->node_bitmap);
 
 		/*
 		 * if there are any overlapping reservations, we need to
@@ -7707,7 +7712,7 @@ extern bool validate_resv_uid(char *resv_name, uid_t uid)
 	static bool user_resv_delete = false;
 
 	slurmdb_assoc_rec_t assoc;
-	List assoc_list;
+	list_t *assoc_list = NULL;
 	assoc_mgr_lock_t locks = { .assoc = READ_LOCK };
 	bool found_it = false;
 	slurmctld_resv_t *resv_ptr;

@@ -72,7 +72,6 @@
 
 /* bitstring.[ch] functions*/
 #define	bit_alloc		slurm_bit_alloc
-#define	bit_test		slurm_bit_test
 #define	bit_set			slurm_bit_set
 #define	bit_clear		slurm_bit_clear
 #define	bit_nclear		slurm_bit_nclear
@@ -88,7 +87,6 @@
 #define	bit_set_count		slurm_bit_set_count
 #define	bit_set_count_range	slurm_bit_set_count_range
 #define	bit_clear_count		slurm_bit_clear_count
-#define	bit_clear_count_range	slurm_bit_clear_count_range
 #define	bit_nset_max_count	slurm_bit_nset_max_count
 #define	bit_rotate_copy		slurm_bit_rotate_copy
 #define	bit_rotate		slurm_bit_rotate
@@ -99,8 +97,6 @@
 #define	bit_fmt_hexmask		slurm_bit_fmt_hexmask
 #define	bit_fmt_hexmask_trim	slurm_bit_fmt_hexmask_trim
 #define bit_unfmt_hexmask	slurm_bit_unfmt_hexmask
-#define	bit_fmt_binmask		slurm_bit_fmt_binmask
-#define bit_unfmt_binmask	slurm_bit_unfmt_binmask
 #define	bit_fls			slurm_bit_fls
 #define	bit_fls_from_bit	slurm_bit_fls_from_bit
 #define	bit_fill_gaps		slurm_bit_fill_gaps
@@ -118,11 +114,12 @@
 
 /* fd.[ch] functions */
 #define closeall		slurm_closeall
+#define closeall_except		slurm_closeall_except
 #define fd_set_blocking		slurm_fd_set_blocking
 #define fd_set_nonblocking	slurm_fd_set_nonblocking
 #define fd_get_socket_error	slurm_fd_get_socket_error
-#define send_fd_over_pipe	slurm_send_fd_over_pipe
-#define receive_fd_over_pipe	slurm_receive_fd_over_pipe
+#define send_fd_over_socket	slurm_send_fd_over_socket
+#define receive_fd_over_socket	slurm_receive_fd_over_socket
 #define rmdir_recursive		slurm_rmdir_recursive
 
 /* hostlist.[ch] functions */
@@ -267,6 +264,7 @@
 #define rehash_node		slurm_rehash_node
 #define hostlist2bitmap		slurm_hostlist2bitmap
 #define bitmap2node_name	slurm_bitmap2node_name
+#define node_name2bitmap	slurm_node_name2bitmap
 #define find_node_record	slurm_find_node_record
 
 /* pack.[ch] functions */
@@ -304,6 +302,8 @@
 #define	unpackstr_xmalloc	slurm_unpackstr_xmalloc
 #define	unpackstr_xmalloc_escaped slurm_unpackstr_xmalloc_escaped
 #define	unpackstr_xmalloc_chooser slurm_unpackstr_xmalloc_chooser
+#define packstr_func slurm_packstr_func
+#define safe_unpackstr_func slurm_safe_unpackstr_func
 #define	packstr_array		slurm_packstr_array
 #define	unpackstr_array		slurm_unpackstr_array
 #define	packmem_array		slurm_packmem_array
@@ -356,6 +356,11 @@
 /* slurm_auth.[ch] functions
  * None exported today.
  * The header file used only for #define values. */
+
+/* state_save.[ch] functions */
+#define lock_state_files	slurm_lock_state_files
+#define unlock_state_files	slurm_unlock_state_files
+#define save_buf_to_state	slurm_save_buf_to_state
 
 /* strlcpy.[ch] functions */
 #ifndef HAVE_STRLCPY

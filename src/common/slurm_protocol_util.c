@@ -51,62 +51,6 @@
 #include "src/slurmdbd/read_config.h"
 
 /*
- * check_header_version checks to see that the specified header was sent
- * from a node running the same version of the protocol as the current node
- * IN header - the message header received
- * RET - Slurm error code
- */
-int check_header_version(header_t * header)
-{
-	uint16_t check_version = SLURM_PROTOCOL_VERSION;
-
-	if (working_cluster_rec)
-		check_version = working_cluster_rec->rpc_version;
-
-	if (slurmdbd_conf) {
-		if ((header->version != SLURM_PROTOCOL_VERSION)     &&
-		    (header->version != SLURM_ONE_BACK_PROTOCOL_VERSION) &&
-		    (header->version != SLURM_MIN_PROTOCOL_VERSION)) {
-			debug("unsupported RPC version %hu msg type %s(%u)",
-			      header->version, rpc_num2string(header->msg_type),
-			      header->msg_type);
-			slurm_seterrno_ret(SLURM_PROTOCOL_VERSION_ERROR);
-		}
-	} else if (header->version != check_version) {
-		switch (header->msg_type) {
-		case REQUEST_LAUNCH_TASKS:
-		case RESPONSE_LAUNCH_TASKS:
-			if (working_cluster_rec) {
-				/* Disable job step creation/launch
-				 * between major releases. Other RPCs
-				 * should all be supported. */
-				debug("unsupported RPC type %hu",
-				      header->msg_type);
-				slurm_seterrno_ret(
-					SLURM_PROTOCOL_VERSION_ERROR);
-				break;
-			}
-		default:
-			if ((header->version != SLURM_PROTOCOL_VERSION)     &&
-			    (header->version !=
-			     SLURM_ONE_BACK_PROTOCOL_VERSION) &&
-			    (header->version != SLURM_MIN_PROTOCOL_VERSION)) {
-				debug("Unsupported RPC version %hu "
-				      "msg type %s(%u)", header->version,
-				      rpc_num2string(header->msg_type),
-				      header->msg_type);
-				slurm_seterrno_ret(
-					SLURM_PROTOCOL_VERSION_ERROR);
-			}
-			break;
-
-		}
-	}
-
-	return SLURM_SUCCESS;
-}
-
-/*
  * init_header - simple function to create a header, always insuring that
  * an accurate version string is inserted
  * OUT header - the message header to be send
@@ -115,24 +59,9 @@ int check_header_version(header_t * header)
  */
 void init_header(header_t *header, slurm_msg_t *msg, uint16_t flags)
 {
-	memset(header, 0, sizeof(header_t));
-	/* Since the slurmdbd could talk to a host of different
-	   versions of slurm this needs to be kept current when the
-	   protocol version changes. */
-	if (msg->protocol_version != NO_VAL16)
-		header->version = msg->protocol_version;
-	else if (working_cluster_rec)
-		msg->protocol_version = header->version =
-			working_cluster_rec->rpc_version;
-	else if ((msg->msg_type == ACCOUNTING_UPDATE_MSG) ||
-	         (msg->msg_type == ACCOUNTING_FIRST_REG)) {
-		uint16_t rpc_version =
-			((accounting_update_msg_t *)msg->data)->rpc_version;
-		msg->protocol_version = header->version = rpc_version;
-	} else
-		msg->protocol_version = header->version =
-			SLURM_PROTOCOL_VERSION;
+	xassert(msg->protocol_version && (msg->protocol_version != NO_VAL16));
 
+	memset(header, 0, sizeof(header_t));
 	header->flags = flags;
 	header->msg_type = msg->msg_type;
 	header->body_length = 0;	/* over-written later */
@@ -143,6 +72,7 @@ void init_header(header_t *header, slurm_msg_t *msg, uint16_t flags)
 		header->ret_cnt = 0;
 	header->ret_list = msg->ret_list;
 	header->orig_addr = msg->orig_addr;
+	header->version = msg->protocol_version;
 }
 
 /*

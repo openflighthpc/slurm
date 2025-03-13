@@ -1,10 +1,12 @@
 <!--#include virtual="header.txt"-->
 
-<h1><a id="top">Frequently Asked Questions</a></h1>
+<h1>Frequently Asked Questions</h1>
 
 <h2>For Management</h2>
 <ul>
-<li><a href="#foss">Why should I use Slurm or other Free Open Source Software (FOSS)?</a></li>
+<li><a href="#free">Is Slurm really free?</a></li>
+<li><a href="#foss">Why should I use Slurm or other free software?</a></li>
+<li><a href="#support">Why should I pay for free software?</a></li>
 <li><a href="#acronym">What does "Slurm" stand for?</a></li>
 </ul>
 
@@ -164,11 +166,12 @@
   is exhausted?</a></li>
 <li><a href="#ubuntu">I see the host of my calling node as 127.0.1.1
   instead of the correct IP address.  Why is that?</a></li>
-<li><a href="#add_nodes">What process should I follow to add nodes to Slurm?</a></li>
-<li><a href="#rem_nodes">What process should I follow to remove nodes from Slurm?</a></li>
+<li><a href="#add_nodes">How should I add nodes to Slurm?</a></li>
+<li><a href="#rem_nodes">How should I remove nodes from Slurm?</a></li>
 <li><a href="#reboot">Why is a compute node down with the reason set to
   "Node unexpectedly rebooted"?</a></li>
-<li><a href="#cgroupv2">How to convert my nodes to Control Group v2?</a></li>
+<li><a href="#cgroupv2">How do I convert my nodes to Control Group (cgroup)
+  v2?</a></li>
 <li><a href="#amazon_ec2">Can Slurm be used to run jobs on Amazon's EC2?</a></li>
 </ul>
 <h3>User Management</h3>
@@ -214,32 +217,28 @@
 </ul>
 <h3>Error Messages</h3>
 <ul>
-<li><a href="#inc_plugin">When the Slurm daemon starts, it prints
-  &quot;cannot resolve X plugin operations&quot; and exits. What does this mean?</a></li>
-<li><a href="#credential_replayed">What does a &quot;credential replayed&quot;
-  error in the <i>SlurmdLogFile</i> indicate?</a></li>
-<li><a href="#cred_invalid">Why are &quot;Invalid job credential&quot; errors
-  generated?</a></li>
-<li><a href="#cred_replay">Why are &quot;Task launch failed on node ... Job
-  credential replayed&quot; errors generated?</a></li>
-<li><a href="#file_limit">What causes the error
-  &quot;Unable to accept new connection: Too many open files&quot;?</a></li>
-<li><a href="#slurmd_log">Why does the setting of <i>SlurmdDebug</i> fail
-  to log job step information at the appropriate level?</a></li>
-<li><a href="#batch_lost">What is the meaning of the error
-  &quot;Batch JobId=# missing from batch node &lt;node&gt; (not found
-  BatchStartTime after startup)&quot;?</a></li>
-<li><a href="#opencl_pmix">Why is Multi-Instance GPU not working with Slurm and
-  PMIx, and complaining about GPUs being 'In use by another client'?</a></li>
-<li><a href="#accept_again">What does the message
-  &quot;srun: error: Unable to accept connection: Resources temporarily unavailable&quot;
-  indicate?</a></li>
-<li><a href="#large_time">What does &quot;Warning: Note very large processing
-  time&quot; in the <i>SlurmctldLogFile</i> indicate?</a></li>
-<li><a href="#mysql_duplicate">Slurmdbd is failing to start with a 'Duplicate entry'
-  error in the database. How do I fix that?</a></li>
-<li><a href="#json_serializer">Why am I getting the following error: "Unable to
-  find plugin: serializer/json"?</a></li>
+<li><a href="#inc_plugin">&quot;Cannot resolve X plugin operations&quot; on
+  daemon startup</a></li>
+<li><a href="#credential_replayed">&quot;Credential replayed&quot; in
+  <i>SlurmdLogFile</i></a></li>
+<li><a href="#cred_invalid">&quot;Invalid job credential&quot;</a></li>
+<li><a href="#cred_replay">&quot;Task launch failed on node ... Job credential
+  replayed&quot;</a></li>
+<li><a href="#file_limit">&quot;Unable to accept new connection: Too many open
+  files&quot;</a></li>
+<li><a href="#slurmd_log"><i>SlurmdDebug</i> fails to log job step information
+  at the appropriate level</a></li>
+<li><a href="#batch_lost">&quot;Batch JobId=# missing from batch node &lt;node&gt;
+  (not found BatchStartTime after startup)&quot;</a></li>
+<li><a href="#opencl_pmix">Multi-Instance GPU not working with Slurm and
+  PMIx; GPUs are &quot;In use by another client&quot;</a></li>
+<li><a href="#accept_again">&quot;srun: error: Unable to accept connection:
+  Resources temporarily unavailable&quot;</a></li>
+<li><a href="#large_time">&quot;Warning: Note very large processing time&quot;
+  in <i>SlurmctldLogFile</i></a></li>
+<li><a href="#mysql_duplicate">&quot;Duplicate entry&quot; causes slurmdbd to
+  fail</a></li>
+<li><a href="#json_serializer">&quot;Unable to find plugin: serializer/json&quot;</a></li>
 </ul>
 <h3>Third Party Integrations</h3>
 <ul>
@@ -249,24 +248,47 @@
 </ul>
 
 <h2>For Management</h2>
-<p><a id="foss"><b>Why should I use Slurm or other Free Open Source Software (FOSS)?</b></a><br>
-Free Open Source Software (FOSS) does not mean that it is without cost.
-It does mean that the you have access to the code so that you are free to
-use it, study it, and/or enhance it.
-These reasons contribute to Slurm (and FOSS in general) being subject to
-active research and development worldwide, displacing proprietary software
-in many environments.
-If the software is large and complex, like Slurm or the Linux kernel,
-then while there is no license fee, its use is not without cost.</p>
-<p>If your work is important, you'll want the leading Slurm experts at your
-disposal to keep your systems operating at peak efficiency.
-While Slurm has a global development community incorporating leading edge
-technology, <a href="https://www.schedmd.com">SchedMD</a> personnel have developed
-most of the code and can provide competitively priced commercial support.
-SchedMD works with various organizations to provide a range of support
-options.
-Customers switching from commercial workload mangers to Slurm typically
-report higher scalability, better performance and lower costs.</p>
+<p><a id="free"><b>Is Slurm really free?</b></a><br>
+Yes, Slurm is free and open source:
+<ul>
+<li>Slurm is free as defined by the
+  <a href="https://www.gnu.org/philosophy/free-sw.en.html">Free Software
+  Foundation</a></li>
+<li>Slurm’s <a href="https://github.com/SchedMD/slurm">source code</a> and
+  <a href="https://slurm.schedmd.com/documentation.html">documentation</a> are
+  publicly available under the GNU GPL v2</li>
+<li>Slurm can be <a href="https://www.schedmd.com/download-slurm/">
+  downloaded</a>, used, modified, and redistributed at no monetary cost</li>
+</ul></p>
+
+<p><a id="foss"><b>Why should I use Slurm or other free software?</b></a><br>
+Free software, as with proprietary software, varies widely in quality, but the
+mechanism itself has proven to be capable of producing high-quality software
+that is trusted by companies around the world. The Linux kernel is a prominent
+example, which is often trusted on web servers, infrastructure servers,
+supercomputers, and mobile devices.</p>
+
+<p>Likewise, Slurm has become a trusted tool in the supercomputing world since
+its initial release in 2002 and the founding of SchedMD in 2010 to continue
+developing Slurm. Today, Slurm powers a majority of the
+<a href="https://www.top500.org/">TOP500</a> supercomputers. Customers switching
+from commercial workload managers to Slurm typically report higher scalability,
+better performance and lower costs.</p>
+
+<p><a id="support"><b>Why should I pay for free software?</b></a><br>
+Free software does not mean that it is without cost. Software requires
+significant time and expertise to write, test, distribute, and maintain. If the
+software is large and complex, like Slurm or the Linux kernel, these costs can
+become very substantial.</p>
+
+<p>Slurm is often used for highly important tasks at major computing clusters
+around the world. Due to the extensive features available and the complexity of
+the code required to provide those features, many organizations prefer to have
+experts available to provide tailored recommendations and troubleshooting
+assistance. While Slurm has a global development community incorporating leading
+edge technology, <a href="https://www.schedmd.com">SchedMD</a> personnel have
+developed most of the code and can provide competitively priced commercial
+support and on-site training.</p>
 
 <p><a id="acronym"><b>What does "Slurm" stand for?</b></a><br>
 Nothing.</p>
@@ -958,7 +980,8 @@ This can be disabled by specifically excluding the propagation of
 specific limits in the <i>slurm.conf</i> file. For example
 <i>PropagateResourceLimitsExcept=MEMLOCK</i> might be used to
 prevent the propagation of a user's locked memory limit from a
-login node to a dedicated node used for his parallel job.
+<a href="quickstart_admin.html#login">login node</a> to a dedicated
+node used for his parallel job.
 If the user's resource limit is not propagated, the limit in
 effect for the <i>slurmd</i> daemon will be used for the spawned job.
 A simple way to control this is to ensure that user <i>root</i> has a
@@ -1163,6 +1186,13 @@ $ rpmbuild -ta slurm-23.11.1.tar.bz2 > /dev/null
 </pre>
 </p>
 
+<p>Alternatively, as of Slurm 24.11.0 when using <b>rpmbuild</b>, a patched
+package may be created directly by placing the patch file in the same directory
+as the source tarball and executing the following command:</p>
+<pre>
+$ rpmbuild -ta --define 'patch security.patch' slurm-24.11.0.tar.bz2
+</pre>
+
 <p><a id="epel"><b>Why am I being offered an automatic update for Slurm?</b></a>
 <br>
 EPEL has added Slurm packages to their repository to make them more widely
@@ -1208,9 +1238,9 @@ that node may be rendered unusable, but no other harm will result.</p>
 
 <p><a id="clock"><b>Do I need to maintain synchronized
 clocks on the cluster?</b></a><br>
-In general, yes. Having inconsistent clocks may cause nodes to
-be unusable. Slurm log files should contain references to
-expired credentials. For example:</p>
+In general, yes. Having inconsistent clocks may cause nodes to be unusable and
+generate errors in Slurm log files regarding expired credentials. For example:
+</p>
 <pre>
 error: Munge decode failed: Expired credential
 ENCODED: Wed May 12 12:34:56 2008
@@ -1521,38 +1551,70 @@ name from the "127.0.1.1" as well as the "127.0.0.1"
 addresses in the /etc/hosts file.  It is ok if they point to
 localhost, but not the actual name of the node.</p>
 
-<p><a id="add_nodes"><b>What process should I follow to add nodes to Slurm?</b></a><br>
-The slurmctld daemon has a multitude of bitmaps to track state of nodes and cores
-in the system. Adding nodes to a running system would require the slurmctld daemon
-to rebuild all of those bitmaps, which the developers feel would be safer to do by
-restarting the daemon. Communications from the slurmd daemons on the compute
+<p><a id="add_nodes"><b>How should I add nodes to Slurm?</b></a><br>
+The slurmctld daemon has many bitmaps to track state of nodes and cores in the
+cluster. Adding nodes to a running cluster would require the slurmctld daemon
+to rebuild all of those bitmaps, which required restarting the daemon in older
+versions of Slurm. Communications from the slurmd daemons on the compute
 nodes to the slurmctld daemon include a configuration file checksum, so you
-probably also want to maintain a common slurm.conf file on all nodes. The
-following procedure is recommended:</p>
+should maintain the same slurm.conf file on all nodes.</p>
+
+<p>The following procedure is recommended on <b>Slurm 24.05</b> and older
+  (see below for 24.11 and newer):</p>
 <ol>
-<li>Stop the slurmctld daemon (e.g. "systemctl stop slurmctld" on the head node)</li>
-<li>Update the slurm.conf file on all nodes in the cluster</li>
-<li>Restart the slurmd daemons on all nodes (e.g. "systemctl restart slurmd" on all nodes)</li>
-<li>Restart the slurmctld daemon (e.g. "systemctl start slurmctld" on the head node)</li>
+<li>Stop the slurmctld daemon (e.g. <code>systemctl stop slurmctld</code>
+  on the head node)</li>
+<li>Update the <b>slurm.conf</b> file on all nodes in the cluster</li>
+<li>Restart the slurmd daemons on all nodes (e.g.
+  <code>systemctl restart slurmd</code> on all nodes)</li>
+<li>Restart the slurmctld daemon (e.g. <code>systemctl start slurmctld</code>
+  on the head node)</li>
+</ol>
+
+<p>The following procedure is sufficient on <b>Slurm 24.11</b> and newer:</p>
+<ol>
+<li>Update the <b>slurm.conf</b> file on all nodes in the cluster</li>
+<li>Run <code>scontrol reconfigure</code></li>
 </ol>
 
 <p><b>NOTE</b>: Jobs submitted with srun, and that are waiting for an
 allocation, prior to new nodes being added to the slurm.conf can fail if the
 job is allocated one of the new nodes.</p>
 
-<p><a id="rem_nodes"><b>What process should I follow to remove nodes from Slurm?</b></a><br>
-To safely remove a node from a system, it's best to drain the node of all jobs.
+<p><a id="rem_nodes"><b>How should I remove nodes from Slurm?</b></a><br>
+To safely remove a node from a cluster, it's best to drain the node of all jobs.
 This ensures that job processes aren't running on the node after removal. On
 restart of the controller, if a node is removed from a running job the
 controller will kill the job on any remaining allocated nodes and attempt to
-requeue the job if possible. The following procedure is recommended:</p>
+requeue the job if possible.</p>
+
+<p>The following procedure is recommended on <b>Slurm 24.05</b> and older
+  (see below for 24.11 and newer):</p>
 <ol>
-<li>Drain node of all jobs (e.g. "scontrol update nodename='%N' state=drain reason='removing nodes'")</li>
-<li>Stop the slurmctld daemon (e.g. "systemctl stop slurmctld" on the head node)</li>
-<li>Update the slurm.conf file on all nodes in the cluster</li>
-<li>Restart the slurmd daemons on all nodes (e.g. "systemctl restart slurmd" on all nodes)</li>
-<li>Restart the slurmctld daemon (e.g. "systemctl start slurmctld" on the head node)</li>
+<li>Drain node of all jobs (e.g.
+  <code>scontrol update nodename='%N' state=drain reason='removing nodes'</code>
+  )</li>
+<li>Stop the slurmctld daemon (e.g. <code>systemctl stop slurmctld</code>
+  on the head node)</li>
+<li>Update the <b>slurm.conf</b> file on all nodes in the cluster</li>
+<li>Restart the slurmd daemons on all nodes (e.g.
+  <code>systemctl restart slurmd</code> on all nodes)</li>
+<li>Restart the slurmctld daemon (e.g. <code>systemctl start slurmctld</code>
+  on the head node)</li>
 </ol>
+
+<p>The following procedure is sufficient on <b>Slurm 24.11</b> and newer:</p>
+<ol>
+<li>Drain node of all jobs (e.g.
+  <code>scontrol update nodename='%N' state=drain reason='removing nodes'</code>
+  )</li>
+<li>Update the <b>slurm.conf</b> file on all nodes in the cluster</li>
+<li>Run <code>scontrol reconfigure</code></li>
+</ol>
+
+<p><b>NOTE</b>: Removing nodes from the cluster may cause some errors in the
+logs. Verify that any errors in the logs are for nodes that you intended to
+remove.</p>
 
 <p><a id="reboot"><b>Why is a compute node down with the reason set to
 "Node unexpectedly rebooted"?</b></a><br>
@@ -1562,65 +1624,10 @@ If you want to prevent this condition from setting the node into a DOWN state
 then configure ReturnToService to 2. See the slurm.conf man page for details.
 Otherwise use scontrol or sview to manually return the node to service.</p>
 
-<a id="cgroupv2"><b>How to convert my nodes to Control Group v2?</b></a>
-<br>
-<p>
-Most existing Slurm installations will be running Cgroup v1 and Slurm's
-cgroup/v1 plugin. Sites that wish to use the new features of cgroup/v2 can
-convert all of their nodes to running Cgroup v2. Slurm supports different nodes
-running Slurm's cgroup/v1 or cgroup/v2 plugins.
-</p>
-<p>Conversion procedure:
-<ol>
-<li>Reconfigure systemd (only required for versions &lt; 252):
-<ul>
-<li>Swap kernel commandline options for systemd to Cgroup v2 support:
-<pre>systemd.unified_cgroup_hierarchy=1 systemd.legacy_systemd_cgroup_controller=0 cgroup_no_v1=all</pre>
-Example commands for Debian based systems:
-<pre>sed -e 's@^GRUB_CMDLINE_LINUX=@#GRUB_CMDLINE_LINUX=@' -i /etc/default/grub
-echo 'GRUB_CMDLINE_LINUX="systemd.unified_cgroup_hierarchy=1 systemd.legacy_systemd_cgroup_controller=0 cgroup_no_v1=all"' >> /etc/default/grub
-update-grub</pre>
-Example command for Redhat based systems:
-<pre>grubby --update-kernel=ALL --args="systemd.unified_cgroup_hierarchy=1 systemd.legacy_systemd_cgroup_controller=0 cgroup_no_v1=all"</pre>
-</li>
-<br>
-<li>Reboot to apply new kernel command line options.</li>
-<br>
-<li>Verify kernel has correct command line options:
-<pre>grep -o -e systemd.unified_cgroup_hierarchy=. -e systemd.legacy_systemd_cgroup_controller=. /proc/cmdline
-systemd.unified_cgroup_hierarchy=1
-systemd.legacy_systemd_cgroup_controller=0</pre>
-If the output does not match exactly, then repeat prior steps
-and verify kernel is given correct command line options.
-</li>
-<br>
-<li>Verify that there is not any <a href="https://docs.kernel.org/admin-guide/cgroup-v1/index.html">Cgroup v1</a>
-controller mounted and <a
-href="https://github.com/systemd/systemd/blob/main/docs/CGROUP_DELEGATION.md#three-different-tree-setups-">
-that your system is not running in hybrid mode</a><br>Example of hybrid mode:
-<pre>$ grep -v ^0: /proc/self/cgroup
-8:net_cls,net_prio:/
-6:name=systemd:/</pre>
-If there are any entries, then a reboot is required. If there are entries after
-a reboot then there is a process actively mounting Cgroup v1 mounts that will
-need to be stopped.</li>
-</ul>
-</li>
-<br>
-<li>Modify Slurm configuration to allow cgroup/v2 plugin:<br>
-<b>/etc/slurm/cgroup.conf</b>:
-<ul>
-<li>Remove line starting with:<pre>CgroupAutomount=</pre></li>
-<li>Remove line starting with:<pre>CgroupMountpoint=</pre></li>
-<li>Remove line if present:<pre>CgroupPlugin=cgroup/v1</pre></li>
-<li>Add line:<pre>CgroupPlugin=autodetect</pre></li>
-<br>
-</ul>
-</li>
-<li>Restart Slurm daemons per normal startup procedure</li>
-</ol>
-<p>Read the Slurm <a href="cgroups.html">Cgroups documentation</a> for more details.</p>
-</p>
+<p><a id="cgroupv2"><b>How do I convert my nodes to Control Group (cgroup)
+v2?</b></a><br>
+Refer to the <a href="cgroup_v2.html#conversion">cgroup v2</a> documentation
+for the conversion procedure.</p>
 
 <p><a id="amazon_ec2"><b>Can Slurm be used to run jobs on
 Amazon's EC2?</b></a><br>
@@ -2204,9 +2211,8 @@ gdb -ex 't a a bt' -batch -p $(pidof slurmctld)
 
 <h3>Error Messages</h3>
 
-<p><a id="inc_plugin"><b>When the Slurm daemon starts, it
-prints &quot;cannot resolve X plugin operations&quot; and exits.
-What does this mean?</b></a><br>
+<p><a id="inc_plugin"><b>&quot;Cannot resolve X plugin operations&quot; on
+  daemon startup</b></a><br>
 This means that symbols expected in the plugin were
 not found by the daemon. This typically happens when the
 plugin was built or installed improperly or the configuration
@@ -2214,9 +2220,8 @@ file is telling the plugin to use an old plugin (say from the
 previous version of Slurm). Restart the daemon in verbose mode
 for more information (e.g. &quot;slurmctld -Dvvvvv&quot;).</p>
 
-<p><a id="credential_replayed"><b>What does a
-&quot;credential replayed&quot;
-error in the <i>SlurmdLogFile</i> indicate?</b></a><br>
+<p><a id="credential_replayed"><b>&quot;Credential replayed&quot; in
+  <i>SlurmdLogFile</i></b></a><br>
 This error is indicative of the <i>slurmd</i> daemon not being able
 to respond to job initiation requests from the <i>srun</i> command
 in a timely fashion (a few seconds).
@@ -2237,16 +2242,14 @@ including</p>
 <p>Configure <i>MessageTimeout</i> in slurm.conf to a value higher than the
 default 10 seconds.</p>
 
-<p><a id="cred_invalid"><b>Why are &quot;Invalid job credential&quot;
-errors generated?</b></a><br>
+<p><a id="cred_invalid"><b>&quot;Invalid job credential&quot;</b></a><br>
 This error is indicative of Slurm's job credential files being inconsistent across
 the cluster. All nodes in the cluster must have the matching public and private
 keys as defined by <b>JobCredPrivateKey</b> and <b>JobCredPublicKey</b> in the
 Slurm configuration file <b>slurm.conf</b>.</p>
 
-<p><a id="cred_replay"><b>Why are
-&quot;Task launch failed on node ... Job credential replayed&quot;
-errors generated?</b></a><br>
+<p><a id="cred_replay"><b>&quot;Task launch failed on node ... Job credential
+  replayed&quot;</b></a><br>
 This error indicates that a job credential generated by the slurmctld daemon
 corresponds to a job that the slurmd daemon has already revoked.
 The slurmctld daemon selects job ID values based upon the configured
@@ -2265,15 +2268,15 @@ for jobs that it considers terminated.
 This solution to this problem is to cold-start all slurmd daemons whenever
 the slurmctld daemon is cold-started.</p>
 
-<p><a id="file_limit"><b>What causes the error
-&quot;Unable to accept new connection: Too many open files&quot;?</b></a><br>
+<p><a id="file_limit"><b>&quot;Unable to accept new connection: Too many open
+  files&quot;</b></a><br>
 The srun command automatically increases its open file limit to
 the hard limit in order to process all of the standard input and output
 connections to the launched tasks. It is recommended that you set the
 open file hard limit to 8192 across the cluster.</p>
 
-<p><a id="slurmd_log"><b>Why does the setting of <i>SlurmdDebug</i>
-fail to log job step information at the appropriate level?</b></a><br>
+<p><a id="slurmd_log"><b><i>SlurmdDebug</i> fails to log job step information
+  at the appropriate level</b></a><br>
 There are two programs involved here. One is <b>slurmd</b>, which is
 a persistent daemon running at the desired debug level. The second
 program is <b>slurmstepd</b>, which executes the user job and its
@@ -2282,9 +2285,8 @@ an option of <i>--debug=#</i> will result in the desired level of
 detail being logged in the <i>SlurmdLogFile</i> plus the output
 of the program.</p>
 
-<p><a id="batch_lost"><b>What is the meaning of the error
-&quot;Batch JobId=# missing from batch node &lt;node&gt; (not found
-  BatchStartTime after startup)&quot;?</b></a><br>
+<p><a id="batch_lost"><b>&quot;Batch JobId=# missing from batch node &lt;node&gt;
+  (not found BatchStartTime after startup)&quot;</b></a><br>
 A shell is launched on node zero of a job's allocation to execute
 the submitted program. The <i>slurmd</i> daemon executing on each compute
 node will periodically report to the <i>slurmctld</i> what programs it
@@ -2294,9 +2296,8 @@ message above will be logged and the job canceled. This typically is
 associated with exhausting memory on the node or some other critical
 failure that cannot be recovered from.</p>
 
-<p><a id="opencl_pmix"><b>Why is Multi-Instance GPU not working with Slurm and
-  PMIx, and complaining about GPUs being 'In use by another client'?</b></a>
-<br/>
+<p><a id="opencl_pmix"><b>Multi-Instance GPU not working with Slurm and PMIx;
+  GPUs are &quot;In use by another client&quot;</b></a><br/>
 PMIx uses the <b>hwloc API</b> for different purposes, including
 <i>OS device</i> features like querying sysfs folders (such as
 <i>/sys/class/net</i> and <i>/sys/class/infiniband</i>) to get the names of
@@ -2316,16 +2317,14 @@ to not query OpenCL devices by setting the
 variable for slurmd, i.e. setting this variable in systemd unit file for slurmd.
 </p>
 
-<p><a id="accept_again"><b>What does the message
-&quot;srun: error: Unable to accept connection: Resources temporarily unavailable&quot;
-indicate?</b></a><br>
+<p><a id="accept_again"><b>&quot;srun: error: Unable to accept connection:
+  Resources temporarily unavailable&quot;</b></a><br>
 This has been reported on some larger clusters running SUSE Linux when
 a user's resource limits are reached. You may need to increase limits
 for locked memory and stack size to resolve this problem.</p>
 
-<p><a id="large_time"><b>What does
-&quot;Warning: Note very large processing time&quot;
-in the <i>SlurmctldLogFile</i> indicate?</b></a><br>
+<p><a id="large_time"><b>&quot;Warning: Note very large processing time&quot;
+  in <i>SlurmctldLogFile</i></b></a><br>
 This error is indicative of some operation taking an unexpectedly
 long time to complete, over one second to be specific.
 Setting the value of the <i>SlurmctldDebug</i> configuration parameter
@@ -2337,8 +2336,8 @@ Another possibility is that the node on which the slurmctld
 daemon executes has exhausted memory and is paging.
 Try running the program <i>top</i> to check for this possibility.</p>
 
-<p><a id="mysql_duplicate"><b>Slurmdbd is failing to start with a 'Duplicate entry'
-  error in the database. How do I fix that?</b></a><br>
+<p><a id="mysql_duplicate"><b>&quot;Duplicate entry&quot; causes slurmdbd to
+  fail</b></a><br>
 This problem has been rarely observed with MySQL, but not MariaDB.
 The root cause of the failure seems to be reaching the upper limit on the auto increment field.
 Upgrading to MariaDB is recommended.
@@ -2372,9 +2371,8 @@ Bye
 $ mysql -u&lt;user&gt; -p&lt;user&gt; &lt;/tmp/slurm_db_backup.sql
 </pre>
 
-<p><a id="json_serializer"><b>Why am I getting the following error: "Unable to
-  find plugin: serializer/json"?</b></a>
-<br/>
+<p><a id="json_serializer"><b>&quot;Unable to find plugin: serializer/json&quot;
+  </b></a><br/>
 Several parts of Slurm have swapped to using our centralized serializer
 code. JSON or YAML plugins are only required if one of the functions that
 require it is executed. If one of the functions is executed it will fail to
@@ -2447,6 +2445,6 @@ dset TV::parallel_configs {
 }
 !-->
 
-<p style="text-align:center;">Last modified 14 August 2024</p>
+<p style="text-align:center;">Last modified 26 November 2024</p>
 
 <!--#include virtual="footer.txt"-->

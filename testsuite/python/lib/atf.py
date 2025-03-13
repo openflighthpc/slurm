@@ -33,7 +33,7 @@ import importlib
 ##############################################################################
 
 default_command_timeout = 60
-default_polling_timeout = 15
+default_polling_timeout = 45
 default_sql_cmd_timeout = 120
 
 PERIODIC_TIMEOUT = 30
@@ -192,9 +192,16 @@ def run_command(
                     "This test requires the test user to have unprompted sudo rights",
                     allow_module_level=True,
                 )
-            # Use su to honor ulimits, specially core
             cp = subprocess.run(
-                ["sudo", "su", user, "/bin/bash", "-lc", command],
+                [
+                    "sudo",
+                    "--preserve-env=PATH",
+                    "-u",
+                    user,
+                    "/bin/bash",
+                    "-lc",
+                    command,
+                ],
                 capture_output=True,
                 text=True,
                 **additional_run_kwargs,
@@ -528,6 +535,8 @@ def start_slurmctld(clean=False, quiet=False):
     if not properties["auto-config"]:
         require_auto_config("wants to start slurmctld")
 
+    logging.debug("Starting slurmctld...")
+
     if not is_slurmctld_running(quiet=quiet):
         # Start slurmctld
         command = f"{properties['slurm-sbin-dir']}/slurmctld"
@@ -543,7 +552,52 @@ def start_slurmctld(clean=False, quiet=False):
         if not repeat_command_until(
             "scontrol ping", lambda results: re.search(r"is UP", results["stdout"])
         ):
-            pytest.fail(f"Slurmctld is not running")
+            pytest.fail("Slurmctld is not running")
+        else:
+            logging.debug("Slurmctldd started successfully")
+
+
+def start_slurmdbd(clean=False, quiet=False):
+    """Starts the Slurm DB daemon (slurmdbd).
+
+    This function may only be used in auto-config mode.
+
+    Args:
+        clean (boolean): If True, clears previous slurmdbd state.
+        quiet (boolean): If True, logging is performed at the TRACE log level.
+
+    Returns:
+        None
+    """
+    if not properties["auto-config"]:
+        require_auto_config("wants to start slurmdbd")
+
+    logging.debug("Starting slurmdbd...")
+
+    if (
+        run_command_exit(
+            "sacctmgr show cluster", user=properties["slurm-user"], quiet=quiet
+        )
+        != 0
+    ):
+        # Start slurmdbd
+        results = run_command(
+            f"{properties['slurm-sbin-dir']}/slurmdbd",
+            user=properties["slurm-user"],
+            quiet=quiet,
+        )
+        if results["exit_code"] != 0:
+            pytest.fail(
+                f"Unable to start slurmdbd (rc={results['exit_code']}): {results['stderr']}"
+            )
+
+        # Verify that slurmdbd is running
+        if not repeat_command_until(
+            "sacctmgr show cluster", lambda results: results["exit_code"] == 0
+        ):
+            pytest.fail(f"Slurmdbd is not running")
+        else:
+            logging.debug("Slurmdbd started successfully")
 
 
 def start_slurm(clean=False, quiet=False):
@@ -574,28 +628,7 @@ def start_slurm(clean=False, quiet=False):
         get_config_parameter("AccountingStorageType", live=False, quiet=quiet)
         == "accounting_storage/slurmdbd"
     ):
-        if (
-            run_command_exit(
-                "sacctmgr show cluster", user=properties["slurm-user"], quiet=quiet
-            )
-            != 0
-        ):
-            # Start slurmdbd
-            results = run_command(
-                f"{properties['slurm-sbin-dir']}/slurmdbd",
-                user=properties["slurm-user"],
-                quiet=quiet,
-            )
-            if results["exit_code"] != 0:
-                pytest.fail(
-                    f"Unable to start slurmdbd (rc={results['exit_code']}): {results['stderr']}"
-                )
-
-            # Verify that slurmdbd is running
-            if not repeat_command_until(
-                "sacctmgr show cluster", lambda results: results["exit_code"] == 0
-            ):
-                pytest.fail(f"Slurmdbd is not running")
+        start_slurmdbd(clean, quiet)
 
     # Remove unnecessary default node0 from config to avoid being used or reserved
     output = run_command_output(
@@ -652,6 +685,15 @@ def start_slurm(clean=False, quiet=False):
             ):
                 pytest.fail(f"Slurmd -N {slurmd_name} is not running")
 
+            # Verify that the slurmd is registered correctly
+            if not repeat_until(
+                lambda: get_node_parameter(slurmd_name, "State"),
+                lambda state: state == "IDLE",
+            ):
+                pytest.fail(
+                    f"Node {slurmd_name} was not able to register correctly, not IDLE."
+                )
+
 
 def stop_slurmctld(quiet=False):
     """Stops the Slurm controller daemon (slurmctld).
@@ -683,6 +725,41 @@ def stop_slurmctld(quiet=False):
         lambda pids: len(pids) == 0,
     ):
         pytest.fail("Slurmctld is still running")
+
+
+def stop_slurmdbd(quiet=False):
+    """Stops the Slurm DB daemon (slurmdbd).
+
+    This function may only be used in auto-config mode.
+
+    Args:
+        quiet (boolean): If True, logging is performed at the TRACE log level.
+
+    Returns:
+        None
+    """
+
+    if not properties["auto-config"]:
+        require_auto_config("wants to stop slurmdbd")
+
+    logging.debug("Stopping slurmdbd...")
+
+    # Stop slurmdbd
+    results = run_command(
+        "sacctmgr shutdown", user=properties["slurm-user"], quiet=quiet
+    )
+    if results["exit_code"] != 0:
+        pytest.fail(f"Command \"sacctmgr shutdown\" failed with rc={results['exit_code']}")
+
+    # Verify that slurmdbd is not running (we might have to wait for rollups to complete)
+    if not repeat_until(
+        lambda: pids_from_exe(f"{properties['slurm-sbin-dir']}/slurmdbd"),
+        lambda pids: len(pids) == 0,
+        timeout=60,
+    ):
+        failures.append("Slurmdbd is still running")
+    else:
+        logging.debug("Slurmdbd stopped successfully")
 
 
 def stop_slurm(fatal=True, quiet=False):
@@ -719,22 +796,7 @@ def stop_slurm(fatal=True, quiet=False):
         get_config_parameter("AccountingStorageType", live=False, quiet=quiet)
         == "accounting_storage/slurmdbd"
     ):
-        # Stop slurmdbd
-        results = run_command(
-            "sacctmgr shutdown", user=properties["slurm-user"], quiet=quiet
-        )
-        if results["exit_code"] != 0:
-            failures.append(
-                f"Command \"sacctmgr shutdown\" failed with rc={results['exit_code']}"
-            )
-
-        # Verify that slurmdbd is not running (we might have to wait for rollups to complete)
-        if not repeat_until(
-            lambda: pids_from_exe(f"{properties['slurm-sbin-dir']}/slurmdbd"),
-            lambda pids: len(pids) == 0,
-            timeout=60,
-        ):
-            failures.append("Slurmdbd is still running")
+        stop_slurmdbd(quiet)
 
     # Stop slurmctld and slurmds
     results = run_command(
@@ -750,7 +812,13 @@ def stop_slurm(fatal=True, quiet=False):
         lambda: pids_from_exe(f"{properties['slurm-sbin-dir']}/slurmctld"),
         lambda pids: len(pids) == 0,
     ):
-        failures.append("Slurmctld is still running")
+        pids = pids_from_exe(f"{properties['slurm-sbin-dir']}/slurmctld")
+        failures.append(f"Slurmctld is still running ({pids})")
+        logging.warning("Getting the bt of the still running slurmctld")
+        for pid in pids:
+            run_command(
+                f'sudo gdb -p {pid} -ex "set debuginfod enabled on" -ex "set pagination off" -ex "set confirm off" -ex "thread apply all bt" -ex "quit"'
+            )
 
     # Build list of slurmds
     slurmd_list = []
@@ -771,8 +839,12 @@ def stop_slurm(fatal=True, quiet=False):
         lambda pids: len(pids) == 0,
     ):
         pids = pids_from_exe(f"{properties['slurm-sbin-dir']}/slurmd")
-        run_command(f"pgrep -f {properties['slurm-sbin-dir']}/slurmd -a", quiet=quiet)
         failures.append(f"Some slurmds are still running ({pids})")
+        for pid in pids:
+            run_command(
+                f'sudo gdb -p {pid} -ex "set debuginfod enabled on" -ex "set pagination off" -ex "set confirm off" -ex "thread apply all bt" -ex "quit"'
+            )
+        run_command(f"pgrep -f {properties['slurm-sbin-dir']}/slurmd -a", quiet=quiet)
 
     # Stop slurmrestd if was started
     if properties["slurmrestd-started"]:
@@ -909,23 +981,26 @@ def require_openapi_generator(version="7.3.0"):
         )
 
     # allow pointing to an existing OpenAPI generated client
+    opath = module_tmp_path
     if "SLURM_TESTSUITE_OPENAPI_CLIENT" in os.environ:
-        pyapi_path = f"{os.environ['SLURM_TESTSUITE_OPENAPI_CLIENT']}/pyapi/"
-        spec_path = f"{os.environ['SLURM_TESTSUITE_OPENAPI_CLIENT']}/openapi.json"
-    else:
-        pyapi_path = f"{module_tmp_path}/pyapi/"
-        spec_path = f"{module_tmp_path}/openapi.json"
+        opath = os.environ["SLURM_TESTSUITE_OPENAPI_CLIENT"]
 
-        r = requests.get(
-            f"{properties['slurmrestd_url']}/openapi/v3",
-            headers=properties["slurmrestd-headers"],
-        )
+    pyapi_path = f"{opath}/pyapi/"
+    spec_path = f"{opath}/openapi.json"
+
+    # Always create path if needed
+    os.makedirs(opath, exist_ok=True)
+
+    if not os.path.exists(spec_path):
+        r = request_slurmrestd("openapi/v3")
         if r.status_code != 200:
             pytest.fail(f"Error requesting openapi specs from slurmrestd: {r}")
 
         with open(spec_path, "w") as f:
             f.write(r.text)
             f.close()
+
+    if not os.path.exists(pyapi_path):
         run_command(
             f"openapi-generator-cli generate -i '{spec_path}' -g python-pydantic-v1 --strict-spec=true -o '{pyapi_path}'",
             fatal=True,
@@ -1790,9 +1865,11 @@ def require_slurmrestd(openapi_plugins, data_parsers):
 def start_slurmrestd():
     os.environ["SLURM_JWT"] = "daemon"
     port = None
+    attempts = 0
 
-    while not port:
+    while not port and attempts < 15:
         port = get_open_port()
+        attempts += 1
         args = [
             "slurmrestd",
             "-a",
@@ -1833,6 +1910,9 @@ def start_slurmrestd():
         properties["slurmrestd"].kill()
         properties["slurmrestd"].wait()
         port = None
+
+    if not port:
+        pytest.fail(f"Unable start slurmrestd after trying {attempts} different ports")
 
     del os.environ["SLURM_JWT"]
 
@@ -2168,6 +2248,8 @@ def set_node_parameter(node_name, new_parameter_name, new_parameter_value):
 
         words = re.split(r" +", line.strip())
         if len(words) < 1:
+            continue
+        if words[0][0] == "#":
             continue
         parameter_name, parameter_value = words[0].split("=", 1)
         if parameter_name.lower() != "nodename":
@@ -3028,6 +3110,33 @@ def wait_for_step_accounted(job_id, step_id, **repeat_until_kwargs):
     )
 
 
+def wait_for_job_accounted(job_id, **repeat_until_kwargs):
+    """Wait for specified job to appear in accounting database (`sacct`).
+
+    Continuously polls the database until the job is accounted for or until a
+    timeout occurs.
+
+    Args:
+        job_id (integer): The id of the job.
+
+    Returns:
+        A boolean value indicating whether the specified job is accounted for
+        in the database or not.
+
+    Example:
+        >>> wait_for_job_accounted(1234, timeout=60, poll_interval=5, fatal=True)
+        True
+        >>> wait_for_job_accounted(5678, timeout=30)
+        False
+    """
+
+    return repeat_until(
+        lambda: run_command_output(f"sacct -Xj {job_id} -o JobID"),
+        lambda out: re.search(rf"{job_id}", out) is not None,
+        **repeat_until_kwargs,
+    )
+
+
 def wait_for_job_state(
     job_id,
     desired_job_state,
@@ -3682,9 +3791,6 @@ def backup_accounting_database():
 
     sql_dump_file = f"{str(module_tmp_path / '../../slurm_acct_db.sql')}"
 
-    # We set this here, because we will want to restore in all cases
-    properties["accounting-database-modified"] = True
-
     # If a dump already exists, issue a warning and return (honor existing dump)
     if os.path.isfile(sql_dump_file):
         logging.warning(f"Dump file already exists ({sql_dump_file})")
@@ -3717,21 +3823,15 @@ def backup_accounting_database():
     if not database_name:
         database_name = "slurm_acct_db"
 
-    # If the slurm database does not exist, touch an empty dump file with
-    # the sticky bit set. restore_accounting_database will remove the file.
     mysql_command = f"{mysql_path} {mysql_options} -e \"USE '{database_name}'\""
     if run_command_exit(mysql_command, quiet=True) != 0:
-        # logging.warning(f"Slurm accounting database ({database_name}) is not present")
-        run_command(f"touch {sql_dump_file}", fatal=True, quiet=True)
-        run_command(f"chmod 1000 {sql_dump_file}", fatal=True, quiet=True)
-
-    # Otherwise, copy the config file to the backup
+        logging.debug(f"Slurm accounting database ({database_name}) is not present")
     else:
         mysqldump_command = (
             f"{mysqldump_path} {mysql_options} {database_name} > {sql_dump_file}"
         )
         run_command(
-            mysqldump_command, fatal=True, quiet=True, timeout=default_sql_cmd_timeout
+            mysqldump_command, fatal=True, quiet=False, timeout=default_sql_cmd_timeout
         )
 
 
@@ -3750,17 +3850,7 @@ def restore_accounting_database():
         >>> restore_accounting_database() # Restores Slurm accounting database from previously created backup.
     """
 
-    if not properties["accounting-database-modified"] or not properties["auto-config"]:
-        return
-
-    sql_dump_file = f"{str(module_tmp_path / '../../slurm_acct_db.sql')}"
-
-    # If the dump file doesn't exist, it has probably already been
-    # restored by a previous call to restore_accounting_database
-    if not os.path.isfile(sql_dump_file):
-        logging.warning(
-            f"Slurm accounting database backup ({sql_dump_file}) is s not present. It has probably already been restored."
-        )
+    if not properties["auto-config"]:
         return
 
     mysql_path = shutil.which("mysql")
@@ -3795,33 +3885,42 @@ def restore_accounting_database():
     if database_password:
         base_command += f" -p {database_password}"
 
-    # If the sticky bit is set and the dump file is empty, remove the database.
-    # Otherwise, restore the dump.
+    # If DB exists, drop it and try to resore the dump file
+    mysql_command = f"{base_command} -e \"USE '{database_name}'\""
+    if run_command_exit(mysql_command, quiet=True) == 0:
+        run_command(
+            f'{base_command} -e "drop database {database_name}"',
+            fatal=True,
+            quiet=False,
+            timeout=default_sql_cmd_timeout,
+        )
 
-    run_command(
-        f'{base_command} -e "drop database {database_name}"',
-        fatal=True,
-        quiet=False,
-        timeout=default_sql_cmd_timeout,
-    )
+    sql_dump_file = f"{str(module_tmp_path / '../../slurm_acct_db.sql')}"
+
+    # If the dump file doesn't exist, it has probably already been
+    # restored by a previous call to restore_accounting_database
+    if not os.path.isfile(sql_dump_file):
+        logging.debug(
+            f"Slurm accounting database backup ({sql_dump_file}) is s not present. It has probably already been restored."
+        )
+        return
+
     dump_stat = os.stat(sql_dump_file)
     if not (dump_stat.st_size == 0 and dump_stat.st_mode & stat.S_ISVTX):
         run_command(
             f'{base_command} -e "create database {database_name}"',
             fatal=True,
-            quiet=True,
+            quiet=False,
         )
         run_command(
             f"{base_command} {database_name} < {sql_dump_file}",
             fatal=True,
-            quiet=True,
+            quiet=False,
             timeout=default_sql_cmd_timeout,
         )
 
     # In either case, remove the dump file
-    run_command(f"rm -f {sql_dump_file}", fatal=True, quiet=True)
-
-    properties["accounting-database-modified"] = False
+    run_command(f"rm -f {sql_dump_file}", fatal=True, quiet=False)
 
 
 def compile_against_libslurm(
@@ -4003,6 +4102,8 @@ def set_partition_parameter(partition_name, new_parameter_name, new_parameter_va
 
         words = re.split(r" +", line.strip())
         if len(words) < 1:
+            continue
+        if words[0][0] == "#":
             continue
         parameter_name, parameter_value = words[0].split("=", 1)
         if parameter_name.lower() != "partitionname":
@@ -4236,6 +4337,7 @@ properties["submitted-jobs"] = []
 properties["test-user"] = pwd.getpwuid(os.getuid()).pw_name
 properties["auto-config"] = False
 properties["allow-slurmdbd-modify"] = False
+properties["slurmrestd-started"] = False
 
 # Instantiate a nodes dictionary. These are populated in require_slurm_running.
 nodes = {}
