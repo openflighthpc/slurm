@@ -1,4 +1,4 @@
-.TH salloc "1" "Slurm Commands" "July 2024" "Slurm Commands"
+.TH salloc "1" "Slurm Commands" "December 2024" "Slurm Commands"
 
 .SH "NAME"
 salloc \- Obtain a Slurm job allocation (a set of nodes), execute a command,
@@ -589,7 +589,7 @@ slurm.conf file, otherwise the default value is zero (no delay).
 .TP
 \fB\-d\fR, \fB\-\-dependency\fR=<\fIdependency_list\fR>
 Defer the start of this job until the specified dependencies have been
-satisfied.
+satisfied. Once a dependency is satisfied, it is removed from the job.
 <\fIdependency_list\fR> is of the form
 <\fItype:job_id[:job_id][,type:job_id[:job_id]]\fR> or
 <\fItype:job_id[:job_id][?type:job_id[:job_id]]\fR>.
@@ -916,36 +916,6 @@ option applies to job allocations.
 .br
 \fBNOTE\fR: This option may implicitly set the number of tasks (if \fB\-n\fR
 was not specified) as one task per requested thread.
-.IP
-
-.TP
-\fB\-\-get\-user\-env\fR[=\fItimeout\fR][\fImode\fR]
-This option will load login environment variables for the user specified
-in the \fB\-\-uid\fR option.
-The environment variables are retrieved by running something along the lines of
-"su \- <username> \-c /usr/bin/env" and parsing the output.
-Be aware that any environment variables already set in salloc's environment
-will take precedence over any environment variables in the user's
-login environment.
-The optional \fItimeout\fR value is in seconds. Default value is 3 seconds.
-The optional \fImode\fR value controls the "su" options.
-With a \fImode\fR value of "S", "su" is executed without the "\-" option.
-With a \fImode\fR value of "L", "su" is executed with the "\-" option,
-replicating the login environment.
-If \fImode\fR is not specified, the mode established at Slurm build time
-is used.
-Examples of use include "\-\-get\-user\-env", "\-\-get\-user\-env=10"
-"\-\-get\-user\-env=10L", and "\-\-get\-user\-env=S".
-\fBNOTE\fR: This option only works if the caller has an
-effective uid of "root".
-.IP
-
-.TP
-\fB\-\-gid\fR=<\fIgroup\fR>
-Submit the job with the specified \fIgroup\fR's group access permissions.
-\fIgroup\fR may be the group name or the numerical group ID.
-In the default Slurm configuration, this option is only valid when used
-by the user root.
 .IP
 
 .TP
@@ -1420,8 +1390,7 @@ per task; \fB\-\-mem\-per\-cpu\fR will be reduced to a value no larger than
 \fBMaxMemPerCPU\fR; \fB\-\-cpus\-per\-task\fR will be set and the value of
 \fB\-\-cpus\-per\-task\fR multiplied by the new \fB\-\-mem\-per\-cpu\fR
 value will equal the original \fB\-\-mem\-per\-cpu\fR value specified by
-the user. If the user already specified a value for \fB\-\-cpus\-per\-task\fR,
-it will be respected and only the total amount of allocated CPUs will change.
+the user.
 This parameter would generally be used if individual processors
 are allocated to jobs (\fBSelectType=select/cons_tres\fR).
 If resources are allocated by core, socket, or whole nodes, then the number
@@ -1848,6 +1817,16 @@ instead of the node level.
 .IP
 
 .TP
+\fB\-\-oom\-kill\-step\fR[={0|1}]
+Whether to kill the entire step if an OOM event is detected in any task of a
+step. This overwrites the "OOMKillStep" setting in TaskPluginParam from
+slurm.conf. When unset it will use the setting in slurm.conf. When set, a value
+of "0" will disable killing the entire step, while a value of "1" will enable
+it. This applies to the entire allocation except for the external step.
+Default is "1" (enabled) when the option is found with no value.
+.IP
+
+.TP
 \fB\-O\fR, \fB\-\-overcommit\fR
 Overcommit resources.
 
@@ -1961,7 +1940,10 @@ Network (InfiniBand) data is collected.
 
 .TP
 \fB\-q\fR, \fB\-\-qos\fR=<\fIqos\fR>
-Request a quality of service for the job. QOS values can be defined
+Request a quality of service for the job, or comma separated list of QOS.
+If requesting a list it will be ordered based on the priority of the QOS given
+with the first being the highest priority.
+QOS values can be defined
 for each user/cluster/account association in the Slurm database.
 Users will be limited to their association's defined set of qos's when
 the Slurm configuration parameter, AccountingStorageEnforce, includes
@@ -2028,7 +2010,9 @@ By default, no signal is sent before the job's end time.
 If a \fIsig_num\fR is specified without any \fIsig_time\fR,
 the default time will be 60 seconds.
 Use the "R:" option to allow this job to overlap with a reservation with
-MaxStartDelay set.
+MaxStartDelay set. If the "R:" option is used, preemption must be enabled on the
+system, and if the job is preempted it will be requeued if allowed otherwise the
+job will be canceled.
 To have the signal sent at preemption time see the \fBsend_user_signal\fR
 \fBPreemptParameter\fR.
 .IP
@@ -2229,7 +2213,7 @@ affinity of the gres as specified in gres.conf's \fICores\fR parameter.
 \fB\-\-tres\-per\-task\fR=<\fIlist\fR>
 Specifies a comma\-delimited list of trackable resources required for the job on
 each task to be spawned in the job's resource allocation.
-The format for each entry in the list is "trestype[/tresname]:count".
+The format for each entry in the list is "trestype[/tresname]=count".
 The \fItrestype\fR is the type of trackable resource requested (e.g. cpu, gres,
 license, etc).
 The \fItresname\fR is the name of the trackable resource, as can be seen with
@@ -2253,10 +2237,10 @@ The count can have a suffix of
 .br
 Examples:
 .nf
-\-\-tres\-per\-task=cpu:4
-\-\-tres\-per\-task=cpu:8,license/ansys:1
-\-\-tres\-per\-task=gres/gpu:1
-\-\-tres\-per\-task=gres/gpu:a100:2
+\-\-tres\-per\-task=cpu=4
+\-\-tres\-per\-task=cpu=8,license/ansys=1
+\-\-tres\-per\-task=gres/gpu=1
+\-\-tres\-per\-task=gres/gpu:a100=2
 .fi
 The specified resources will be allocated to the job on each node.
 The available trackable resources are configurable by the system
@@ -2269,18 +2253,6 @@ with an explicit \-\-tres\-bind specification.
 \fBNOTE\fR: Invalid TRES for \-\-tres\-per\-task include
 bb,billing,energy,fs,mem,node,pages,vmem.
 .br
-.IP
-
-.TP
-\fB\-\-uid\fR=<\fIuser\fR>
-Attempt to submit and/or run a job as \fIuser\fR instead of the
-invoking user id. The invoking user's credentials will be used
-to check access permissions for the target partition. This option
-is only valid for user root. This option may be used by user root
-may use this option to run jobs as a normal user in a RootOnly
-partition for example. If run as root, \fBsalloc\fR will drop
-its permissions to the uid specified after node allocation is
-successful. \fIuser\fR may be the user name or numerical user ID.
 .IP
 
 .TP
@@ -2675,7 +2647,7 @@ Only set if the \fB\-\-cpus\-per\-gpu\fR option is specified.
 \fBSLURM_CPUS_PER_TASK\fR
 Number of CPUs requested per task.
 Only set if either the \fB\-\-cpus\-per\-task\fR option or the
-\fB\-\-tres\-per\-task=cpu:#\fR option is specified.
+\fB\-\-tres\-per\-task=cpu=#\fR option is specified.
 .IP
 
 .TP
@@ -2758,6 +2730,11 @@ Only set in batch and interactive jobs.
 .TP
 \fBSLURM_JOB_ID\fR
 The ID of the job allocation.
+.IP
+
+.TP
+\fBSLURM_JOB_LICENSES\fR
+Name and count of any license(s) requested.
 .IP
 
 .TP
@@ -2889,6 +2866,11 @@ Set to value of the \fB\-\-ntasks\-per\-node\fR option, if specified.
 .TP
 \fBSLURM_NTASKS_PER_SOCKET\fR
 Set to value of the \fB\-\-ntasks\-per\-socket\fR option, if specified.
+.IP
+
+.TP
+\fBSLURM_OOMKILLSTEP\fR
+Same as \fB\-\-oom\-kill\-step\fR
 .IP
 
 .TP

@@ -39,6 +39,7 @@
 #include "src/common/print_fields.h"
 #include "src/common/parse_time.h"
 #include "src/common/read_config.h"
+#include "src/common/sluid.h"
 
 int print_fields_parsable_print = 0;
 int print_fields_have_header = 1;
@@ -62,7 +63,7 @@ extern void destroy_print_field(void *object)
 	}
 }
 
-extern void print_fields_header(List print_fields_list)
+extern void print_fields_header(list_t *print_fields_list)
 {
 	list_itr_t *itr = NULL;
 	print_field_t *field = NULL;
@@ -417,14 +418,40 @@ extern void print_fields_time_from_secs(print_field_t *field,
 	}
 }
 
+extern void print_fields_sluid(print_field_t *field, void *input, int last)
+{
+	int abs_len = abs(field->len);
+	sluid_t sluid = 0;
+	char *sluid_str = NULL;
+
+	if (input)
+		sluid = *(sluid_t *) input;
+
+	sluid_str = sluid2str(sluid);
+
+	if ((print_fields_parsable_print == PRINT_FIELDS_PARSABLE_NO_ENDING)
+	    && last)
+		printf("%s", sluid_str);
+	else if (print_fields_parsable_print && !fields_delimiter)
+		printf("%s|", sluid_str);
+	else if (print_fields_parsable_print && fields_delimiter)
+		printf("%s%s", sluid_str, fields_delimiter);
+	else if (field->len == abs_len)
+		printf("%*s ", abs_len, sluid_str);
+	else
+		printf("%-*s ", abs_len, sluid_str);
+
+	xfree(sluid_str);
+}
+
 extern void print_fields_char_list(print_field_t *field, void *input, int last)
 {
 	int abs_len = abs(field->len);
 	char *print_this = NULL;
-	List value = NULL;
+	list_t *value = NULL;
 
 	if (input)
-		value = *(List *) input;
+		value = *(list_t **) input;
 
 	if (!value || !list_count(value)) {
 		if (print_fields_parsable_print)
@@ -459,6 +486,7 @@ static bool _is_wildcard(char *ptr)
 	switch (*ptr) {
 	case 'A': /* Array job ID */
 	case 'a': /* Array task ID */
+	case 'b': /* Array task ID modulo 10 */
 	case 'J': /* Jobid.stepid */
 	case 'j': /* Job ID */
 	case 'N': /* Short hostname */
@@ -487,6 +515,10 @@ static void _expand_wildcard(char **expanded, char **pos, char *ptr,
 	case 'a': /* Array task ID */
 		xstrfmtcatat(*expanded, pos, "%0*u", padding,
 			     job->array_task_id);
+		break;
+	case 'b': /* Array task ID modulo 10 */
+		xstrfmtcatat(*expanded, pos, "%0*u", padding,
+			     job->array_task_id % 10);
 		break;
 	case 'N': /* Short hostname */
 		xstrfmtcatat(*expanded, pos, "%s", job->first_step_node);

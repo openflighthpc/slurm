@@ -1,4 +1,4 @@
-.TH sacct "1" "Slurm Commands" "April 2024" "Slurm Commands"
+.TH sacct "1" "Slurm Commands" "November 2024" "Slurm Commands"
 
 .SH "NAME"
 sacct \- displays accounting data for all jobs and job steps in the
@@ -278,28 +278,29 @@ AveVMSize           BlockID             Cluster             Comment
 Constraints         ConsumedEnergy      ConsumedEnergyRaw   Container
 CPUTime             CPUTimeRAW          DBIndex             DerivedExitCode
 Elapsed             ElapsedRaw          Eligible            End
-ExitCode            FailedNode          Flags               GID
-Group               JobID               JobIDRaw            JobName
-Layout              MaxDiskRead         MaxDiskReadNode     MaxDiskReadTask
-MaxDiskWrite        MaxDiskWriteNode    MaxDiskWriteTask    MaxPages
-MaxPagesNode        MaxPagesTask        MaxRSS              MaxRSSNode
-MaxRSSTask          MaxVMSize           MaxVMSizeNode       MaxVMSizeTask
-McsLabel            MinCPU              MinCPUNode          MinCPUTask
-NCPUS               NNodes              NodeList            NTasks
-Partition           Planned             PlannedCPU          PlannedCPURAW
-Priority            QOS                 QOSRAW              Reason
-ReqCPUFreq          ReqCPUFreqGov       ReqCPUFreqMax       ReqCPUFreqMin
-ReqCPUS             ReqMem              ReqNodes            ReqTRES
-Reservation         ReservationId       Start               State
-StdErr              StdIn               StdOut              Submit
-SubmitLine          Suspended           SystemComment       SystemCPU
-Timelimit           TimelimitRaw        TotalCPU            TRESUsageInAve
-TRESUsageInMax      TRESUsageInMaxNode  TRESUsageInMaxTask  TRESUsageInMin
-TRESUsageInMinNode  TRESUsageInMinTask  TRESUsageInTot      TRESUsageOutAve
-TRESUsageOutMax     TRESUsageOutMaxNode TRESUsageOutMaxTask TRESUsageOutMin
-TRESUsageOutMinNode TRESUsageOutMinTask TRESUsageOutTot     UID
-User                UserCPU             WCKey               WCKeyID
-WorkDir
+ExitCode            Extra               FailedNode          Flags
+GID                 Group               JobID               JobIDRaw
+JobName             Layout              Licenses            MaxDiskRead
+MaxDiskReadNode     MaxDiskReadTask     MaxDiskWrite        MaxDiskWriteNode
+MaxDiskWriteTask    MaxPages            MaxPagesNode        MaxPagesTask
+MaxRSS              MaxRSSNode          MaxRSSTask          MaxVMSize
+MaxVMSizeNode       MaxVMSizeTask       McsLabel            MinCPU
+MinCPUNode          MinCPUTask          NCPUS               NNodes
+NodeList            NTasks              Partition           Planned
+PlannedCPU          PlannedCPURAW       Priority            QOS
+QOSRAW              QOSREQ              Reason              ReqCPUFreq
+ReqCPUFreqGov       ReqCPUFreqMax       ReqCPUFreqMin       ReqCPUS
+ReqMem              ReqNodes            ReqTRES             Reservation
+ReservationId       Restarts            SLUID               Start
+State               StdErr              StdIn               StdOut
+Submit              SubmitLine          Suspended           SystemComment
+SystemCPU           Timelimit           TimelimitRaw        TotalCPU
+TRESUsageInAve      TRESUsageInMax      TRESUsageInMaxNode  TRESUsageInMaxTask
+TRESUsageInMin      TRESUsageInMinNode  TRESUsageInMinTask  TRESUsageInTot
+TRESUsageOutAve     TRESUsageOutMax     TRESUsageOutMaxNode TRESUsageOutMaxTask
+TRESUsageOutMin     TRESUsageOutMinNode TRESUsageOutMinTask TRESUsageOutTot
+UID                 User                UserCPU             WCKey
+WCKeyID             WorkDir
 .ft 1
 .fi
 .RE
@@ -572,10 +573,12 @@ data_parser with parameters. Sorting and formatting arguments will be ignored.
 .IP
 
 .SS "Job Accounting Fields"
-Descriptions of each job accounting field can be found below.
+Descriptions of each field option can be found below.
 Note that the Ave*, Max* and Min* accounting fields look at the values for
 all the tasks of each step in a job and return the average, maximum or minimum
-values for the job step.
+values of the task for that job step. For example, for MaxRSS, the returned
+value is the maximum memory consumption seen by one of the tasks of the step,
+and MaxRSSTask shows which task it is.
 .RS
 .TP "10"
 \f3ALL\fP
@@ -1076,6 +1079,11 @@ Reservation Id.
 .IP
 
 .TP
+\f3Restarts\fP
+How many times this job has been requeued/restarted.
+.IP
+
+.TP
 \f3Start\fP
 Initiation time of the job. In the same format as \f3End\fP.
 .IP
@@ -1321,6 +1329,8 @@ The directory used by the job to execute commands.
 .IP
 
 .SH "JOB STATE CODES"
+The following states are recognized by sacct. A full list of possible states
+is available at <https://slurm.schedmd.com/job_state_codes.html>.
 
 .TP 20
 \f3BF  BOOT_FAIL\fR

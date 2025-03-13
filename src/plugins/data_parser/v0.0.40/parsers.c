@@ -45,6 +45,7 @@
 #include "src/common/data.h"
 #include "src/common/log.h"
 #include "src/common/net.h"
+#include "src/common/openapi.h"
 #include "src/common/parse_time.h"
 #include "src/common/proc_args.h"
 #include "src/common/read_config.h"
@@ -183,7 +184,7 @@ typedef struct {
 	data_t *parent_path;
 	const char *caller;
 	ssize_t index;
-	List qos_list;
+	list_t *qos_list;
 	args_t *args;
 } foreach_qos_string_id_t;
 
@@ -385,6 +386,17 @@ static void _check_flag_bit(int8_t i, const flag_bit_t *bit, bool *found_bit,
 	xassert(bit->type > FLAG_BIT_TYPE_INVALID);
 	xassert(bit->type < FLAG_BIT_TYPE_MAX);
 	xassert(bit->name && bit->name[0]);
+
+	if (bit->type == FLAG_BIT_TYPE_REMOVED) {
+		xassert(!bit->mask_size);
+		xassert(!bit->mask_name);
+		xassert(!bit->value);
+		xassert(!bit->flag_name);
+		xassert(!bit->flag_size);
+		xassert(bit->deprecated);
+		return;
+	}
+
 	/* mask must be set */
 	xassert(bit->mask);
 	xassert(bit->flag_size <= sizeof(bit->value));
@@ -443,6 +455,30 @@ extern void check_parser_funcname(const parser_t *const parser,
 	xassert(parser->model > PARSER_MODEL_INVALID);
 	xassert(parser->model < PARSER_MODEL_MAX);
 	xassert(parser->obj_type_string && parser->obj_type_string[0]);
+
+	if (parser->model == PARSER_MODEL_ALIAS) {
+		xassert(!parser->size);
+		xassert(!parser->field_name);
+		xassert(parser->ptr_offset == NO_VAL);
+		xassert(!parser->key);
+		xassert(!parser->deprecated);
+		xassert(!parser->flag_bit_array_count);
+		xassert(parser->type_string && parser->type_string[0]);
+		xassert(parser->list_type == DATA_PARSER_TYPE_INVALID);
+		xassert(!parser->fields);
+		xassert(!parser->field_count);
+		xassert(!parser->parse);
+		xassert(!parser->dump);
+		xassert(!parser->pointer_type);
+		xassert(!parser->array_type);
+		xassert(parser->obj_openapi == OPENAPI_FORMAT_INVALID);
+		xassert(parser->alias_type > DATA_PARSER_TYPE_INVALID);
+		xassert(parser->alias_type < DATA_PARSER_TYPE_MAX);
+		xassert(parser->alias_type != parser->type);
+		return;
+	}
+
+	xassert(parser->alias_type == DATA_PARSER_TYPE_INVALID);
 
 	if (parser->model == PARSER_MODEL_ARRAY_REMOVED_FIELD) {
 		xassert(!parser->size);
@@ -515,7 +551,7 @@ extern void check_parser_funcname(const parser_t *const parser,
 		xassert(parser->ptr_offset == NO_VAL);
 		xassert(!parser->pointer_type);
 		xassert(!parser->array_type);
-		xassert(!parser->obj_openapi);
+		xassert(parser->obj_openapi == OPENAPI_FORMAT_ARRAY);
 	} else if (parser->model == PARSER_MODEL_LIST) {
 		/* parser of a List */
 		xassert(parser->list_type > DATA_PARSER_TYPE_INVALID);
@@ -604,6 +640,11 @@ extern void check_parser_funcname(const parser_t *const parser,
 		xassert(!parser->obj_openapi);
 
 		switch (linked->model) {
+		case PARSER_MODEL_ALIAS:
+			xassert(linked->alias_type > DATA_PARSER_TYPE_INVALID);
+			xassert(linked->alias_type < DATA_PARSER_TYPE_MAX);
+			xassert(linked->alias_type != parser->type);
+			break;
 		case PARSER_MODEL_SIMPLE:
 			xassert(parser->field_name && parser->field_name[0]);
 			/* fall through */
@@ -1003,6 +1044,16 @@ static int DUMP_FUNC(QOS_PREEMPT_LIST)(const parser_t *const parser, void *obj,
 	return SLURM_SUCCESS;
 }
 
+/* Force loading of associations via NEED_ASSOC */
+static int _load_all_assocs(const parser_t *const parser, args_t *args)
+{
+	parser_t p = *parser;
+
+	p.needs |= NEED_ASSOC;
+
+	return load_prereqs(PARSING, &p, args);
+}
+
 static int PARSE_FUNC(ASSOC_ID)(const parser_t *const parser, void *obj,
 				data_t *src, args_t *args, data_t *parent_path)
 {
@@ -1028,7 +1079,21 @@ static int PARSE_FUNC(ASSOC_ID)(const parser_t *const parser, void *obj,
 				args)))
 			goto cleanup;
 
-		if ((match = list_find_first(args->assoc_list,
+		if (!args->assoc_list) {
+			/*
+			 * WARNING: This is a work around to always load the
+			 * associations when resolving an Association via
+			 * PARSE_FUNC(ASSOC_ID)() without having to rewrite the
+			 * association lookup code in slurmdb_helpers.[ch].
+			 */
+			int rc;
+
+			if ((rc = _load_all_assocs(parser, args)))
+				return rc;
+		}
+
+		if (args->assoc_list &&
+		    (match = list_find_first(args->assoc_list,
 					     (ListFindF) compare_assoc,
 					     &assoc_short))) {
 			assoc->id = match->id;
@@ -1050,7 +1115,8 @@ static int DUMP_FUNC(ASSOC_ID)(const parser_t *const parser, void *obj,
 	if (assoc->id && (assoc->id < NO_VAL)) {
 		slurmdb_assoc_rec_t *match;
 
-		if ((match = list_find_first(args->assoc_list,
+		if (args->assoc_list &&
+		    (match = list_find_first(args->assoc_list,
 					     (ListFindF) compare_assoc, assoc)))
 			return DUMP(ASSOC_SHORT_PTR, match, dst, args);
 	}
@@ -1100,12 +1166,19 @@ static int DUMP_FUNC(JOB_ASSOC_ID)(const parser_t *const parser, void *obj,
 		.cluster = job->cluster, .id = job->associd
 	};
 
-	xassert(args->assoc_list);
+	if (job->associd && (job->associd != NO_VAL)) {
+		int rc;
 
-	if (!job->associd || (job->associd == NO_VAL) ||
-	    !(assoc = list_find_first(args->assoc_list,
-				      (ListFindF) compare_assoc,
-				      &assoc_key))) {
+		if ((rc = _load_all_assocs(parser, args)))
+			return rc;
+
+		if (args->assoc_list)
+			assoc = list_find_first(args->assoc_list,
+						(ListFindF) compare_assoc,
+						&assoc_key);
+	}
+
+	if (!assoc) {
 		/*
 		 * The association is either invalid or unknown or deleted.
 		 * Since this is coming from Slurm internally, issue a warning
@@ -1117,9 +1190,9 @@ static int DUMP_FUNC(JOB_ASSOC_ID)(const parser_t *const parser, void *obj,
 			job->associd);
 		data_set_dict(dst);
 		return SLURM_SUCCESS;
-	} else {
-		return DUMP(ASSOC_SHORT_PTR, assoc, dst, args);
 	}
+
+	return DUMP(ASSOC_SHORT_PTR, assoc, dst, args);
 }
 
 static int _foreach_resolve_tres_id(void *x, void *arg)
@@ -2071,9 +2144,9 @@ static int DUMP_FUNC(FLOAT64_NO_VAL)(const parser_t *const parser, void *obj,
 	data_t *set, *inf, *num;
 
 	if (is_complex_mode(args)) {
-		if (isinf(*src))
+		if ((((uint32_t) *src) == INFINITE) || isinf(*src))
 			data_set_string(dst, "Infinity");
-		else if (isnan(*src))
+		else if ((((uint32_t) *src) == NO_VAL) || isnan(*src))
 			data_set_null(dst);
 		else
 			data_set_float(dst, *src);
@@ -2085,11 +2158,11 @@ static int DUMP_FUNC(FLOAT64_NO_VAL)(const parser_t *const parser, void *obj,
 	inf = data_key_set(dst, "infinite");
 	num = data_key_set(dst, "number");
 
-	if ((uint32_t) *src == INFINITE) {
+	if ((((uint32_t) *src) == INFINITE) || isinf(*src)) {
 		data_set_bool(set, false);
 		data_set_bool(inf, true);
 		data_set_float(num, 0);
-	} else if ((uint32_t) *src == NO_VAL) {
+	} else if ((((uint32_t) *src) == NO_VAL) || isnan(*src)) {
 		data_set_bool(set, false);
 		data_set_bool(inf, false);
 		data_set_float(num, 0);
@@ -4105,7 +4178,7 @@ static int PARSE_FUNC(HOSTLIST)(const parser_t *const parser, void *obj,
 		return SLURM_SUCCESS;
 
 	if (data_get_type(src) == DATA_TYPE_STRING) {
-		char *host_list_str = data_get_string(src);
+		const char *host_list_str = data_get_string(src);
 
 		if (!host_list_str || !host_list_str[0]) {
 			/* empty list -> no hostlist */
@@ -4846,17 +4919,17 @@ static int _parse_timestamp(const parser_t *const parser, time_t *time_ptr,
 	xassert(sizeof(t) == sizeof(uint64_t));
 
 	if (!src) {
-		*time_ptr = NO_VAL64;
+		*time_ptr = (time_t) NO_VAL64;
 		return SLURM_SUCCESS;
 	}
 
 	switch (data_get_type(src)) {
 	case DATA_TYPE_NULL:
-		*time_ptr = NO_VAL64;
+		*time_ptr = (time_t) NO_VAL64;
 		return SLURM_SUCCESS;
 	case DATA_TYPE_FLOAT:
 		if (isnan(data_get_float(src)) || isinf(data_get_float(src))) {
-			*time_ptr = NO_VAL64;
+			*time_ptr = (time_t) NO_VAL64;
 			return SLURM_SUCCESS;
 		}
 
@@ -4961,7 +5034,7 @@ static int PARSE_FUNC(JOB_CONDITION_SUBMIT_TIME)(const parser_t *const parser,
 {
 	int rc;
 	slurmdb_job_cond_t *cond = obj;
-	time_t t = NO_VAL64;
+	time_t t = (time_t) NO_VAL64;
 
 	if (data_get_type(src) == DATA_TYPE_NULL)
 		return SLURM_SUCCESS;
@@ -4981,7 +5054,7 @@ static int DUMP_FUNC(JOB_CONDITION_SUBMIT_TIME)(const parser_t *const parser,
 						args_t *args)
 {
 	slurmdb_job_cond_t *cond = obj;
-	time_t t = NO_VAL64;
+	time_t t = (time_t) NO_VAL64;
 
 	if (cond->flags & JOBCOND_FLAG_NO_DEFAULT_USAGE)
 		t = cond->usage_start;
@@ -6289,6 +6362,230 @@ static int DUMP_FUNC(ACCOUNT_CONDITION_WITH_DELETED_V40)(
 	return DUMP(BOOL, flag, dst, args);
 }
 
+static int PARSE_FUNC(QOS_CONDITION_WITH_DELETED_OLD)(
+	const parser_t *const parser, void *obj, data_t *src, args_t *args,
+	data_t *parent_path)
+{
+	slurmdb_qos_cond_t *cond = obj;
+	bool flag;
+	int rc;
+
+	if ((rc = PARSE(BOOL, flag, src, parent_path, args)))
+		return rc;
+
+	if (flag)
+		cond->flags |= QOS_COND_FLAG_WITH_DELETED;
+	else
+		cond->flags &= QOS_COND_FLAG_WITH_DELETED;
+
+	return SLURM_SUCCESS;
+}
+
+static int DUMP_FUNC(QOS_CONDITION_WITH_DELETED_OLD)(
+	const parser_t *const parser, void *obj, data_t *dst, args_t *args)
+{
+	slurmdb_qos_cond_t *cond = obj;
+	bool flag = cond->flags & QOS_COND_FLAG_WITH_DELETED;
+
+	return DUMP(BOOL, flag, dst, args);
+}
+
+static int PARSE_FUNC(ASSOC_CONDITION_WITH_DELETED_OLD)(
+	const parser_t *const parser, void *obj, data_t *src, args_t *args,
+	data_t *parent_path)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag;
+	int rc;
+
+	if ((rc = PARSE(BOOL, flag, src, parent_path, args)))
+		return rc;
+
+	if (flag)
+		cond->flags |= ASSOC_COND_FLAG_WITH_DELETED;
+	else
+		cond->flags &= ASSOC_COND_FLAG_WITH_DELETED;
+
+	return SLURM_SUCCESS;
+}
+
+static int DUMP_FUNC(ASSOC_CONDITION_WITH_DELETED_OLD)(
+	const parser_t *const parser, void *obj, data_t *dst, args_t *args)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag = cond->flags & ASSOC_COND_FLAG_WITH_DELETED;
+
+	return DUMP(BOOL, flag, dst, args);
+}
+
+static int PARSE_FUNC(ASSOC_CONDITION_WITH_USAGE_OLD)(
+	const parser_t *const parser, void *obj, data_t *src, args_t *args,
+	data_t *parent_path)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag;
+	int rc;
+
+	if ((rc = PARSE(BOOL, flag, src, parent_path, args)))
+		return rc;
+
+	if (flag)
+		cond->flags |= ASSOC_COND_FLAG_WITH_USAGE;
+	else
+		cond->flags &= ASSOC_COND_FLAG_WITH_USAGE;
+
+	return SLURM_SUCCESS;
+}
+
+static int DUMP_FUNC(ASSOC_CONDITION_WITH_USAGE_OLD)(
+	const parser_t *const parser, void *obj, data_t *dst, args_t *args)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag = cond->flags & ASSOC_COND_FLAG_WITH_USAGE;
+
+	return DUMP(BOOL, flag, dst, args);
+}
+
+static int PARSE_FUNC(ASSOC_CONDITION_ONLY_DEFS_OLD)(
+	const parser_t *const parser, void *obj, data_t *src, args_t *args,
+	data_t *parent_path)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag;
+	int rc;
+
+	if ((rc = PARSE(BOOL, flag, src, parent_path, args)))
+		return rc;
+
+	if (flag)
+		cond->flags |= ASSOC_COND_FLAG_ONLY_DEFS;
+	else
+		cond->flags &= ASSOC_COND_FLAG_ONLY_DEFS;
+
+	return SLURM_SUCCESS;
+}
+
+static int DUMP_FUNC(ASSOC_CONDITION_ONLY_DEFS_OLD)(
+	const parser_t *const parser, void *obj, data_t *dst, args_t *args)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag = cond->flags & ASSOC_COND_FLAG_ONLY_DEFS;
+
+	return DUMP(BOOL, flag, dst, args);
+}
+
+static int PARSE_FUNC(ASSOC_CONDITION_RAW_QOS_OLD)(
+	const parser_t *const parser, void *obj, data_t *src, args_t *args,
+	data_t *parent_path)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag;
+	int rc;
+
+	if ((rc = PARSE(BOOL, flag, src, parent_path, args)))
+		return rc;
+
+	if (flag)
+		cond->flags |= ASSOC_COND_FLAG_RAW_QOS;
+	else
+		cond->flags &= ASSOC_COND_FLAG_RAW_QOS;
+
+	return SLURM_SUCCESS;
+}
+
+static int DUMP_FUNC(ASSOC_CONDITION_RAW_QOS_OLD)(
+	const parser_t *const parser, void *obj, data_t *dst, args_t *args)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag = cond->flags & ASSOC_COND_FLAG_RAW_QOS;
+
+	return DUMP(BOOL, flag, dst, args);
+}
+
+static int PARSE_FUNC(ASSOC_CONDITION_SUB_ACCTS_OLD)(
+	const parser_t *const parser, void *obj, data_t *src, args_t *args,
+	data_t *parent_path)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag;
+	int rc;
+
+	if ((rc = PARSE(BOOL, flag, src, parent_path, args)))
+		return rc;
+
+	if (flag)
+		cond->flags |= ASSOC_COND_FLAG_SUB_ACCTS;
+	else
+		cond->flags &= ASSOC_COND_FLAG_SUB_ACCTS;
+
+	return SLURM_SUCCESS;
+}
+
+static int DUMP_FUNC(ASSOC_CONDITION_SUB_ACCTS_OLD)(
+	const parser_t *const parser, void *obj, data_t *dst, args_t *args)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag = cond->flags & ASSOC_COND_FLAG_SUB_ACCTS;
+
+	return DUMP(BOOL, flag, dst, args);
+}
+
+static int PARSE_FUNC(ASSOC_CONDITION_WOPI_OLD)(
+	const parser_t *const parser, void *obj, data_t *src, args_t *args,
+	data_t *parent_path)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag;
+	int rc;
+
+	if ((rc = PARSE(BOOL, flag, src, parent_path, args)))
+		return rc;
+
+	if (flag)
+		cond->flags |= ASSOC_COND_FLAG_WOPI;
+	else
+		cond->flags &= ASSOC_COND_FLAG_WOPI;
+
+	return SLURM_SUCCESS;
+}
+
+static int DUMP_FUNC(ASSOC_CONDITION_WOPI_OLD)(
+	const parser_t *const parser, void *obj, data_t *dst, args_t *args)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag = cond->flags & ASSOC_COND_FLAG_WOPI;
+
+	return DUMP(BOOL, flag, dst, args);
+}
+
+static int PARSE_FUNC(ASSOC_CONDITION_WOPL_OLD)(
+	const parser_t *const parser, void *obj, data_t *src, args_t *args,
+	data_t *parent_path)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag;
+	int rc;
+
+	if ((rc = PARSE(BOOL, flag, src, parent_path, args)))
+		return rc;
+
+	if (flag)
+		cond->flags |= ASSOC_COND_FLAG_WOPL;
+	else
+		cond->flags &= ASSOC_COND_FLAG_WOPL;
+
+	return SLURM_SUCCESS;
+}
+
+static int DUMP_FUNC(ASSOC_CONDITION_WOPL_OLD)(
+	const parser_t *const parser, void *obj, data_t *dst, args_t *args)
+{
+	slurmdb_assoc_cond_t *cond = obj;
+	bool flag = cond->flags & ASSOC_COND_FLAG_WOPL;
+
+	return DUMP(BOOL, flag, dst, args);
+}
+
 /*
  * The following struct arrays are not following the normal Slurm style but are
  * instead being treated as piles of data instead of code.
@@ -6445,6 +6742,13 @@ static int DUMP_FUNC(ACCOUNT_CONDITION_WITH_DELETED_V40)(
 	.flag_size = sizeof(flag_value),                              \
 	.hidden = hidden_flag,                                        \
 	.description = desc_str,                                      \
+}
+#define add_flag_removed(flag_string, deprec)                         \
+{                                                                     \
+	.magic = MAGIC_FLAG_BIT,                                      \
+	.type = FLAG_BIT_TYPE_REMOVED,                                \
+	.name = flag_string,                                          \
+	.deprecated = deprec,                                         \
 }
 
 #define add_parse(mtype, field, path, desc) \
@@ -7564,7 +7868,11 @@ static const parser_t PARSER_ARRAY(JOB_INFO)[] = {
 	add_parse_overload(HOLD, priority, 1, "hold", "Hold (true) or release (false) job"),
 	add_parse_overload(UINT32_NO_VAL, priority, 1, "priority", "Request specific job priority"),
 	add_parse(ACCT_GATHER_PROFILE, profile, "profile", "Profile used by the acct_gather_profile plugin"),
-	add_parse(QOS_NAME, qos, "qos", "Quality of Service assigned to the job"),
+	/*
+	 * This field could also be QOS_NAME but we want to avoid NEED_QOS for
+	 * dumping since there is nothing that currently parses this field.
+	 */
+	add_parse(STRING, qos, "qos", "Quality of Service assigned to the job, if pending the QOS requested"),
 	add_parse(BOOL, reboot, "reboot", "Node reboot requested before start"),
 	add_parse(STRING, req_nodes, "required_nodes", "Comma separated list of required nodes"),
 	add_skip(req_node_inx),
@@ -7578,7 +7886,7 @@ static const parser_t PARSER_ARRAY(JOB_INFO)[] = {
 	add_parse_overload(JOB_SHARED, shared, 2, "shared", "How the job can share resources with other jobs, if at all"),
 	add_parse_deprec(JOB_EXCLUSIVE, shared, 2, "exclusive", NULL, SLURM_23_11_PROTOCOL_VERSION),
 	add_parse_deprec(BOOL16, shared, 2, "oversubscribe", NULL, SLURM_23_11_PROTOCOL_VERSION),
-	add_parse_bit_flag_array(slurm_job_info_t, JOB_SHOW_FLAGS, false, show_flags, "show_flags", "Job details shown in this response"),
+	add_removed(JOB_SHOW_FLAGS, "show_flags", NULL, SLURM_24_11_PROTOCOL_VERSION),
 	add_parse(UINT16, sockets_per_board, "sockets_per_board", "Number of sockets per board required"),
 	add_parse(UINT16_NO_VAL, sockets_per_node, "sockets_per_node", "Number of sockets per node required"),
 	add_parse(TIMESTAMP_NO_VAL, start_time, "start_time", "Time execution began, or is expected to begin (UNIX timestamp)"),
@@ -7919,7 +8227,7 @@ static const flag_bit_t PARSER_FLAG_ARRAY(CPU_BINDING_FLAGS)[] = {
 	add_flag_equal(CPU_BIND_TO_SOCKETS, CPU_BIND_T_TO_MASK, "CPU_BIND_TO_SOCKETS"),
 	add_flag_equal(CPU_BIND_TO_LDOMS, CPU_BIND_T_TO_MASK, "CPU_BIND_TO_LDOMS"),
 	add_flag_equal(CPU_BIND_NONE, CPU_BIND_T_MASK, "CPU_BIND_NONE"),
-	add_flag_equal(CPU_BIND_RANK, CPU_BIND_T_MASK, "CPU_BIND_RANK"),
+	add_flag_removed("CPU_BIND_RANK", SLURM_24_11_PROTOCOL_VERSION),
 	add_flag_equal(CPU_BIND_MAP, CPU_BIND_T_MASK, "CPU_BIND_MAP"),
 	add_flag_equal(CPU_BIND_MASK, CPU_BIND_T_MASK, "CPU_BIND_MASK"),
 	add_flag_equal(CPU_BIND_LDRANK, CPU_BIND_T_MASK, "CPU_BIND_LDRANK"),
@@ -8229,7 +8537,7 @@ static const parser_t PARSER_ARRAY(OPENAPI_WARNING)[] = {
 static const parser_t PARSER_ARRAY(INSTANCE_CONDITION)[] = {
 	add_parse(CSV_STRING_LIST, cluster_list, "cluster", "CSV clusters list"),
 	add_parse(CSV_STRING_LIST, extra_list, "extra", "CSV extra list"),
-	add_parse(CSV_STRING_LIST, format_list, "format", "CSV format list"),
+	add_parse(CSV_STRING_LIST, format_list, "format", "Ignored; process JSON manually to control output format"),
 	add_parse(CSV_STRING_LIST, instance_id_list, "instance_id", "CSV instance_id list"),
 	add_parse(CSV_STRING_LIST, instance_type_list, "instance_type", "CSV instance_type list"),
 	add_parse(STRING, node_list, "node_list", "Ranged node string"),
@@ -8304,7 +8612,7 @@ static const parser_t PARSER_ARRAY(JOB_CONDITION)[] = {
 	add_flags(JOB_CONDITION_DB_FLAGS, db_flags),
 	add_parse(INT32, exitcode, "exit_code", "Job exit code (numeric)"),
 	add_flags(JOB_CONDITION_FLAGS, flags),
-	add_parse(CSV_STRING_LIST, format_list, "format", "CSV format list"),
+	add_parse(CSV_STRING_LIST, format_list, "format", "Ignored; process JSON manually to control output format"),
 	add_parse(GROUP_ID_STRING_LIST, groupid_list, "groups", "CSV group list"),
 	add_parse(CSV_STRING_LIST, jobname_list, "job_name", "CSV job name list"),
 	add_parse(UINT32_NO_VAL, nodes_max, "nodes_max", "Maximum number of nodes"),
@@ -8329,17 +8637,20 @@ static const parser_t PARSER_ARRAY(JOB_CONDITION)[] = {
 #undef add_cparse
 #undef add_flags
 
+#define add_cparse(mtype, path, desc) \
+	add_complex_parser(slurmdb_qos_cond_t, mtype, false, path, desc)
 #define add_parse(mtype, field, path, desc) \
 	add_parser(slurmdb_qos_cond_t, mtype, false, field, 0, path, desc)
 static const parser_t PARSER_ARRAY(QOS_CONDITION)[] = {
 	add_parse(CSV_STRING_LIST, description_list, "description", "CSV description list"),
 	add_parse(QOS_ID_STRING_CSV_LIST, id_list, "id", "CSV QOS id list"),
-	add_parse(CSV_STRING_LIST, format_list, "format", "CSV format list"),
+	add_parse(CSV_STRING_LIST, format_list, "format", "Ignored; process JSON manually to control output format"),
 	add_parse(QOS_NAME_CSV_LIST, name_list, "name", "CSV QOS name list"),
 	add_parse_bit_flag_array(slurmdb_qos_cond_t, QOS_PREEMPT_MODES, false, preempt_mode, "preempt_mode", "PreemptMode used when jobs in this QOS are preempted"),
-	add_parse(BOOL16, with_deleted, "with_deleted", "Include deleted QOS"),
+	add_cparse(QOS_CONDITION_WITH_DELETED_OLD, "with_deleted", "Include deleted QOS"),
 };
 #undef add_parse
+#undef add_cparse
 
 #define add_skip(field) \
 	add_parser_skip(slurmdb_add_assoc_cond_t, field)
@@ -8387,29 +8698,32 @@ static const parser_t PARSER_ARRAY(USERS_ADD_COND)[] = {
 #undef add_parse_req
 #undef add_skip
 
+#define add_cparse(mtype, path, desc) \
+	add_complex_parser(slurmdb_qos_cond_t, mtype, false, path, desc)
 #define add_parse(mtype, field, path, desc) \
 	add_parser(slurmdb_assoc_cond_t, mtype, false, field, 0, path, desc)
 static const parser_t PARSER_ARRAY(ASSOC_CONDITION)[] = {
 	add_parse(CSV_STRING_LIST, acct_list, "account", "CSV accounts list"),
 	add_parse(CSV_STRING_LIST, cluster_list, "cluster", "CSV clusters list"),
 	add_parse(QOS_ID_STRING_CSV_LIST, def_qos_id_list, "default_qos", "CSV QOS list"),
-	add_parse(CSV_STRING_LIST, format_list, "format", "CSV format list"),
+	add_parse(CSV_STRING_LIST, format_list, "format", "Ignored; process JSON manually to control output format"),
 	add_parse(ASSOC_ID_STRING_CSV_LIST, id_list, "id", "CSV id list"),
-	add_parse(BOOL16, only_defs, "only_defaults", "Filter to only defaults"),
+	add_cparse(ASSOC_CONDITION_ONLY_DEFS_OLD, "only_defaults", "Filter to only defaults"),
 	add_parse(CSV_STRING_LIST, parent_acct_list, "parent_account", "CSV names of parent account"),
 	add_parse(CSV_STRING_LIST, partition_list, "partition", "CSV partition name list"),
 	add_parse(QOS_ID_STRING_CSV_LIST, qos_list, "qos", "CSV QOS list"),
 	add_parse(TIMESTAMP, usage_end, "usage_end", "Usage end (UNIX timestamp)"),
 	add_parse(TIMESTAMP, usage_start, "usage_start", "Usage start (UNIX timestamp)"),
 	add_parse(CSV_STRING_LIST, user_list, "user", "CSV user list"),
-	add_parse(BOOL16, with_usage, "with_usage", "Include usage"),
-	add_parse(BOOL16, with_deleted, "with_deleted", "Include deleted associations"),
-	add_parse(BOOL16, with_raw_qos, "with_raw_qos", "Include a raw qos or delta_qos"),
-	add_parse(BOOL16, with_sub_accts, "with_sub_accts", "Include sub acct information also"),
-	add_parse(BOOL16, without_parent_info, "without_parent_info", "Exclude parent id/name"),
-	add_parse(BOOL16, without_parent_limits, "without_parent_limits", "Exclude limits from parents"),
+	add_cparse(ASSOC_CONDITION_WITH_USAGE_OLD, "with_usage", "Include usage"),
+	add_cparse(ASSOC_CONDITION_WITH_DELETED_OLD, "with_deleted", "Include deleted associations"),
+	add_cparse(ASSOC_CONDITION_RAW_QOS_OLD, "with_raw_qos", "Include a raw qos or delta_qos"),
+	add_cparse(ASSOC_CONDITION_SUB_ACCTS_OLD, "with_sub_accts", "Include sub acct information also"),
+	add_cparse(ASSOC_CONDITION_WOPI_OLD, "without_parent_info", "Exclude parent id/name"),
+	add_cparse(ASSOC_CONDITION_WOPL_OLD, "without_parent_limits", "Exclude limits from parents"),
 };
 #undef add_parse
+#undef add_cparse
 
 #define add_parse(mtype, field, path, desc) \
 	add_parser(slurmdb_user_cond_t, mtype, false, field, 0, path, desc)
@@ -8461,7 +8775,7 @@ static const parser_t PARSER_ARRAY(OPENAPI_WCKEY_PARAM)[] = {
 	add_parser(slurmdb_wckey_cond_t, mtype, false, field, 0, path, desc)
 static const parser_t PARSER_ARRAY(WCKEY_CONDITION)[] = {
 	add_parse(CSV_STRING_LIST, cluster_list, "cluster", "CSV cluster name list"),
-	add_parse(CSV_STRING_LIST, format_list, "format", "CSV format name list"),
+	add_parse(CSV_STRING_LIST, format_list, "format", "Ignored; process JSON manually to control output format"),
 	add_parse(CSV_STRING_LIST, id_list, "id", "CSV id list"),
 	add_parse(CSV_STRING_LIST, name_list, "name", "CSV name list"),
 	add_parse(BOOL16, only_defs, "only_defaults", "Only query defaults"),
@@ -8490,7 +8804,7 @@ static const parser_t PARSER_ARRAY(OPENAPI_ACCOUNT_QUERY)[] = {
 #undef add_parse
 
 #define add_cparse(mtype, path, desc) \
-	add_complex_parser(shares_response_msg_t, mtype, false, path, desc)
+	add_complex_parser(slurmdb_account_cond_t, mtype, false, path, desc)
 #define add_parse(mtype, field, path, desc) \
 	add_parser(slurmdb_account_cond_t , mtype, false, field, 0, path, desc)
 static const parser_t PARSER_ARRAY(ACCOUNT_CONDITION)[] = {
@@ -8524,7 +8838,7 @@ static const parser_t PARSER_ARRAY(CLUSTER_CONDITION)[] = {
 	add_parse(STRING_LIST, cluster_list, "cluster", "CSV cluster list"),
 	add_parse(STRING_LIST, federation_list, "federation", "CSV federation list"),
 	add_parse_bit_flag_array(slurmdb_cluster_cond_t, CLUSTER_REC_FLAGS, false, flags, "flags", "Query flags"),
-	add_parse(STRING_LIST, format_list, "format", "CSV format list"),
+	add_parse(STRING_LIST, format_list, "format", "Ignored; process JSON manually to control output format"),
 	add_parse(STRING_LIST, rpc_version_list, "rpc_version", "CSV RPC version list"),
 	add_parse(TIMESTAMP, usage_end, "usage_end", "Usage end (UNIX timestamp)"),
 	add_parse(TIMESTAMP, usage_start, "usage_start", "Usage start (UNIX timestamp)"),
@@ -8630,7 +8944,6 @@ static const flag_bit_t PARSER_FLAG_ARRAY(JOB_STATE)[] = {
 	add_flag_eq(JOB_OOM, JOB_STATE_BASE, "OUT_OF_MEMORY", false, "experienced out of memory error"),
 	add_flag_eq(JOB_END, JOB_STATE_BASE, "invalid-placeholder", true, NULL),
 	add_flag(JOB_LAUNCH_FAILED, JOB_STATE_FLAGS, "LAUNCH_FAILED", false, "job launch failed"),
-	add_flag(JOB_UPDATE_DB, JOB_STATE_FLAGS, "UPDATE_DB", false, "Send job start to database again"),
 	add_flag(JOB_REQUEUE, JOB_STATE_FLAGS, "REQUEUED", false, "Requeue job in completing state"),
 	add_flag(JOB_REQUEUE_HOLD, JOB_STATE_FLAGS, "REQUEUE_HOLD", false, "Requeue any job in hold"),
 	add_flag(JOB_SPECIAL_EXIT, JOB_STATE_FLAGS, "SPECIAL_EXIT", false, "Requeue an exit job in hold"),
@@ -9125,6 +9438,18 @@ static const parser_t PARSER_ARRAY(OPENAPI_JOB_STATE_RESP)[] = {
 		.field_count = ARRAY_SIZE(PARSER_ARRAY(typev)),                \
 		.ptr_offset = NO_VAL,                                          \
 	}
+/* add parser alias */
+#define addalias(typev, typea)                                                 \
+	{                                                                      \
+		.magic = MAGIC_PARSER,                                         \
+		.model = PARSER_MODEL_ALIAS,                                   \
+		.type = DATA_PARSER_##typev,                                   \
+		.type_string = XSTRINGIFY(DATA_PARSER_ ## typev),              \
+		.obj_type_string = XSTRINGIFY(typea),                          \
+		.obj_openapi = OPENAPI_FORMAT_INVALID,                         \
+		.alias_type = DATA_PARSER_##typea,                             \
+		.ptr_offset = NO_VAL,                                          \
+	}
 /* add parser array (for struct) and pointer for parser array */
 #define addpap(typev, typet, newf, freef)                                      \
 	addpa(typev, typet),                                      \
@@ -9269,7 +9594,7 @@ static const parser_t PARSER_ARRAY(OPENAPI_JOB_STATE_RESP)[] = {
 		.type_string = XSTRINGIFY(DATA_PARSER_ ## typev),              \
 		.obj_desc = desc,                                              \
 		.obj_type_string = XSTRINGIFY(typet),                          \
-		.obj_openapi = OPENAPI_FORMAT_INVALID,                         \
+		.obj_openapi = OPENAPI_FORMAT_ARRAY,                           \
 		.size = sizeof(typet),                                         \
 		.needs = need,                                                 \
 		.parse = PARSE_FUNC(typev),                                    \
@@ -9317,6 +9642,7 @@ static const parser_t PARSER_ARRAY(OPENAPI_JOB_STATE_RESP)[] = {
 		.type = DATA_PARSER_##typev,                                   \
 		.type_string = XSTRINGIFY(DATA_PARSER_ ## typev),              \
 		.obj_type_string = XSTRINGIFY(typet),                          \
+		.obj_openapi = OPENAPI_FORMAT_ARRAY,                           \
 		.size = sizeof(typet),                                         \
 		.needs = NEED_NONE,                                            \
 		.flag_bit_array = PARSER_FLAG_ARRAY(typev),                    \
@@ -9415,8 +9741,8 @@ static const parser_t parsers[] = {
 	addpsp(JOB_DESC_MSG_CRON_ENTRY, CRON_ENTRY_PTR, cron_entry_t *, NEED_NONE, "crontab entry"),
 
 	/* Complex type parsers */
-	addpcp(ASSOC_ID, ASSOC_SHORT, slurmdb_assoc_rec_t, NEED_ASSOC, "Association ID"),
-	addpcp(JOB_ASSOC_ID, ASSOC_SHORT_PTR, slurmdb_job_rec_t, NEED_ASSOC, NULL),
+	addpcp(ASSOC_ID, ASSOC_SHORT, slurmdb_assoc_rec_t, NEED_NONE, "Association ID"),
+	addpcp(JOB_ASSOC_ID, ASSOC_SHORT_PTR, slurmdb_job_rec_t, NEED_NONE, NULL),
 	addpca(QOS_PREEMPT_LIST, STRING, slurmdb_qos_rec_t, NEED_QOS, NULL),
 	addpcp(STEP_NODES, HOSTLIST, slurmdb_step_rec_t, NEED_TRES, NULL),
 	addpca(STEP_TRES_REQ_MAX, TRES, slurmdb_step_rec_t, NEED_TRES, NULL),
@@ -9477,6 +9803,14 @@ static const parser_t parsers[] = {
 	addpcp(ACCOUNT_CONDITION_WITH_ASSOC_V40, BOOL, slurmdb_account_cond_t, NEED_NONE, NULL),
 	addpcp(ACCOUNT_CONDITION_WITH_WCOORD_V40, BOOL, slurmdb_account_cond_t, NEED_NONE, NULL),
 	addpcp(ACCOUNT_CONDITION_WITH_DELETED_V40, BOOL, slurmdb_account_cond_t, NEED_NONE, NULL),
+	addpcp(QOS_CONDITION_WITH_DELETED_OLD, BOOL, slurmdb_qos_cond_t, NEED_NONE, NULL),
+	addpcp(ASSOC_CONDITION_WITH_DELETED_OLD, BOOL, slurmdb_assoc_cond_t, NEED_NONE, NULL),
+	addpcp(ASSOC_CONDITION_WITH_USAGE_OLD, BOOL, slurmdb_assoc_cond_t, NEED_NONE, NULL),
+	addpcp(ASSOC_CONDITION_ONLY_DEFS_OLD, BOOL, slurmdb_assoc_cond_t, NEED_NONE, NULL),
+	addpcp(ASSOC_CONDITION_RAW_QOS_OLD, BOOL, slurmdb_assoc_cond_t, NEED_NONE, NULL),
+	addpcp(ASSOC_CONDITION_SUB_ACCTS_OLD, BOOL, slurmdb_assoc_cond_t, NEED_NONE, NULL),
+	addpcp(ASSOC_CONDITION_WOPI_OLD, BOOL, slurmdb_assoc_cond_t, NEED_NONE, NULL),
+	addpcp(ASSOC_CONDITION_WOPL_OLD, BOOL, slurmdb_assoc_cond_t, NEED_NONE, NULL),
 
 	/* Removed parsers */
 	addr(EXT_SENSORS_DATA, void *, OBJECT, SLURM_24_05_PROTOCOL_VERSION),
@@ -9633,6 +9967,7 @@ static const parser_t parsers[] = {
 	addpap(OPENAPI_STEP_INFO_MSG, openapi_resp_job_step_info_msg_t, NULL, NULL),
 	addpap(OPENAPI_JOB_STATE_RESP, openapi_resp_job_state_t, NULL, NULL),
 	addoar(OPENAPI_KILL_JOBS_RESP),
+	addalias(OPENAPI_KILL_JOB_RESP, OPENAPI_RESP),
 
 	/* Flag bit arrays */
 	addfa(ASSOC_FLAGS, slurmdb_assoc_flags_t),
@@ -9726,6 +10061,21 @@ extern const parser_t *const find_parser_by_type(type_t type)
 			return &parsers[i];
 
 	return NULL;
+}
+
+extern const parser_t *unalias_parser(const parser_t *parser)
+{
+	if (!parser)
+		return NULL;
+
+	while (parser->pointer_type || parser->alias_type) {
+		if (parser->pointer_type)
+			parser = find_parser_by_type(parser->pointer_type);
+		if (parser->alias_type)
+			parser = find_parser_by_type(parser->alias_type);
+	}
+
+	return parser;
 }
 
 extern void parsers_init(void)

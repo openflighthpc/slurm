@@ -57,10 +57,15 @@ typedef struct avail_res {	/* Per-node resource availability */
 	uint16_t max_cpus;	/* Maximum available CPUs on the node */
 	uint16_t min_cpus;	/* Minimum allocated CPUs */
 	uint16_t sock_cnt;	/* Number of sockets on this node */
-	List sock_gres_list;	/* Per-socket GRES availability, sock_gres_t */
+	list_t *sock_gres_list;	/* Per-socket GRES availability, sock_gres_t */
 	uint16_t spec_threads;	/* Specialized threads to be reserved */
 	uint16_t tpc;		/* Threads/cpus per core */
 } avail_res_t;
+
+typedef struct will_run_data {
+	time_t start;
+	time_t end;
+} will_run_data_t;
 
 /* Convert a node coordinate character into its equivalent number:
  * '0' = 0; '9' = 9; 'A' = 10; etc. */
@@ -133,7 +138,7 @@ extern int select_g_node_init(void);
  * slurmctld and used to synchronize any job state.
  * IN job_list - List of Slurm jobs from slurmctld
  */
-extern int select_g_job_init(List job_list);
+extern int select_g_job_init(list_t *job_list);
 
 /* Note reconfiguration or change in partition configuration */
 extern int select_g_reconfigure(void);
@@ -322,14 +327,16 @@ extern int select_g_select_jobinfo_get(dynamic_plugin_data_t *jobinfo,
  *		if mode=SELECT_MODE_TEST_ONLY or input pointer is NULL.
  *		Existing list is appended to.
  * IN resv_exc_ptr - Various TRES which the job can NOT use.
+ * IN will_run_ptr - Pointer to data specific to WILL_RUN mode
  * RET zero on success, EINVAL otherwise
  */
 extern int select_g_job_test(job_record_t *job_ptr, bitstr_t *bitmap,
 			     uint32_t min_nodes, uint32_t max_nodes,
 			     uint32_t req_nodes, uint16_t mode,
-			     List preemptee_candidates,
-			     List *preemptee_job_list,
-			     resv_exc_t *resv_exc_ptr);
+			     list_t *preemptee_candidates,
+			     list_t **preemptee_job_list,
+			     resv_exc_t *resv_exc_ptr,
+			     will_run_data_t *will_run_ptr);
 
 /*
  * Note initiation of job is about to begin. Called immediately

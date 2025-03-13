@@ -286,9 +286,10 @@ static sock_gres_t *_build_sock_gres_by_topo(
 			}
 		}
 
-		if (!gres_ns->topo_core_bitmap ||
-		    !gres_ns->topo_core_bitmap[i] ||
-		    use_all_sockets) {
+		if (gres_ns->topo_gres_bitmap[i] &&
+		    (!gres_ns->topo_core_bitmap ||
+		     !gres_ns->topo_core_bitmap[i] ||
+		     use_all_sockets)) {
 			/*
 			 * Not constrained by core, but only specific
 			 * GRES may be available (save their bitmap)
@@ -592,7 +593,7 @@ static sock_gres_t *_build_sock_gres_basic(
 	return sock_gres;
 }
 
-static void _sock_gres_log(List sock_gres_list, char *node_name)
+static void _sock_gres_log(list_t *sock_gres_list, char *node_name)
 {
 	sock_gres_t *sock_gres;
 	list_itr_t *iter;
@@ -736,7 +737,7 @@ static int _foreach_restricted_gpu(void *x, void *arg)
 }
 
 static void _gres_limit_reserved_cores(
-	List job_gres_list, List node_gres_list, bitstr_t *core_bitmap,
+	list_t *job_gres_list, list_t *node_gres_list, bitstr_t *core_bitmap,
 	uint16_t sockets, uint16_t cores_per_sock,
 	const uint32_t node_inx, bitstr_t *gpu_spec_bitmap,
 	uint32_t res_cores_per_gpu)
@@ -776,8 +777,8 @@ static void _gres_limit_reserved_cores(
 	bit_free(gpu_spec_cpy);
 }
 
-extern List gres_sock_list_create(
-	List job_gres_list, List node_gres_list,
+extern list_t *gres_sock_list_create(
+	list_t *job_gres_list, list_t *node_gres_list,
 	resv_exc_t *resv_exc_ptr,
 	bool use_total_gres, bitstr_t *core_bitmap,
 	uint16_t sockets, uint16_t cores_per_sock,
@@ -787,7 +788,7 @@ extern List gres_sock_list_create(
 	const uint32_t node_inx, bitstr_t *gpu_spec_bitmap,
 	uint32_t res_cores_per_gpu, uint16_t cr_type)
 {
-	List sock_gres_list = NULL;
+	list_t *sock_gres_list = NULL;
 	list_itr_t *job_gres_iter;
 	gres_state_t *gres_state_job, *gres_state_node;
 	gres_job_state_t  *gres_js;
@@ -795,6 +796,7 @@ extern List gres_sock_list_create(
 	uint32_t local_s_p_n;
 	list_t *gres_list_resv = NULL;
 	gres_job_state_t **gres_js_resv = NULL;
+	node_record_t *node_ptr = node_record_table_ptr[node_inx];
 
 	if (!job_gres_list || (list_count(job_gres_list) == 0)) {
 		if (gpu_spec_bitmap && core_bitmap)
@@ -864,7 +866,18 @@ extern List gres_sock_list_create(
 		if (core_bitmap && (bit_ffs(core_bitmap) == -1)) {
 			sock_gres = NULL;	/* No cores available */
 		} else if (gres_ns->topo_cnt &&
-			   gres_ns->gres_cnt_found != NO_VAL64) {
+			   (gres_ns->gres_cnt_found != NO_VAL64 ||
+			    !(IS_NODE_UNKNOWN(node_ptr) ||
+			      IS_NODE_DOWN(node_ptr) ||
+			      IS_NODE_DRAIN(node_ptr) ||
+			      IS_NODE_NO_RESPOND(node_ptr)))) {
+			/*
+			 * If the node has not yet registered and isn't
+			 * available to allocate jobs, we build the list with
+			 * _build_sock_gres_by_type() (which uses the newest
+			 * slurm.conf gres configuration) so that it won't be
+			 * rejected as never runnable.
+			 */
 			sock_gres = _build_sock_gres_by_topo(
 				gres_state_job, gres_state_node, resv_exc_ptr,
 				use_total_gres,

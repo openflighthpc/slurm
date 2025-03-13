@@ -167,11 +167,24 @@ static inline int _internal_hwloc_topology_export_xml(
 #endif
 }
 
+static void _check_full_access(hwloc_topology_t *topology)
+{
+	hwloc_const_bitmap_t complete, allowed;
+
+	complete = hwloc_topology_get_complete_cpuset(*topology);
+	allowed = hwloc_topology_get_allowed_cpuset(*topology);
+
+	if (!hwloc_bitmap_isequal(complete, allowed))
+		warning("restricted to a subset of cpus");
+}
+
 static void _remove_ecores(hwloc_topology_t *topology)
 {
 #if HWLOC_API_VERSION > 0x00020401
 	int type_cnt;
 	hwloc_bitmap_t cpuset, cpuset_tot = NULL;
+	char *pcore_freq = NULL;
+	bool found = false;
 
 	if (slurm_conf.conf_flags & CONF_FLAG_ECORE)
 		return;
@@ -194,8 +207,16 @@ static void _remove_ecores(hwloc_topology_t *topology)
 	 * handle these E-Cores through a core spec instead.
 	 *
 	 * This logic should do nothing on any other existing processor.
+	 *
+	 * One notable issue found is that, for processes launching with a
+	 * restricted cpuset, the CPU Kind entry for the P-Cores will only
+	 * include the P-Cores in the active cpuset, and not all of those
+	 * available on the node. However, those unavailable cores are
+	 * listed on another entry with an identical FrequencyMaxMHz value.
+	 * This should be distinct from the slower E-Cores.
 	 */
 	cpuset = hwloc_bitmap_alloc();
+	cpuset_tot = hwloc_bitmap_alloc();
 	for (int i = 0; i < type_cnt; i++) {
 		unsigned nr_infos = 0;
 		struct hwloc_info_s *infos;
@@ -203,29 +224,65 @@ static void _remove_ecores(hwloc_topology_t *topology)
 			    *topology, i, cpuset, NULL, &nr_infos, &infos, 0))
 			fatal("Error getting info from hwloc_cpukinds_get_info() %m");
 
+		/* Look for the CPU Kinds entry with CoreType=IntelCore. */
 		for (int j = 0; j < nr_infos; j++) {
 			if (!xstrcasecmp(infos[j].name, "CoreType") &&
 			    !xstrcasecmp(infos[j].value, "IntelCore")) {
-				/* Restrict the node to only IntelCores */
-				if (!cpuset_tot)
-					cpuset_tot = hwloc_bitmap_alloc();
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+			continue;
+
+		/*
+		 * Copy the cpuset over now. This avoids problems with a
+		 * hypothetical system with the FrequencyMaxMHz not being
+		 * listed for the P-Cores.
+		 */
+		hwloc_bitmap_or(cpuset_tot, cpuset_tot, cpuset);
+
+		/* If found, note the FrequencyMaxMHz value for these cores. */
+		for (int j = 0; j < nr_infos; j++) {
+			if (!xstrcasecmp(infos[j].name, "FrequencyMaxMHz")) {
+				pcore_freq = infos[j].value;
+				break;
+			}
+		}
+		break;
+	}
+
+	if (!found) {
+		hwloc_bitmap_free(cpuset);
+		hwloc_bitmap_free(cpuset_tot);
+		return;
+	}
+
+	for (int i = 0; i < type_cnt; i++) {
+		unsigned nr_infos = 0;
+		struct hwloc_info_s *infos;
+		if (hwloc_cpukinds_get_info(
+			    *topology, i, cpuset, NULL, &nr_infos, &infos, 0))
+			fatal("Error getting info from hwloc_cpukinds_get_info() %m");
+
+		/*
+		 * Look for all CPU Kinds with a matching FrequencyMaxMHz value.
+		 * These should all be the P-cores, including those that aren't
+		 * in the available cpuset we are running under.
+		 */
+		for (int j = 0; j < nr_infos; j++) {
+			if (!xstrcasecmp(infos[j].name, "FrequencyMaxMHz") &&
+			    !xstrcasecmp(infos[j].value, pcore_freq)) {
 				hwloc_bitmap_or(cpuset_tot, cpuset_tot, cpuset);
 			}
 		}
 
-		/*
-		 * If we have a cpuset_tot it means we are on a system with
-		 * IntelCore cpus. We will restrict to only those and be done
-		 * here.
-		 */
-		if (cpuset_tot) {
-			hwloc_topology_restrict(*topology, cpuset_tot, 0);
-			hwloc_bitmap_free(cpuset_tot);
-			break;
-		}
 	}
-	hwloc_bitmap_free(cpuset);
 
+	hwloc_topology_restrict(*topology, cpuset_tot, 0);
+	hwloc_bitmap_free(cpuset_tot);
+	hwloc_bitmap_free(cpuset);
 #endif
 }
 
@@ -305,6 +362,8 @@ handle_write:
 		ret = SLURM_ERROR;
 		goto end_it;
 	}
+
+	_check_full_access(topology);
 
 	_remove_ecores(topology);
 
@@ -444,7 +503,7 @@ extern int xcpuinfo_hwloc_topo_get(
 	nobj[SOCKET] = 0;
 	depth = hwloc_get_type_depth(topology, objtype[SOCKET]);
 	used_socket = bit_alloc(_MAX_SOCKET_INX);
-	cores_per_socket = xmalloc(sizeof(int) * _MAX_SOCKET_INX);
+	cores_per_socket = xcalloc(_MAX_SOCKET_INX, sizeof(int));
 	sock_cnt = hwloc_get_nbobjs_by_depth(topology, depth);
 	for (i = 0; i < sock_cnt; i++) {
 		obj = hwloc_get_obj_by_depth(topology, depth, i);
@@ -519,8 +578,8 @@ extern int xcpuinfo_hwloc_topo_get(
 	if (p_block_map_size)
 		*p_block_map_size = (uint16_t)actual_cpus;
 	if (p_block_map && p_block_map_inv) {
-		*p_block_map     = xmalloc(actual_cpus * sizeof(uint16_t));
-		*p_block_map_inv = xmalloc(actual_cpus * sizeof(uint16_t));
+		*p_block_map = xcalloc(actual_cpus, sizeof(uint16_t));
+		*p_block_map_inv = xcalloc(actual_cpus, sizeof(uint16_t));
 
 		/* initialize default as linear mapping */
 		for (i = 0; i < actual_cpus; i++) {
@@ -659,7 +718,7 @@ extern int xcpuinfo_hwloc_topo_get(
 	if (cpuinfo)
 		memset(cpuinfo, 0, numproc * sizeof(cpuinfo_t));
 	else
-		cpuinfo = xmalloc(numproc * sizeof(cpuinfo_t));
+		cpuinfo = xcalloc(numproc, sizeof(cpuinfo_t));
 
 	curcpu = 0;
 	while (fgets(buffer, sizeof(buffer), cpu_info_file) != NULL) {
@@ -965,14 +1024,14 @@ static int _compute_block_map(uint16_t numproc,
 	uint16_t i;
 	/* Compute abstract->machine block mapping (and inverse) */
 	if (block_map) {
-		*block_map = xmalloc(numproc * sizeof(uint16_t));
+		*block_map = xcalloc(numproc, sizeof(uint16_t));
 		for (i = 0; i < numproc; i++) {
 			(*block_map)[i] = i;
 		}
 		qsort(*block_map, numproc, sizeof(uint16_t), &_compare_cpus);
 	}
 	if (block_map && block_map_inv) {
-		*block_map_inv = xmalloc(numproc * sizeof(uint16_t));
+		*block_map_inv = xcalloc(numproc, sizeof(uint16_t));
 		for (i = 0; i < numproc; i++) {
 			uint16_t idx = (*block_map)[i];
 			(*block_map_inv)[idx] = i;
@@ -1144,7 +1203,7 @@ int xcpuinfo_abs_to_mac(char *lrange, char **prange)
 	}
 
 	/* convert machine cpu bitmap to range string */
-	*prange = (char*)xmalloc(total_cpus*6);
+	*prange = xmalloc(total_cpus * 6);
 	bit_fmt(*prange, total_cpus*6, macmap);
 
 	/* free unused bitmaps */
@@ -1239,7 +1298,7 @@ int xcpuinfo_mac_to_abs(char *in_range, char **out_range)
 	}
 
 	/* convert abstract core bitmap to range string */
-	*out_range = (char*)xmalloc(total_cores * 6);
+	*out_range = xmalloc(total_cores * 6);
 	bit_fmt(*out_range, total_cores * 6, absmap_core);
 
 	/* free unused bitmaps */
@@ -1258,7 +1317,7 @@ int
 xcpuinfo_abs_to_map(char* lrange,uint16_t **map,uint16_t *map_size)
 {
 	*map_size = block_map_size;
-	*map = (uint16_t*) xmalloc(block_map_size*sizeof(uint16_t));
+	*map = xcalloc(block_map_size, sizeof(uint16_t));
 	/* abstract range does not already include the hyperthreads */
 	return _range_to_map(lrange,*map,*map_size,1);
 }

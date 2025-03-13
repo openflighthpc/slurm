@@ -706,9 +706,6 @@ static bool _opt_verify(void)
 	if (opt.container_id && !getenv("SLURM_CONTAINER_ID"))
 		setenvf(NULL, "SLURM_CONTAINER_ID", "%s", opt.container_id);
 
-	if (opt.network)
-		setenvf(NULL, "SLURM_NETWORK", "%s", opt.network);
-
 	/*
 	 * NOTE: this burst_buffer_file processing is intentionally different
 	 * than in salloc/srun, there is not a missing chunk of code here.
@@ -738,7 +735,7 @@ static bool _opt_verify(void)
 	if (opt.exclude && !_valid_node_list(&opt.exclude))
 		exit(error_exit);
 
-	if (opt.nodelist && !opt.nodes_set) {
+	if (opt.nodelist && !opt.nodes_set && !xstrchr(opt.nodelist, '{')) {
 		hl = hostlist_create(opt.nodelist);
 		if (!hl)
 			fatal("Invalid node list specified");
@@ -755,8 +752,6 @@ static bool _opt_verify(void)
 		opt.job_name = xstrdup("wrap");
 	else if (!opt.job_name && (opt.argc > 0))
 		opt.job_name = base_name(opt.argv[0]);
-	if (opt.job_name)
-		setenv("SLURM_JOB_NAME", opt.job_name, 1);
 
 	/* check for realistic arguments */
 	if (opt.ntasks < 0) {
@@ -863,7 +858,8 @@ static bool _opt_verify(void)
 	/* set up the proc and node counts based on the arbitrary list
 	   of nodes */
 	if (((opt.distribution & SLURM_DIST_STATE_BASE) == SLURM_DIST_ARBITRARY)
-	    && (!opt.nodes_set || !opt.ntasks_set)) {
+	    && (!opt.nodes_set || !opt.ntasks_set)
+	    && !xstrchr(opt.nodelist, '{')) {
 		FREE_NULL_HOSTLIST(hl);
 		hl = hostlist_create(opt.nodelist);
 		if (!hl)
@@ -913,13 +909,6 @@ static bool _opt_verify(void)
 		exit(error_exit);
 	}
 
-	if (opt.open_mode) {
-		/* Propage mode to spawned job using environment variable */
-		if (opt.open_mode == OPEN_MODE_APPEND)
-			setenvf(NULL, "SLURM_OPEN_MODE", "a");
-		else
-			setenvf(NULL, "SLURM_OPEN_MODE", "t");
-	}
 	if (opt.dependency)
 		setenvfs("SLURM_JOB_DEPENDENCY=%s", opt.dependency);
 
@@ -927,14 +916,6 @@ static bool _opt_verify(void)
 		/* srun ignores "ALL", it is the default */
 		setenv("SLURM_EXPORT_ENV", opt.export_env, 0);
 	}
-
-	if (opt.profile)
-		setenvfs("SLURM_PROFILE=%s",
-			 acct_gather_profile_to_string(opt.profile));
-
-
-	if (opt.acctg_freq)
-		setenvf(NULL, "SLURM_ACCTG_FREQ", "%s", opt.acctg_freq);
 
 	if (opt.mem_bind_type && (getenv("SBATCH_MEM_BIND") == NULL)) {
 		char *tmp = slurm_xstr_mem_bind_type(opt.mem_bind_type);
@@ -959,9 +940,6 @@ static bool _opt_verify(void)
 		}
 	}
 
-	cpu_freq_set_env("SLURM_CPU_FREQ_REQ",
-			 opt.cpu_freq_min, opt.cpu_freq_max, opt.cpu_freq_gov);
-
 	return verified;
 }
 
@@ -974,7 +952,7 @@ extern char *spank_get_job_env(const char *name)
 
 	if ((name == NULL) || (name[0] == '\0') ||
 	    (strchr(name, (int)'=') != NULL)) {
-		slurm_seterrno(EINVAL);
+		errno = EINVAL;
 		return NULL;
 	}
 
@@ -1000,7 +978,7 @@ extern int   spank_set_job_env(const char *name, const char *value,
 
 	if ((name == NULL) || (name[0] == '\0') ||
 	    (strchr(name, (int)'=') != NULL)) {
-		slurm_seterrno(EINVAL);
+		errno = EINVAL;
 		return -1;
 	}
 
@@ -1034,7 +1012,7 @@ extern int   spank_unset_job_env(const char *name)
 
 	if ((name == NULL) || (name[0] == '\0') ||
 	    (strchr(name, (int)'=') != NULL)) {
-		slurm_seterrno(EINVAL);
+		errno = EINVAL;
 		return -1;
 	}
 
@@ -1113,6 +1091,7 @@ static void _usage(void)
 "              [--cpus-per-gpu=n] [--gpus=n] [--gpu-bind=...] [--gpu-freq=...]\n"
 "              [--gpus-per-node=n] [--gpus-per-socket=n] [--gpus-per-task=n]\n"
 "              [--mem-per-gpu=MB] [--tres-bind=...] [--tres-per-task=list]\n"
+"              [--oom-kill-step[=0|1]]\n"
 "              executable [args...]\n");
 }
 
@@ -1169,6 +1148,7 @@ static void _help(void)
 "      --no-requeue            if set, do not permit the job to be requeued\n"
 "      --ntasks-per-node=n     number of tasks to invoke on each node\n"
 "  -N, --nodes=N               number of nodes on which to run (N = min[-max])\n"
+"      --oom-kill-step[=0|1]   set the OOMKillStep behaviour\n"
 "  -o, --output=out            file for batch script's standard output\n"
 "  -O, --overcommit            overcommit resources\n"
 "  -p, --partition=partition   partition requested\n"
@@ -1235,7 +1215,7 @@ static void _help(void)
 "      --sockets-per-node=S    number of sockets per node to allocate\n"
 "      --cores-per-socket=C    number of cores per socket to allocate\n"
 "      --threads-per-core=T    number of threads per core to allocate\n"
-"  -B  --extra-node-info=S[:C[:T]]  combine request of sockets per node,\n"
+"  -B, --extra-node-info=S[:C[:T]]  combine request of sockets per node,\n"
 "                              cores per socket and threads per core.\n"
 "                              Specify an asterisk (*) as a placeholder,\n"
 "                              a minimum value, or a min-max range.\n"

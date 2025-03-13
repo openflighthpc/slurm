@@ -178,12 +178,12 @@ extern int job_test_resv(job_record_t *job_ptr, time_t *when,
 			 bool reboot);
 
 /*
- * Note that a job is starting execution. If that job is associated with a
- * reservation having the "Refresh" flag, then remove that job's nodes from
- * the reservation. Additional nodes will be added to the reservation from
+ * Note that a job is starting or finishing execution. If that job is associated
+ * with a reservation having the "Refresh" flag, then remove that job's nodes
+ * from the reservation. Additional nodes will be added to the reservation from
  * those currently available.
  */
-extern void job_claim_resv(job_record_t *job_ptr);
+extern void resv_replace_update(job_record_t *job_ptr);
 
 /*
  * Determine the time of the first reservation to end after some time.
@@ -239,11 +239,11 @@ extern void reservation_update_groups(int force);
  * get_resv_list - find record for named reservation(s)
  * IN name - reservation name(s) in a comma separated char
  * OUT err_part - The first invalid reservation name.
- * RET List of pointers to the reservations or NULL if not found
+ * RET list of pointers to the reservations or NULL if not found
  * NOTE: Caller must free the returned list
  * NOTE: Caller must free err_part
  */
-extern List get_resv_list(char *name, char **err_resv);
+extern list_t *get_resv_list(char *name, char **err_resv);
 
 extern void set_reserved_license_count(licenses_t *license);
 

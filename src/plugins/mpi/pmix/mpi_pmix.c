@@ -96,6 +96,10 @@ const uint32_t plugin_id = MPI_PLUGIN_PMIX5;
 
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
+static pthread_mutex_t setup_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t setup_cond  = PTHREAD_COND_INITIALIZER;
+static bool setup_done = false;
+
 void *libpmix_plug = NULL;
 
 char *process_mapping = NULL;
@@ -266,9 +270,6 @@ extern int mpi_p_slurmstepd_task(const mpi_task_info_t *mpi_task, char ***env)
 extern mpi_plugin_client_state_t *
 mpi_p_client_prelaunch(const mpi_step_info_t *mpi_step, char ***env)
 {
-	static pthread_mutex_t setup_mutex = PTHREAD_MUTEX_INITIALIZER;
-	static pthread_cond_t setup_cond  = PTHREAD_COND_INITIALIZER;
-	static bool setup_done = false;
 	uint32_t nnodes, ntasks, **tids;
 	uint16_t *task_cnt;
 	int ret;
@@ -310,7 +311,10 @@ mpi_p_client_prelaunch(const mpi_step_info_t *mpi_step, char ***env)
 
 extern int mpi_p_client_fini(void)
 {
-	xfree(process_mapping);
+	slurm_mutex_lock(&setup_mutex);
+	if (setup_done)
+		xfree(process_mapping);
+	slurm_mutex_unlock(&setup_mutex);
 	return pmixp_abort_agent_stop();
 }
 
@@ -396,73 +400,39 @@ extern s_p_hashtbl_t *mpi_p_conf_get(void)
 	return tbl;
 }
 
-extern List mpi_p_conf_get_printable(void)
+extern list_t *mpi_p_conf_get_printable(void)
 {
-	config_key_pair_t *key_pair;
-	List data = list_create(destroy_config_key_pair);
+	list_t *data = list_create(destroy_config_key_pair);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxCliTmpDirBase");
-	key_pair->value = xstrdup(slurm_pmix_conf.cli_tmpdir_base);
-	list_append(data, key_pair);
+	add_key_pair(data, "PMIxCliTmpDirBase", "%s",
+		     slurm_pmix_conf.cli_tmpdir_base);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxCollFence");
-	key_pair->value = xstrdup(slurm_pmix_conf.coll_fence);
-	list_append(data, key_pair);
+	add_key_pair(data, "PMIxCollFence", "%s", slurm_pmix_conf.coll_fence);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxDebug");
-	key_pair->value = xstrdup_printf("%u", slurm_pmix_conf.debug);
-	list_append(data, key_pair);
+	add_key_pair(data, "PMIxDebug", "%u", slurm_pmix_conf.debug);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxDirectConn");
-	key_pair->value = xstrdup(slurm_pmix_conf.direct_conn ? "yes" : "no");
-	list_append(data, key_pair);
+	add_key_pair_bool(data, "PMIxDirectConn", slurm_pmix_conf.direct_conn);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxDirectConnEarly");
-	key_pair->value = xstrdup(slurm_pmix_conf.direct_conn_early ?
-				  "yes" : "no");
-	list_append(data, key_pair);
+	add_key_pair_bool(data, "PMIxDirectConnEarly",
+			  slurm_pmix_conf.direct_conn_early);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxDirectConnUCX");
-	key_pair->value = xstrdup(slurm_pmix_conf.direct_conn_ucx ?
-				  "yes" : "no");
-	list_append(data, key_pair);
+	add_key_pair_bool(data, "PMIxDirectConnUCX",
+			  slurm_pmix_conf.direct_conn_ucx);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxDirectSameArch");
-	key_pair->value = xstrdup(slurm_pmix_conf.direct_samearch ?
-				  "yes" : "no");
-	list_append(data, key_pair);
+	add_key_pair_bool(data, "PMIxDirectSameArch",
+			  slurm_pmix_conf.direct_samearch);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxEnv");
-	key_pair->value = xstrdup(slurm_pmix_conf.env);
-	list_append(data, key_pair);
+	add_key_pair(data, "PMIxEnv", "%s", slurm_pmix_conf.env);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxFenceBarrier");
-	key_pair->value = xstrdup(slurm_pmix_conf.fence_barrier ? "yes" : "no");
-	list_append(data, key_pair);
+	add_key_pair_bool(data, "PMIxFenceBarrier",
+			  slurm_pmix_conf.fence_barrier);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxNetDevicesUCX");
-	key_pair->value = xstrdup(slurm_pmix_conf.ucx_netdevices);
-	list_append(data, key_pair);
+	add_key_pair(data, "PMIxNetDevicesUCX", "%s",
+		     slurm_pmix_conf.ucx_netdevices);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxTimeout");
-	key_pair->value = xstrdup_printf("%u", slurm_pmix_conf.timeout);
-	list_append(data, key_pair);
+	add_key_pair(data, "PMIxTimeout", "%u", slurm_pmix_conf.timeout);
 
-	key_pair = xmalloc(sizeof(*key_pair));
-	key_pair->name = xstrdup("PMIxTlsUCX");
-	key_pair->value = xstrdup(slurm_pmix_conf.ucx_tls);
-	list_append(data, key_pair);
+	add_key_pair(data, "PMIxTlsUCX", "%s", slurm_pmix_conf.ucx_tls);
 
 	return data;
 }

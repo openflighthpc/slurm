@@ -52,24 +52,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 
 #include "src/common/assoc_mgr.h"
-#include "src/interfaces/gres.h"
 #include "src/common/hostlist.h"
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/parse_time.h"
 #include "src/common/read_config.h"
-#include "src/interfaces/select.h"
-#include "src/interfaces/accounting_storage.h"
-#include "src/interfaces/acct_gather_energy.h"
-#include "src/interfaces/topology.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+
+#include "src/interfaces/accounting_storage.h"
+#include "src/interfaces/acct_gather_energy.h"
+#include "src/interfaces/gres.h"
+#include "src/interfaces/select.h"
+#include "src/interfaces/topology.h"
 
 #define _DEBUG 0
 
@@ -78,11 +79,14 @@ strong_alias(build_all_nodeline_info, slurm_build_all_nodeline_info);
 strong_alias(rehash_node, slurm_rehash_node);
 strong_alias(hostlist2bitmap, slurm_hostlist2bitmap);
 strong_alias(bitmap2node_name, slurm_bitmap2node_name);
+strong_alias(node_name2bitmap, slurm_node_name2bitmap);
 strong_alias(find_node_record, slurm_find_node_record);
 
 /* Global variables */
-List config_list  = NULL;	/* list of config_record entries */
-List front_end_list = NULL;	/* list of slurm_conf_frontend_t entries */
+list_t *active_feature_list;	/* list of currently active features_records */
+list_t *avail_feature_list;	/* list of available features_records */
+list_t *config_list = NULL;	/* list of config_record entries */
+list_t *front_end_list = NULL;	/* list of slurm_conf_frontend_t entries */
 time_t last_node_update = (time_t) 0;	/* time of last update */
 node_record_t **node_record_table_ptr = NULL;	/* node records */
 xhash_t* node_hash_table = NULL;
@@ -95,18 +99,19 @@ int last_node_index = -1;		/* index of last node in tabe */
 uint16_t *cr_node_num_cores = NULL;
 uint32_t *cr_node_cores_offset = NULL;
 bool spec_cores_first = false;
+time_t slurmd_start_time = 0;
 
 /* Local function definitions */
 static void _delete_config_record(void);
 static void _delete_node_config_ptr(node_record_t *node_ptr);
 #if _DEBUG
-static void	_dump_hash (void);
+static void _dump_hash(void);
 #endif
 static node_record_t *_find_node_record(char *name, bool test_alias,
 					bool log_missing);
-static void	_list_delete_config (void *config_entry);
-static void _node_record_hash_identity (void* item, const char** key,
-					uint32_t* key_len);
+static void _list_delete_config(void *config_entry);
+static void _node_record_hash_identity(void *item, const char **key,
+				       uint32_t *key_len);
 
 /*
  * _delete_config_record - delete all configuration records
@@ -120,12 +125,11 @@ static void _delete_config_record(void)
 	list_flush(front_end_list);
 }
 
-
 #if _DEBUG
 /*
  * helper function used by _dump_hash to print the hash table elements
  */
-static void xhash_walk_helper_cbk (void* item, void* arg)
+static void xhash_walk_helper_cbk(void *item, void *arg)
 {
 	int *i_ptr = arg;
 	node_record_t *node_ptr = (node_record_t *) item;
@@ -133,13 +137,14 @@ static void xhash_walk_helper_cbk (void* item, void* arg)
 	debug3("node_hash[%d]:%d(%s)", (*i_ptr)++, node_ptr->index,
 	       node_ptr->name);
 }
+
 /*
  * _dump_hash - print the node_hash_table contents, used for debugging
  *	or analysis of hash technique
  * global: node_record_table_ptr - pointer to global node table
  *         node_hash_table - table of hash indexes
  */
-static void _dump_hash (void)
+static void _dump_hash(void)
 {
 	int i = 0;
 	if (node_hash_table == NULL)
@@ -152,7 +157,7 @@ static void _dump_hash (void)
 
 /* _list_delete_config - delete an entry from the config list,
  *	see list.h for documentation */
-static void _list_delete_config (void *config_entry)
+static void _list_delete_config(void *config_entry)
 {
 	config_record_t *config_ptr = (config_record_t *) config_entry;
 
@@ -172,10 +177,10 @@ static void _list_delete_config (void *config_entry)
  * xhash helper function to index node_record per name field
  * in node_hash_table
  */
-static void _node_record_hash_identity (void* item, const char** key,
-					uint32_t* key_len)
+static void _node_record_hash_identity(void *item, const char **key,
+				       uint32_t *key_len)
 {
-	node_record_t *node_ptr = (node_record_t *) item;
+	node_record_t *node_ptr = item;
 	*key = node_ptr->name;
 	*key_len = strlen(node_ptr->name);
 }
@@ -187,7 +192,7 @@ static void _node_record_hash_identity (void* item, const char** key,
  * globals: node_record_table_ptr - pointer to node table
  * NOTE: the caller must xfree the memory at node_list when no longer required
  */
-hostlist_t *bitmap2hostlist(bitstr_t *bitmap)
+extern hostlist_t *bitmap2hostlist(bitstr_t *bitmap)
 {
 	hostlist_t *hl;
 	node_record_t *node_ptr;
@@ -213,7 +218,7 @@ hostlist_t *bitmap2hostlist(bitstr_t *bitmap)
  * globals: node_record_table_ptr - pointer to node table
  * NOTE: the caller must xfree the memory at node_list when no longer required
  */
-char * bitmap2node_name_sortable (bitstr_t *bitmap, bool sort)
+extern char *bitmap2node_name_sortable(bitstr_t *bitmap, bool sort)
 {
 	hostlist_t *hl;
 	char *buf;
@@ -237,7 +242,7 @@ char * bitmap2node_name_sortable (bitstr_t *bitmap, bool sort)
  * globals: node_record_table_ptr - pointer to node table
  * NOTE: the caller must xfree the memory at node_list when no longer required
  */
-char * bitmap2node_name (bitstr_t *bitmap)
+extern char *bitmap2node_name(bitstr_t *bitmap)
 {
 	return bitmap2node_name_sortable(bitmap, 1);
 }
@@ -262,7 +267,7 @@ static void _dump_front_end(slurm_conf_frontend_t *fe_ptr)
  * is_slurmd_context: set to true if run from slurmd
  * RET 0 if no error, error code otherwise
  */
-extern void build_all_frontend_info (bool is_slurmd_context)
+extern void build_all_frontend_info(bool is_slurmd_context)
 {
 	slurm_conf_frontend_t **ptr_array;
 #ifdef HAVE_FRONT_END
@@ -409,7 +414,7 @@ extern config_record_t *config_record_from_conf_node(
  *		    slurmd), false is used by slurmctld, clients, and testsuite
  * IN tres_cnt - number of TRES configured on system (used on controller side)
  */
-extern void build_all_nodeline_info(bool set_bitmap, int tres_cnt)
+extern int build_all_nodeline_info(bool set_bitmap, int tres_cnt)
 {
 	slurm_conf_node_t *node, **ptr_array;
 	config_record_t *config_ptr = NULL;
@@ -418,9 +423,12 @@ extern void build_all_nodeline_info(bool set_bitmap, int tres_cnt)
 	count = slurm_conf_nodename_array(&ptr_array);
 
 	for (i = 0; i < count; i++) {
+		int rc;
 		node = ptr_array[i];
 		config_ptr = config_record_from_conf_node(node, tres_cnt);
-		expand_nodeline_info(node, config_ptr, NULL, _check_callback);
+		if (((rc = expand_nodeline_info(node, config_ptr, NULL,
+					       _check_callback))))
+			return rc;
 	}
 
 	if (set_bitmap) {
@@ -428,10 +436,12 @@ extern void build_all_nodeline_info(bool set_bitmap, int tres_cnt)
 		config_iterator = list_iterator_create(config_list);
 		while ((config_ptr = list_next(config_iterator))) {
 			node_name2bitmap(config_ptr->nodes, true,
-					 &config_ptr->node_bitmap);
+					 &config_ptr->node_bitmap, NULL);
 		}
 		list_iterator_destroy(config_iterator);
 	}
+
+	return SLURM_SUCCESS;
 }
 
 extern int build_node_spec_bitmap(node_record_t *node_ptr)
@@ -606,29 +616,13 @@ extern int expand_nodeline_info(slurm_conf_node_t *node_ptr,
 	alias_count    = hostlist_count(alias_list);
 	hostname_count = hostlist_count(hostname_list);
 	port_count     = hostlist_count(port_list);
-#ifdef HAVE_FRONT_END
+
+	if ((address_count != alias_count) && (address_count != 1))
+		fatal("NodeAddr count must equal that of NodeName records or  there must be no more than one");
+	if ((bcast_count != alias_count) && (bcast_count > 1))
+		fatal("BcastAddr count must equal that of NodeName records or there must be no more than one");
 	if ((hostname_count != alias_count) && (hostname_count != 1))
-		fatal("NodeHostname count must equal that of NodeName records of there must be no more than one");
-
-	if ((address_count != alias_count) && (address_count != 1))
-		fatal("NodeAddr count must equal that of NodeName records of there must be no more than one");
-#else
-#ifdef MULTIPLE_SLURMD
-	if ((address_count != alias_count) && (address_count != 1))
-		fatal("NodeAddr count must equal that of NodeName records of there must be no more than one");
-	if (bcast_count && (bcast_count != alias_count) && (bcast_count != 1))
-		fatal("BcastAddr count must equal that of NodeName records, or there must be no more than one");
-#else
-	if (address_count < alias_count)
-		fatal("At least as many NodeAddr are required as NodeName");
-
-	if (bcast_count && (bcast_count < alias_count))
-		fatal("At least as many BcastAddr are required as NodeName");
-
-	if (hostname_count < alias_count)
-		fatal("At least as many NodeHostname are required as NodeName");
-#endif	/* MULTIPLE_SLURMD */
-#endif	/* HAVE_FRONT_END */
+		fatal("NodeHostname count must equal that of NodeName records or there must be no more than one");
 	if ((port_count != alias_count) && (port_count > 1))
 		fatal("Port count must equal that of NodeName records or there must be no more than one (%u != %u)",
 		      port_count, alias_count);
@@ -884,6 +878,10 @@ extern node_record_t *create_node_record_at(int index, char *node_name,
 		error("Attempting to create node record past MaxNodeCount:%d",
 		      slurm_conf.max_node_cnt);
 		return NULL;
+	} else if (index > MAX_SLURM_NODES) {
+		error("Attempting to create nodes past max node limit (%d)",
+		      MAX_SLURM_NODES);
+		return NULL;
 	}
 
 	if (index > last_node_index)
@@ -985,6 +983,7 @@ extern void insert_node_record_at(node_record_t *node_ptr, int index)
 	slurm_conf_remove_node(node_ptr->name);
 	slurm_conf_add_node(node_ptr);
 }
+
 extern void delete_node_record(node_record_t *node_ptr)
 {
 	xassert(node_ptr);
@@ -1130,7 +1129,7 @@ extern void init_node_conf(void)
 
 
 /* node_fini2 - free memory associated with node records (except bitmaps) */
-extern void node_fini2 (void)
+extern void node_fini2(void)
 {
 	int i;
 	node_record_t *node_ptr;
@@ -1171,53 +1170,202 @@ extern int node_name_get_inx(char *node_name)
 	return node_ptr->index;
 }
 
+extern void add_nodes_with_feature_to_bitmap(bitstr_t *bitmap, char *feature)
+{
+	if (avail_feature_list) {
+		node_feature_t *node_feat_ptr;
+		if (!(node_feat_ptr = list_find_first_ro(avail_feature_list,
+							 list_find_feature,
+							 feature))) {
+			debug2("unable to find nodeset feature '%s'", feature);
+			return;
+		}
+		bit_or(bitmap, node_feat_ptr->node_bitmap);
+	} else {
+		node_record_t *node_ptr;
+		/*
+		 * The global feature bitmaps have not been set up at this
+		 * point, so we'll have to scan through the node_record_table
+		 * directly to locate the appropriate records.
+		 */
+		for (int i = 0; (node_ptr = next_node(&i)); i++) {
+			char *features, *tmp, *tok, *last = NULL;
+
+			if (!node_ptr->features)
+				continue;
+
+			features = tmp = xstrdup(node_ptr->features);
+
+			while ((tok = strtok_r(tmp, ",", &last))) {
+				if (!xstrcmp(tok, feature)) {
+					bit_set(bitmap, node_ptr->index);
+					break;
+				}
+				tmp = NULL;
+			}
+			xfree(features);
+		}
+	}
+}
+
+static int _parse_hostlist_function(bitstr_t *node_bitmap, char *node_str)
+{
+	int rc = SLURM_SUCCESS;
+	char *start_ptr, *end_ptr;
+
+	start_ptr = xstrchr(node_str, '{') + 1;
+	end_ptr = xstrchr(start_ptr, '}');
+
+	if (!end_ptr) {
+		error("%s: invalid node specified in hostlist function: \"%s\" (missing closing '}')",
+		      __func__, node_str);
+		return SLURM_ERROR;
+	}
+
+	*end_ptr = '\0';
+
+	if (!xstrncmp("blockwith{", node_str, 10) ||
+	    !xstrncmp("switchwith{", node_str, 11)) {
+		node_record_t *node_ptr;
+		bitstr_t *tmp_bitmap = bit_alloc(node_record_count);
+
+		node_ptr = _find_node_record(start_ptr, false, true);
+		if (node_ptr) {
+			bit_set(tmp_bitmap, node_ptr->index);
+			topology_g_whole_topo(tmp_bitmap);
+			bit_or(node_bitmap, tmp_bitmap);
+		} else {
+			rc = SLURM_ERROR;
+			error("%s: invalid node specified in hostlist function: \"%s\"",
+			      __func__, node_str);
+		}
+
+		FREE_NULL_BITMAP(tmp_bitmap);
+	} else if (!xstrncmp("block{", node_str, 6) ||
+		   !xstrncmp("switch{", node_str, 7)) {
+		bitstr_t *tmp_bitmap = topology_g_get_bitmap(start_ptr);
+
+		if (tmp_bitmap) {
+			bit_or(node_bitmap, tmp_bitmap);
+		} else {
+			rc = SLURM_ERROR;
+			error("%s: invalid block or switch specified in hostlist function: \"%s\"",
+			      __func__, node_str);
+		}
+	} else if (!xstrncmp("feature{", node_str, 8)) {
+		add_nodes_with_feature_to_bitmap(node_bitmap, start_ptr);
+	} else {
+		rc = SLURM_ERROR;
+		error("Invalid hostlist_function specified: %s", node_str);
+	}
+
+	*end_ptr = '}';
+	return rc;
+}
+
+extern int parse_hostlist_functions(hostlist_t **hostlist)
+{
+	hostlist_t *new_hostlist = hostlist_create(NULL);
+	node_record_t *node_ptr;
+	char *host;
+	int rc = SLURM_SUCCESS;
+
+	while ((host = hostlist_shift(*hostlist))) {
+		if ((strchr(host, '{'))) {
+			bitstr_t *node_bitmap = bit_alloc(node_record_count);
+			if (_parse_hostlist_function(node_bitmap, host)) {
+				rc = SLURM_ERROR;
+			} else {
+				for (int i = 0; (node_ptr = next_node_bitmap(
+							 node_bitmap, &i));
+				     i++) {
+					hostlist_push_host(new_hostlist,
+							   node_ptr->name);
+				}
+			}
+			FREE_NULL_BITMAP(node_bitmap);
+		} else {
+			hostlist_push_host(new_hostlist, host);
+		}
+		free(host);
+	}
+	hostlist_destroy(*hostlist);
+	*hostlist = new_hostlist;
+
+	return rc;
+}
+
+static int _single_node_name2bitmap(char *node_name, bool test_alias,
+				    bitstr_t *bitmap,
+				    hostlist_t **invalid_hostlist)
+{
+	int rc = SLURM_SUCCESS;
+
+	/* If there are curly brackets it must be a hostlist_function */
+	if ((xstrchr(node_name, '{'))) {
+		rc = _parse_hostlist_function(bitmap, node_name);
+	} else {
+		node_record_t *node_ptr;
+		node_ptr = _find_node_record(node_name, test_alias, true);
+		if (node_ptr)
+			bit_set(bitmap, node_ptr->index);
+		else
+			rc = SLURM_ERROR;
+	}
+
+	if ((rc != SLURM_SUCCESS) && invalid_hostlist) {
+		debug2("%s: invalid node specified: \"%s\"",
+		       __func__, node_name);
+		if (*invalid_hostlist) {
+			hostlist_push_host(*invalid_hostlist, node_name);
+		} else {
+			*invalid_hostlist = hostlist_create(node_name);
+		}
+		rc = SLURM_SUCCESS;
+	} else if (rc != SLURM_SUCCESS) {
+		error("%s: invalid node specified: \"%s\"",
+		      __func__, node_name);
+		rc = EINVAL;
+	}
+
+	return rc;
+}
+
 /*
  * node_name2bitmap - given a node name regular expression, build a bitmap
  *	representation
  * IN node_names  - list of nodes
- * IN best_effort - if set don't return an error on invalid node name entries
+ * IN: test_alias - if set, also test NodeHostName value
  * OUT bitmap     - set to bitmap, may not have all bits set on error
  * RET 0 if no error, otherwise EINVAL
  * NOTE: call FREE_NULL_BITMAP() to free bitmap memory when no longer required
  */
-extern int node_name2bitmap (char *node_names, bool best_effort,
-			     bitstr_t **bitmap)
+extern int node_name2bitmap(char *node_names, bool test_alias,
+			    bitstr_t **bitmap, hostlist_t **invalid_hostlist)
 {
 	int rc = SLURM_SUCCESS;
 	char *this_node_name;
-	bitstr_t *my_bitmap;
 	hostlist_t *host_list;
 
-	my_bitmap = (bitstr_t *) bit_alloc (node_record_count);
-	*bitmap = my_bitmap;
+	*bitmap = bit_alloc(node_record_count);
 
-	if (node_names == NULL) {
-		info("node_name2bitmap: node_names is NULL");
+	if (!node_names) {
+		info("%s: node_names is NULL", __func__);
 		return rc;
 	}
 
-	if ( (host_list = hostlist_create (node_names)) == NULL) {
+	if (!(host_list = hostlist_create(node_names))) {
 		/* likely a badly formatted hostlist */
-		error ("hostlist_create on %s error:", node_names);
-		if (!best_effort)
-			rc = EINVAL;
-		return rc;
+		error("hostlist_create on %s error:", node_names);
+		return EINVAL;
 	}
 
-	while ( (this_node_name = hostlist_shift (host_list)) ) {
-		node_record_t *node_ptr;
-		node_ptr = _find_node_record(this_node_name, best_effort, true);
-		if (node_ptr) {
-			bit_set(my_bitmap, node_ptr->index);
-		} else {
-			error("%s: invalid node specified: \"%s\"", __func__,
-			      this_node_name);
-			if (!best_effort)
-				rc = EINVAL;
-		}
-		free (this_node_name);
+	while ((this_node_name = hostlist_shift(host_list))) {
+		rc = _single_node_name2bitmap(this_node_name, test_alias,
+					      *bitmap, invalid_hostlist);
+		free(this_node_name);
 	}
-	hostlist_destroy (host_list);
+	hostlist_destroy(host_list);
 
 	return rc;
 }
@@ -1225,11 +1373,11 @@ extern int node_name2bitmap (char *node_names, bool best_effort,
 /*
  * hostlist2bitmap - given a hostlist, build a bitmap representation
  * IN hl          - hostlist
- * IN best_effort - if set don't return an error on invalid node name entries
+ * IN: test_alias - if set, also test NodeHostName value
  * OUT bitmap     - set to bitmap, may not have all bits set on error
  * RET 0 if no error, otherwise EINVAL
  */
-extern int hostlist2bitmap(hostlist_t *hl, bool best_effort, bitstr_t **bitmap)
+extern int hostlist2bitmap(hostlist_t *hl, bool test_alias, bitstr_t **bitmap)
 {
 	int rc = SLURM_SUCCESS;
 	bitstr_t *my_bitmap;
@@ -1237,27 +1385,17 @@ extern int hostlist2bitmap(hostlist_t *hl, bool best_effort, bitstr_t **bitmap)
 	hostlist_iterator_t *hi;
 
 	FREE_NULL_BITMAP(*bitmap);
-	my_bitmap = (bitstr_t *) bit_alloc (node_record_count);
+	my_bitmap = bit_alloc(node_record_count);
 	*bitmap = my_bitmap;
 
 	hi = hostlist_iterator_create(hl);
 	while ((name = hostlist_next(hi))) {
-		node_record_t *node_ptr;
-		node_ptr = _find_node_record(name, best_effort, true);
-		if (node_ptr) {
-			bit_set(my_bitmap, node_ptr->index);
-		} else {
-			error ("hostlist2bitmap: invalid node specified %s",
-			       name);
-			if (!best_effort)
-				rc = EINVAL;
-		}
-		free (name);
+		rc = _single_node_name2bitmap(name, test_alias, *bitmap, NULL);
+		free(name);
 	}
 
 	hostlist_iterator_destroy(hi);
 	return rc;
-
 }
 
 /* Only delete config_ptr if isn't referenced by another node. */
@@ -1293,6 +1431,7 @@ extern void purge_node_rec(void *in)
 	node_record_t *node_ptr = in;
 
 	xfree(node_ptr->arch);
+	xfree(node_ptr->cert_token);
 	xfree(node_ptr->comment);
 	xfree(node_ptr->comm_name);
 	xfree(node_ptr->cpu_spec_list);
@@ -1329,7 +1468,7 @@ extern void purge_node_rec(void *in)
  * rehash_node - build a hash table of the node_record entries.
  * NOTE: using xhash implementation
  */
-extern void rehash_node (void)
+extern void rehash_node(void)
 {
 	int i;
 	node_record_t *node_ptr;
@@ -1387,8 +1526,8 @@ extern void cr_init_global_core_data(node_record_t **node_ptr, int node_cnt)
 
 	cr_fini_global_core_data();
 
-	cr_node_num_cores = xmalloc(node_cnt * sizeof(uint16_t));
-	cr_node_cores_offset = xmalloc((node_cnt+1) * sizeof(uint32_t));
+	cr_node_num_cores = xcalloc(node_cnt, sizeof(uint16_t));
+	cr_node_cores_offset = xcalloc(node_cnt + 1, sizeof(uint32_t));
 
 	for (n = 0; n < node_cnt; n++) {
 		if (!node_ptr[n])
@@ -1575,13 +1714,58 @@ extern void node_conf_create_cluster_core_bitmap(bitstr_t **core_bitmap)
  * Used for dumping node state and passing node_record_t between ctld and
  * stepmgr.
  */
-extern void node_record_pack(void *in,
-			     uint16_t protocol_version,
-			     buf_t *buffer)
+static void _node_record_pack(void *in, uint16_t protocol_version,
+			      buf_t *buffer, bool pack_secrets)
 {
 	node_record_t *object = in;
 
-	if (protocol_version >= SLURM_24_05_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_24_11_PROTOCOL_VERSION) {
+		if (pack_secrets)
+			packstr(object->cert_token, buffer);
+		else
+			packnull(buffer);
+
+		packstr(object->comm_name, buffer);
+		packstr(object->name, buffer);
+		packstr(object->node_hostname, buffer);
+		packstr(object->comment, buffer);
+		packstr(object->extra, buffer);
+		packstr(object->reason, buffer);
+		packstr(object->features, buffer);
+		packstr(object->features_act, buffer);
+		packstr(object->gres, buffer);
+		packstr(object->instance_id, buffer);
+		packstr(object->instance_type, buffer);
+		packstr(object->cpu_spec_list, buffer);
+		pack32(object->next_state, buffer);
+		pack32(object->node_state, buffer);
+		pack32(object->cpu_bind, buffer);
+		pack16(object->cpus, buffer);
+		pack16(object->boards, buffer);
+		pack16(object->tot_sockets, buffer);
+		pack16(object->cores, buffer);
+		pack16(object->core_spec_cnt, buffer);
+		pack64(object->mem_spec_limit, buffer);
+		pack16(object->threads, buffer);
+		pack64(object->real_memory, buffer);
+		pack16(object->res_cores_per_gpu, buffer);
+		pack_bit_str_hex(object->gpu_spec_bitmap, buffer);
+		pack32(object->tmp_disk, buffer);
+		pack32(object->reason_uid, buffer);
+		pack_time(object->reason_time, buffer);
+		pack_time(object->resume_after, buffer);
+		pack_time(object->boot_req_time, buffer);
+		pack_time(object->power_save_req_time, buffer);
+		pack_time(object->last_busy, buffer);
+		pack_time(object->last_response, buffer);
+		pack16(object->port, buffer);
+		pack16(object->protocol_version, buffer);
+		pack16(object->tpc, buffer);
+		packstr(object->mcs_label, buffer);
+		(void) gres_node_state_pack(object->gres_list, buffer,
+					    protocol_version);
+		pack32(object->weight, buffer);
+	} else if (protocol_version >= SLURM_24_05_PROTOCOL_VERSION) {
 		packstr(object->comm_name, buffer);
 		packstr(object->name, buffer);
 		packstr(object->node_hostname, buffer);
@@ -1619,9 +1803,21 @@ extern void node_record_pack(void *in,
 		pack16(object->tpc, buffer);
 		packstr(object->mcs_label, buffer);
 		(void) gres_node_state_pack(object->gres_list, buffer,
-					    object->name);
+					    protocol_version);
 		pack32(object->weight, buffer);
 	}
+}
+
+extern void node_record_pack(void *in, uint16_t protocol_version,
+			     buf_t *buffer)
+{
+	_node_record_pack(in, protocol_version, buffer, false);
+}
+
+extern void node_record_pack_state(void *in, uint16_t protocol_version,
+				   buf_t *buffer)
+{
+	_node_record_pack(in, protocol_version, buffer, true);
 }
 
 extern int node_record_unpack(void **out,
@@ -1632,7 +1828,51 @@ extern int node_record_unpack(void **out,
 	object->magic = NODE_MAGIC;
 	*out = object;
 
-	if (protocol_version >= SLURM_24_05_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_24_11_PROTOCOL_VERSION) {
+		safe_unpackstr(&object->cert_token, buffer);
+		safe_unpackstr(&object->comm_name, buffer);
+		safe_unpackstr(&object->name, buffer);
+		safe_unpackstr(&object->node_hostname, buffer);
+		safe_unpackstr(&object->comment, buffer);
+		safe_unpackstr(&object->extra, buffer);
+		safe_unpackstr(&object->reason, buffer);
+		safe_unpackstr(&object->features, buffer);
+		safe_unpackstr(&object->features_act, buffer);
+		safe_unpackstr(&object->gres, buffer);
+		safe_unpackstr(&object->instance_id, buffer);
+		safe_unpackstr(&object->instance_type, buffer);
+		safe_unpackstr(&object->cpu_spec_list, buffer);
+		safe_unpack32(&object->next_state, buffer);
+		safe_unpack32(&object->node_state, buffer);
+		safe_unpack32(&object->cpu_bind, buffer);
+		safe_unpack16(&object->cpus, buffer);
+		safe_unpack16(&object->boards, buffer);
+		safe_unpack16(&object->tot_sockets, buffer);
+		safe_unpack16(&object->cores, buffer);
+		safe_unpack16(&object->core_spec_cnt, buffer);
+		safe_unpack64(&object->mem_spec_limit, buffer);
+		safe_unpack16(&object->threads, buffer);
+		safe_unpack64(&object->real_memory, buffer);
+		safe_unpack16(&object->res_cores_per_gpu, buffer);
+		unpack_bit_str_hex(&object->gpu_spec_bitmap, buffer);
+		safe_unpack32(&object->tmp_disk, buffer);
+		safe_unpack32(&object->reason_uid, buffer);
+		safe_unpack_time(&object->reason_time, buffer);
+		safe_unpack_time(&object->resume_after, buffer);
+		safe_unpack_time(&object->boot_req_time, buffer);
+		safe_unpack_time(&object->power_save_req_time, buffer);
+		safe_unpack_time(&object->last_busy, buffer);
+		safe_unpack_time(&object->last_response, buffer);
+		safe_unpack16(&object->port, buffer);
+		safe_unpack16(&object->protocol_version, buffer);
+		safe_unpack16(&object->tpc, buffer);
+		safe_unpackstr(&object->mcs_label, buffer);
+		if (gres_node_state_unpack(&object->gres_list, buffer,
+					   object->name, protocol_version) !=
+		    SLURM_SUCCESS)
+			goto unpack_error;
+		safe_unpack32(&object->weight, buffer);
+	} else if (protocol_version >= SLURM_24_05_PROTOCOL_VERSION) {
 		safe_unpackstr(&object->comm_name, buffer);
 		safe_unpackstr(&object->name, buffer);
 		safe_unpackstr(&object->node_hostname, buffer);
@@ -1759,4 +1999,44 @@ unpack_error:
 	purge_node_rec(object);
 	*out = NULL;
 	return SLURM_ERROR;
+}
+
+extern config_record_t *config_record_from_node_record(node_record_t *node_ptr)
+{
+	config_record_t *config_ptr = create_config_record();
+
+	config_ptr->boards = node_ptr->boards;
+	config_ptr->core_spec_cnt = node_ptr->core_spec_cnt;
+	config_ptr->mem_spec_limit = node_ptr->mem_spec_limit;
+	config_ptr->cores = node_ptr->cores;
+	config_ptr->cpu_spec_list = xstrdup(node_ptr->cpu_spec_list);
+	config_ptr->cpus = node_ptr->cpus;
+	config_ptr->feature = xstrdup(node_ptr->features);
+	config_ptr->gres = xstrdup(node_ptr->gres);
+	config_ptr->node_bitmap = bit_alloc(node_record_count);
+	config_ptr->nodes = xstrdup(node_ptr->name);
+	config_ptr->real_memory = node_ptr->real_memory;
+	config_ptr->res_cores_per_gpu = node_ptr->res_cores_per_gpu;
+	config_ptr->threads = node_ptr->threads;
+	config_ptr->tmp_disk = node_ptr->tmp_disk;
+	config_ptr->tot_sockets = node_ptr->tot_sockets;
+	config_ptr->weight = node_ptr->weight;
+
+	return config_ptr;
+}
+
+/*
+ * list_find_feature - find an entry in the feature list, see list.h for
+ *	documentation
+ * IN key - is feature name or NULL for all features
+ * RET 1 if found, 0 otherwise
+ */
+extern int list_find_feature(void *feature_entry, void *key)
+{
+	node_feature_t *feature_ptr = feature_entry;
+
+	if (!key)
+		return 1;
+
+	return !xstrcmp(feature_ptr->name, (char *) key);
 }

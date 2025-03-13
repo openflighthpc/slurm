@@ -1,4 +1,4 @@
-.TH slurmdbd "8" "Slurm Daemon" "March 2020" "Slurm Daemon"
+.TH slurmdbd "8" "Slurm Daemon" "January 2025" "Slurm Daemon"
 
 .SH "NAME"
 slurmdbd \- Slurm Database Daemon.
@@ -41,6 +41,13 @@ otherwise.
 .IP
 
 .TP
+\fB\-u\fR
+Only display the Slurm Database version and if conversion is needed and exit
+without taking control. If no conversion is needed 0 is returned, if conversion
+is needed 1 is returned.
+.IP
+
+.TP
 \fB\-v\fR
 Verbose operation. Multiple \fBv\fR's can be specified, with each '\fBv\fR'
 beyond the first increasing verbosity, up to 6 times (i.e. \-vvvvvv).
@@ -64,7 +71,7 @@ have write permission for SlurmUser, no core file will be produced.
 .SH "SIGNALS"
 
 .TP
-\fBSIGTERM SIGINT\fR
+\fBSIGTERM SIGINT SIGQUIT\fR
 \fBslurmdbd\fR will shutdown cleanly, waiting for in\-progress rollups to
 finish.
 .IP
@@ -87,7 +94,7 @@ should be used when setting up \fBlogrotate\fR(8).
 .IP
 
 .TP
-\fBSIGCHLD SIGUSR1 SIGTSTP SIGXCPU SIGQUIT SIGPIPE SIGALRM\fR
+\fBSIGCHLD SIGUSR1 SIGTSTP SIGXCPU SIGPIPE SIGALRM\fR
 These signals are explicitly ignored.
 .IP
 

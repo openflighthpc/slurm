@@ -82,9 +82,9 @@ typedef struct {
 	uint32_t weight;	/* arbitrary priority of node for
 				 * scheduling work on */
 } config_record_t;
-extern List config_list;	/* list of config_record entries */
+extern list_t *config_list;	/* list of config_record entries */
 
-extern List front_end_list;	/* list of slurm_conf_frontend_t entries */
+extern list_t *front_end_list;	/* list of slurm_conf_frontend_t entries */
 
 typedef struct node_record node_record_t;
 struct node_record {
@@ -94,6 +94,7 @@ struct node_record {
 	time_t boot_req_time;		/* Time of node boot request */
 	time_t boot_time;		/* Time of node boot,
 					 * computed from up_time */
+	char *cert_token;		/* unique token for certmgr validation */
 	char *comm_name;		/* communications path name to node */
 	char *comment;			/* arbitrary comment */
 	uint16_t comp_job_cnt;		/* count of jobs completing on node */
@@ -124,7 +125,7 @@ struct node_record {
 	char *gres;			/* node's generic resources, used only
 					 * for state save/restore, DO NOT
 					 * use for scheduling purposes */
-	List gres_list;			/* list of gres state info managed by
+	list_t *gres_list;		/* list of gres state info managed by
 					 * plugins */
 	uint32_t index;			/* Index into node_record_table_ptr */
 	char *instance_id;		/* cloud instance id */
@@ -211,6 +212,11 @@ extern time_t last_node_update;		/* time of last node record update */
 extern uint16_t *cr_node_num_cores;
 extern uint32_t *cr_node_cores_offset;
 
+extern time_t slurmd_start_time;
+
+extern list_t *active_feature_list;	/* list of currently active features_records */
+extern list_t *avail_feature_list;	/* list of available features_records */
+
 /*
  * bitmap2node_name_sortable - given a bitmap, build a list of comma
  *	separated node names. names may include regular expressions
@@ -249,7 +255,7 @@ hostlist_t *bitmap2hostlist(bitstr_t *bitmap);
  *		    slurmd), false is used by slurmctld, clients, and testsuite
  * IN tres_cnt - number of TRES configured on system (used on controller side)
  */
-extern void build_all_nodeline_info(bool set_bitmap, int tres_cnt);
+extern int build_all_nodeline_info(bool set_bitmap, int tres_cnt);
 
 /*
  * build_all_frontend_info - get a array of slurm_conf_frontend_t structures
@@ -404,17 +410,22 @@ extern void node_fini2 (void);
  */
 extern int node_name_get_inx(char *node_name);
 
+extern void add_nodes_with_feature_to_bitmap(bitstr_t *bitmap, char *feature);
+
+extern int parse_hostlist_functions(hostlist_t **hostlist);
+
 /*
  * node_name2bitmap - given a node name regular expression, build a bitmap
  *	representation
  * IN node_names  - list of nodes
  * IN best_effort - if set don't return an error on invalid node name entries
  * OUT bitmap     - set to bitmap, may not have all bits set on error
+ * IN/OUT invalid_hostlist - hostlist of invalid host names, initialize to NULL
  * RET 0 if no error, otherwise EINVAL
  * NOTE: the caller must bit_free() memory at bitmap when no longer required
  */
 extern int node_name2bitmap (char *node_names, bool best_effort,
-			     bitstr_t **bitmap);
+			     bitstr_t **bitmap, hostlist_t **invalid_hostlist);
 
 /* Purge the contents of a node record */
 extern void purge_node_rec(void *in);
@@ -520,11 +531,21 @@ extern char *node_conf_nodestr_tokenize(char *s, char **save_ptr);
  */
 extern void node_conf_create_cluster_core_bitmap(bitstr_t **core_bitmap);
 
+/* used for stepmgr and omits sensitive fields */
 extern void node_record_pack(void *in,
 			     uint16_t protocol_version,
 			     buf_t *buffer);
+/* used for state files and may contain sensitive fields */
+extern void node_record_pack_state(void *in,
+				   uint16_t protocol_version,
+				   buf_t *buffer);
 extern int node_record_unpack(void **out,
 			      uint16_t protocol_version,
 			      buf_t *buffer);
+
+/* Create config_record_t from a packed node_record_t */
+extern config_record_t *config_record_from_node_record(node_record_t *node_ptr);
+
+extern int list_find_feature(void *feature_entry, void *key);
 
 #endif /* !_HAVE_NODE_CONF_H */

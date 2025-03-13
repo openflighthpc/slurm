@@ -1,4 +1,4 @@
-.TH squeue "1" "Slurm Commands" "June 2024" "Slurm Commands"
+.TH squeue "1" "Slurm Commands" "December 2024" "Slurm Commands"
 
 .SH "NAME"
 squeue \- view information about jobs located in the Slurm scheduling queue.
@@ -192,7 +192,8 @@ Time at which the job ended or is expected to end (based upon its time limit).
 Job dependencies remaining. This job will not begin execution until these
 dependent jobs complete. In the case of a job that can not run due to job
 dependencies never being satisfied, the full original job dependency
-specification will be reported. A value of NULL implies this job has no
+specification will be reported. Once a dependency is satisfied, it is
+removed from the job. A value of NULL implies this job has no
 dependencies.
 (Valid for jobs only)
 .IP
@@ -314,6 +315,9 @@ The value may be "NOT_SET" if not yet established or "UNLIMITED" for no limit.
 \fB%m\fR
 Minimum size of memory (in MB) requested by the job.
 (Valid for jobs only)
+If memory was request per CPU, or per GPU the value is shown
+with the assumption that at least one CPU, GPU will be allocated
+respectively.
 .IP
 
 .TP
@@ -691,7 +695,8 @@ Delay boot time.
 Job dependencies remaining. This job will not begin execution until these
 dependent jobs complete. In the case of a job that can not run due to job
 dependencies never being satisfied, the full original job dependency
-specification will be reported. A value of NULL implies this job has no
+specification will be reported. Once a dependency is satisfied, it is
+removed from the job. A value of NULL implies this job has no
 dependencies.
 (Valid for jobs only)
 .IP
@@ -1338,7 +1343,7 @@ Use the environment variable SLURM_BITSTR_LEN to specify larger field sizes.
 Dump information as JSON using the default data_parser plugin or explicit
 data_parser with parameters. All information is dumped, even if it would
 normally not be. Sorting and formatting arguments passed to other options are
-ignored; however, filtering arguments are still used.
+ignored; however, most filtering arguments are still used.
 .IP
 
 .TP
@@ -1514,7 +1519,7 @@ Print version information and exit.
 Dump information as YAML using the default data_parser plugin or explicit
 data_parser with parameters. All information is dumped, even if it would
 normally not be. Sorting and formatting arguments passed to other options are
-ignored; however, filtering arguments are still used.
+ignored; however, most filtering arguments are still used.
 .IP
 
 .SH "JOB REASON CODES"
@@ -1523,7 +1528,7 @@ There may be multiple reasons why a job cannot start yet, in which case only the
 reason that was encountered by the attempted scheduling method will be displayed.
 
 The Reasons listed below are some of the more common ones you might see.
-For a full list of Reason codes refer to this page page:
+For a full list of Reason codes refer to this page:
 <https://slurm.schedmd.com/job_reason_codes.html>
 
 .TP 22
@@ -1658,7 +1663,7 @@ One or more higher priority jobs exist for this partition or advanced reservatio
 
 .TP
 \fBProlog\fR
-Its PrologSlurmctld program is still running.
+Its Prolog program is still running.
 .IP
 
 .TP
@@ -1732,7 +1737,8 @@ Waiting for the scheduler to determine the appropriate reason.
 Jobs typically pass through several states in the course of their
 execution.
 The typical states are PENDING, RUNNING, SUSPENDED, COMPLETING, and COMPLETED.
-An explanation of each state follows.
+The following states are recognized by squeue. A full list of possible states
+is available at <https://slurm.schedmd.com/job_state_codes.html>.
 
 .TP 20
 \fBBF  BOOT_FAIL\fR

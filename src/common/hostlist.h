@@ -49,6 +49,9 @@
  * prefix records in the hostlist) */
 #define MAX_PREFIX_CNT 64*1024
 
+/* max host range: anything larger will be assumed to be an error */
+#define MAX_RANGE MAX_SLURM_NODES /* 64K Hosts */
+
 #if (SYSTEM_DIMENSIONS > 1)
 #define HOSTLIST_BASE 36
 #else
@@ -64,6 +67,12 @@
 #define FREE_NULL_HOSTLIST(_X)			\
 	do {					\
 		if (_X) hostlist_destroy (_X);	\
+		_X	= NULL; 		\
+	} while (0)
+
+#define FREE_NULL_HOSTSET(_X)			\
+	do {					\
+		if (_X) hostset_destroy (_X);	\
 		_X	= NULL; 		\
 	} while (0)
 

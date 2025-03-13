@@ -45,9 +45,9 @@ def setup():
     global local_cluster_name, partition_name
 
     atf.require_accounting(modify=True)
-    atf.require_config_parameter("AllowNoDefAcct", "Yes", source="slurmdbd")
-    atf.require_config_parameter("TrackWCKey", "Yes", source="slurmdbd")
-    atf.require_config_parameter("TrackWCKey", "Yes")
+    atf.require_config_parameter("AllowNoDefAcct", "yes", source="slurmdbd")
+    atf.require_config_parameter("TrackWCKey", "yes", source="slurmdbd")
+    atf.require_config_parameter("TrackWCKey", "yes")
     atf.require_config_parameter("AuthAltTypes", "auth/jwt")
     atf.require_config_parameter("AuthAltTypes", "auth/jwt", source="slurmdbd")
     atf.require_slurmrestd("slurmctld,slurmdbd", "v0.0.40")
@@ -927,8 +927,6 @@ def test_db_tres(slurmdb):
     assert len(resp.errors) == 0
 
 
-# TODO: Remove xfail once bug 20420 is fixed
-@pytest.mark.xfail
 def test_db_config(slurmdb):
     resp = slurmdb.slurmdb_v0040_get_config()
     assert len(resp.warnings) == 0
@@ -1030,6 +1028,9 @@ def test_jobs(slurm, slurmdb):
         assert job.partition == partition_name
         assert job.user_name == local_user_name
         assert job.job_state == ["CANCELLED"]
+
+    # Ensure that job is in the DB before quering it
+    atf.wait_for_job_accounted(jobid, fatal=True)
 
     resp = slurmdb.slurmdb_v0040_get_jobs()
     assert len(resp.errors) == 0

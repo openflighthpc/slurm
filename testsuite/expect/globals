@@ -3007,6 +3007,29 @@ proc get_mps_count_by_index { index hostname } {
 	return $count
 }
 
+################################################################
+#
+# NAME
+#	check_mpi - determines if mpicc and the desired --mpi option are available
+#
+# SYNOPSIS
+#	check_mpi desired_mpi
+#
+# DESCRIPTION
+#	Runs srun --mpi=list to determine if the desired mpi is available, as
+#	well as if mpicc set in globals.local is too.
+#
+# RETURN VALUE
+#	Returns true if the desired mpi and mpicc are available, false otherwise.
+#
+################################################################
+
+proc check_mpi {desired_mpi} {
+	global srun eol mpicc
+	set output [run_command_output -fail "$srun --mpi=list"]
+
+	return [regexp "${desired_mpi}${eol}" $output] && [file executable $mpicc]
+}
 
 ################################################################
 #
@@ -7171,8 +7194,14 @@ proc _test_init {} {
 	if {![regexp "is UP" [run_command_output -nolog -none "$scontrol ping"]]} {
 		skip "The expect testsuite requires Slurm to be running, but '$scontrol ping' failed."
 	}
-	if {[llength [get_nodes_by_state]] < 1} {
+	set idle_nodes [get_nodes_by_state]
+	if {[llength $idle_nodes] < 1} {
 		skip "The expect testsuite requires there to be at least one idle node in the default partition."
+	}
+	# Ensure that idle nodes are not drained/down
+	# Checking one by one to be able to print a warning if some was drain/down
+	foreach idle_node $idle_nodes {
+		run_command -nolog -xfail "$scontrol update nodename=$idle_node state=resume"
 	}
 }
 
@@ -7293,4 +7322,3 @@ proc exit { {status 0} } {
 
 # Call _test_init at the beginning of each test
 _test_init
-

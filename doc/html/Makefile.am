@@ -65,7 +65,6 @@ generated_html = \
 	priority_multifactor3.html \
 	programmer_guide.html \
 	prolog_epilog.html \
-	publications.html \
 	qos.html \
 	quickstart_admin.html \
 	quickstart.html \
@@ -83,6 +82,7 @@ generated_html = \
 	select_design.html \
 	selinux.html \
 	site_factor.html \
+	slinky.html \
 	slurm.html \
 	slurm_ug_agenda.html \
 	topology.html \

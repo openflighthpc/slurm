@@ -1,4 +1,4 @@
-.TH scontrol "1" "Slurm Commands" "August 2024" "Slurm Commands"
+.TH scontrol "1" "Slurm Commands" "November 2024" "Slurm Commands"
 
 .SH "NAME"
 scontrol \- view or modify Slurm configuration and state.
@@ -75,7 +75,7 @@ unavailable to user's group will be displayed (i.e. this is the default behavior
 Dump information as JSON using the default data_parser plugin or explicit
 data_parser with parameters. All information is dumped, even if it would
 normally not be. Sorting and formatting arguments passed to other options are
-ignored; however, filtering arguments are still used. This option is not
+ignored; however, most filtering arguments are still used. This option is not
 available for every command.
 This option implicitly sets the \fB\-\-details\fR option.
 .IP
@@ -122,7 +122,7 @@ Print version information and exit.
 Dump information as YAML using the default data_parser plugin or explicit
 data_parser with parameters. All information is dumped, even if it would
 normally not be. Sorting and formatting arguments passed to other options are
-ignored; however, filtering arguments are still used. This option is not
+ignored; however, most filtering arguments are still used. This option is not
 available for every command.
 This option implicitly sets the \fB\-\-details\fR option.
 
@@ -152,7 +152,7 @@ COMPLETING or DOWN state.
 \fBdelete\fR <\fISPECIFICATION\fR>
 Delete the entry with the specified \fISPECIFICATION\fP.
 The three \fISPECIFICATION\fP choices are \fINodeName=<nodelist>\fP,
-\fIPartitionName=<name>\fP and \fIReservation=<name>\fP. Only dynamic nodes
+\fIPartitionName=<name>\fP and \fIReservationName=<name>\fP. Only dynamic nodes
 that have no running jobs and that are not part of a reservation can be
 deleted. Reservations and partitions should have no associated jobs at the time
 of their deletion (modify the jobs first). If the specified partition is in
@@ -210,6 +210,14 @@ spawned by Slurm and their descendants.
 .IP
 
 .TP
+\fBlistjobs\fR [<\fINodeName\fR>]
+Print jobs running on the host that runs this. This contacts any slurmstepd's
+running locally, and does not contact slurmctld
+
+Use <\fINodeName\fR> if using --enable-multiple-slurmd.
+.IP
+
+.TP
 \fBlistpids\fR [<\fIjob_id\fR>[.<\fIstep_id\fR>]] [<\fINodeName\fR>]
 Print a listing of the process IDs in a job step (if JOBID.STEPID is provided),
 or all of the job steps in a job (if \fIjob_id\fP is provided), or all of the job
@@ -223,6 +231,14 @@ are unable to identify all processes associated with a job or job step.
 Note that the NodeName option is only really useful when you have multiple
 slurmd daemons running on the same host machine. Multiple slurmd daemons on
 one host are, in general, only used by Slurm developers.
+.IP
+
+.TP
+\fBliststeps\fR [<\fINodeName\fR>]
+Print steps running on the host that runs this. This contacts any slurmstepd's
+running locally, and does not contact slurmctld
+
+Use <\fINodeName\fR> if using --enable-multiple-slurmd.
 .IP
 
 .TP
@@ -340,7 +356,7 @@ or authentication mechanism.
 \fBrelease\fR <\fIjob_list\fR>
 Release a previously held job to begin execution.
 The job_list argument is a comma separated list of job IDs OR
-"jobname=" with the job's name, which will attempt to hold all jobs having
+"jobname=" with the job's name, which will attempt to release all jobs having
 that name.
 Also see \fBhold\fR.
 .IP
@@ -941,7 +957,7 @@ time period. See salloc/sbatch man pages option \-\-delay\-boot.
 .TP
 \fBDependency\fR=<\fIdependency_list\fR>
 Defer job's initiation until specified job dependency specification
-is satisfied.
+is satisfied. Once a dependency is satisfied, it is removed from the job.
 Cancel dependency with an empty dependency_list (e.g. "Dependency=").
 <\fIdependency_list\fR> is of the form
 <\fItype:job_id[:job_id][,type:job_id[:job_id]]\fR>.
@@ -1216,7 +1232,10 @@ Only the Slurm administrator or root can increase job's priority.
 
 .TP
 \fBQOS\fR=<\fIname\fR>
-Set the job's QOS (Quality Of Service) to the specified value.
+Set the job's QOS (Quality Of Service) to the specified value,
+or comma separated list of QOS.
+If requesting a list it will be ordered based on the priority of the QOS given
+with the first being the highest priority.
 Value may be cleared with blank data value, "QOS=".
 .IP
 
@@ -1430,8 +1449,10 @@ Local node and system id making the resource allocation.
 
 .TP
 \fBBatchFlag\fR
-Jobs submitted using the sbatch command have BatchFlag set to 1.
-Jobs submitted using other commands have BatchFlag set to 0.
+Jobs submitted using the sbatch command have BatchFlag set to 1. The BatchFlag
+will be incremented past 1 if the job is requeued due to a failure. Jobs
+submitted using other commands have BatchFlag set to 0 and will not be
+incremented.
 .IP
 
 .TP
@@ -2403,7 +2424,7 @@ See the slurm.conf man page for more information.
 .SH "RESERVATIONS \- SPECIFICATIONS FOR CREATE, UPDATE, AND DELETE COMMANDS"
 
 .TP
-\fBReservation\fR=<\fIname\fR>
+\fBReservationName\fR=<\fIname\fR>
 Identify the name of the reservation to be created, updated, or deleted.
 This parameter is required for update and is the only parameter for delete.
 For create, if you do not want to give a reservation name, use

@@ -59,6 +59,7 @@
 #include "src/common/port_mgr.h"
 #include "src/common/read_config.h"
 #include "src/common/slurm_rlimits_info.h"
+#include "src/common/state_save.h"
 #include "src/common/strnatcmp.h"
 #include "src/common/xstring.h"
 
@@ -97,15 +98,13 @@
 #define FEATURE_MAGIC	0x34dfd8b5
 
 /* Global variables */
-List active_feature_list;	/* list of currently active features_records */
-List avail_feature_list;	/* list of available features_records */
 bool node_features_updated = true;
 bool slurmctld_init_db = true;
 
 static void _acct_restore_active_jobs(void);
-static void _add_config_feature(List feature_list, char *feature,
+static void _add_config_feature(list_t *feature_list, char *feature,
 				bitstr_t *node_bitmap);
-static void _add_config_feature_inx(List feature_list, char *feature,
+static void _add_config_feature_inx(list_t *feature_list, char *feature,
 				    int node_inx);
 static void _build_bitmaps(void);
 static void _gres_reconfig(void);
@@ -206,7 +205,7 @@ static int _sort_nodes_by_rank(const void *a, const void *b)
 	if (!n2)
 		return -1;
 
-	return slurm_sort_uint_list_asc(&n1->node_rank, &n2->node_rank);
+	return slurm_sort_uint32_list_asc(&n1->node_rank, &n2->node_rank);
 }
 
 /*
@@ -254,44 +253,15 @@ static void _sort_node_record_table_ptr(void)
 
 static void _add_nodes_with_feature(hostlist_t *hl, char *feature)
 {
-	if (avail_feature_list) {
-		char *feature_nodes;
-		node_feature_t *node_feat_ptr;
-		if (!(node_feat_ptr = list_find_first(avail_feature_list,
-						      list_find_feature,
-						      feature))) {
-			debug2("unable to find nodeset feature '%s'", feature);
-			return;
-		}
-		feature_nodes = bitmap2node_name(node_feat_ptr->node_bitmap);
-		hostlist_push(hl, feature_nodes);
-		xfree(feature_nodes);
-	} else {
-		node_record_t *node_ptr;
-		/*
-		 * The global feature bitmaps have not been set up at this
-		 * point, so we'll have to scan through the node_record_table
-		 * directly to locate the appropriate records.
-		 */
-		for (int i = 0; (node_ptr = next_node(&i)); i++) {
-			char *features, *tmp, *tok, *last = NULL;
+	node_record_t *node_ptr;
+	bitstr_t *tmp_bitmap = bit_alloc(node_record_count);
 
-			if (!node_ptr->features)
-				continue;
-
-			features = tmp = xstrdup(node_ptr->features);
-
-			while ((tok = strtok_r(tmp, ",", &last))) {
-				if (!xstrcmp(tok, feature)) {
-					hostlist_push_host(
-						hl, node_ptr->name);
-					break;
-				}
-				tmp = NULL;
-			}
-			xfree(features);
-		}
+	add_nodes_with_feature_to_bitmap(tmp_bitmap, feature);
+	for (int i = 0; (node_ptr = next_node_bitmap(tmp_bitmap, &i)); i++) {
+		hostlist_push_host(hl, node_ptr->name);
 	}
+
+	FREE_NULL_BITMAP(tmp_bitmap);
 }
 
 static void _add_all_nodes_to_hostlist(hostlist_t *hl)
@@ -354,6 +324,9 @@ extern hostlist_t *nodespec_to_hostlist(const char *nodes, bool uniq,
 		}
 	}
 
+	if (xstrchr(nodes, '{'))
+		parse_hostlist_functions(&hl);
+
 	if (uniq)
 		hostlist_uniq(hl);
 	return hl;
@@ -362,6 +335,7 @@ extern hostlist_t *nodespec_to_hostlist(const char *nodes, bool uniq,
 static void _init_bitmaps(void)
 {
 	/* initialize the idle and up bitmaps */
+	FREE_NULL_BITMAP(asap_node_bitmap);
 	FREE_NULL_BITMAP(avail_node_bitmap);
 	FREE_NULL_BITMAP(bf_ignore_node_bitmap);
 	FREE_NULL_BITMAP(booting_node_bitmap);
@@ -374,6 +348,7 @@ static void _init_bitmaps(void)
 	FREE_NULL_BITMAP(rs_node_bitmap);
 	FREE_NULL_BITMAP(share_node_bitmap);
 	FREE_NULL_BITMAP(up_node_bitmap);
+	asap_node_bitmap = bit_alloc(node_record_count);
 	avail_node_bitmap = bit_alloc(node_record_count);
 	bf_ignore_node_bitmap = bit_alloc(node_record_count);
 	booting_node_bitmap = bit_alloc(node_record_count);
@@ -595,6 +570,9 @@ static void _build_bitmaps(void)
 		     IS_NODE_REBOOT_ISSUED(node_ptr)) &&
 		    ((node_ptr->next_state & NODE_STATE_FLAGS) & NODE_RESUME))
 			bit_set(rs_node_bitmap, node_ptr->index);
+
+		if (IS_NODE_REBOOT_ASAP(node_ptr))
+			bit_set(asap_node_bitmap, node_ptr->index);
 	}
 }
 
@@ -686,7 +664,7 @@ static void _handle_all_downnodes(void)
 }
 
 /*
- * Convert a comma delimited string of account names into a List containing
+ * Convert a comma delimited string of account names into a list containing
  * pointers to those associations.
  */
 extern list_t *accounts_list_build(char *accounts, bool locked)
@@ -1201,7 +1179,7 @@ static void _sync_steps_to_conf(job_record_t *job_ptr)
 		if (step_ptr->step_layout &&
 		    step_ptr->step_layout->node_list &&
 		    (node_name2bitmap(step_ptr->step_layout->node_list, false,
-				      &step_ptr->step_node_bitmap))) {
+				      &step_ptr->step_node_bitmap, NULL))) {
 			error("Invalid step_node_list (%s) for %pS",
 			      step_ptr->step_layout->node_list, step_ptr);
 			delete_step_record(job_ptr, step_ptr);
@@ -1223,20 +1201,20 @@ static int _sync_detail_bitmaps(job_record_t *job_ptr)
 
 	if ((job_ptr->details->req_nodes) &&
 	    (node_name2bitmap(job_ptr->details->req_nodes, false,
-			      &job_ptr->details->req_node_bitmap))) {
+			      &job_ptr->details->req_node_bitmap, NULL))) {
 		error("Invalid req_nodes (%s) for %pJ",
 		      job_ptr->details->req_nodes, job_ptr);
 		return SLURM_ERROR;
 	}
 
+	/*
+	 * Ignore any errors if the exc_nodes list contains invalid entries.
+	 * We can the pretty sure we won't schedule onto nodes that don't exist.
+	 */
 	FREE_NULL_BITMAP(job_ptr->details->exc_node_bitmap);
-	if ((job_ptr->details->exc_nodes) &&
-	    (node_name2bitmap(job_ptr->details->exc_nodes, true,
-			      &job_ptr->details->exc_node_bitmap))) {
-		error("Invalid exc_nodes (%s) for %pJ",
-		      job_ptr->details->exc_nodes, job_ptr);
-		return SLURM_ERROR;
-	}
+	if (job_ptr->details->exc_nodes)
+		node_name2bitmap(job_ptr->details->exc_nodes, false,
+				 &job_ptr->details->exc_node_bitmap, NULL);
 
 	/*
 	 * If a nodelist has been provided with more nodes than are required
@@ -1269,7 +1247,7 @@ void _sync_jobs_to_conf(void)
 	list_itr_t *job_iterator;
 	job_record_t *job_ptr;
 	part_record_t *part_ptr;
-	List part_ptr_list = NULL;
+	list_t *part_ptr_list = NULL;
 	bool job_fail = false;
 	time_t now = time(NULL);
 	bool gang_flag = false;
@@ -1314,17 +1292,8 @@ void _sync_jobs_to_conf(void)
 			job_fail = true;
 		} else {
 			char *err_part = NULL;
-			part_ptr = find_part_record(job_ptr->partition);
-			if (part_ptr == NULL) {
-				part_ptr_list = get_part_list(
-					job_ptr->partition,
-					&err_part);
-				if (part_ptr_list) {
-					part_ptr = list_peek(part_ptr_list);
-					if (list_count(part_ptr_list) == 1)
-						FREE_NULL_LIST(part_ptr_list);
-				}
-			}
+			get_part_list(job_ptr->partition, &part_ptr_list,
+				      &part_ptr, &err_part);
 			if (part_ptr == NULL) {
 				error("Invalid partition (%s) for %pJ",
 				      err_part, job_ptr);
@@ -1349,15 +1318,15 @@ void _sync_jobs_to_conf(void)
 		FREE_NULL_BITMAP(job_ptr->node_bitmap_cg);
 		if (job_ptr->nodes_completing &&
 		    node_name2bitmap(job_ptr->nodes_completing,
-				     false,  &job_ptr->node_bitmap_cg)) {
-			error("Invalid nodes (%s) for %pJ",
+				     false,  &job_ptr->node_bitmap_cg, NULL)) {
+			error("Invalid nodes_completing (%s) for %pJ",
 			      job_ptr->nodes_completing, job_ptr);
 			job_fail = true;
 		}
 		FREE_NULL_BITMAP(job_ptr->node_bitmap);
 		if (job_ptr->nodes &&
 		    node_name2bitmap(job_ptr->nodes, false,
-				     &job_ptr->node_bitmap) && !job_fail) {
+				     &job_ptr->node_bitmap, NULL)) {
 			error("Invalid nodes (%s) for %pJ",
 			      job_ptr->nodes, job_ptr);
 			job_fail = true;
@@ -1365,9 +1334,9 @@ void _sync_jobs_to_conf(void)
 		FREE_NULL_BITMAP(job_ptr->node_bitmap_pr);
 #ifndef HAVE_FRONT_END
 		if (job_ptr->nodes_pr &&
-		    node_name2bitmap(job_ptr->nodes_pr,
-				     false,  &job_ptr->node_bitmap_pr)) {
-			error("Invalid nodes (%s) for %pJ",
+		    node_name2bitmap(job_ptr->nodes_pr, false,
+				     &job_ptr->node_bitmap_pr, NULL)) {
+			error("Invalid nodes_pr (%s) for %pJ",
 			      job_ptr->nodes_pr, job_ptr);
 			job_fail = true;
 		}
@@ -1437,6 +1406,7 @@ void _sync_jobs_to_conf(void)
 			}
 			job_ptr->state_reason = FAIL_DOWN_NODE;
 			xfree(job_ptr->state_desc);
+			job_ptr->exit_code = 1;
 			job_completion_logger(job_ptr, false);
 			if (job_ptr->job_state == JOB_NODE_FAIL) {
 				/* build_cg_bitmap() may clear JOB_COMPLETING */
@@ -1456,6 +1426,8 @@ void _sync_jobs_to_conf(void)
 				/* Reset node_cnt to exclude vanished nodes */
 				job_ptr->node_cnt = bit_set_count(
 					job_ptr->node_bitmap_cg);
+				/* Reset exit code from last run */
+				job_ptr->exit_code = 0;
 			}
 		}
 	}
@@ -1534,7 +1506,8 @@ extern int read_slurm_conf(int recover)
 		fatal("STEP_MGR not supported without PrologFlags=contain");
 
 	/* Build node and partition information based upon slurm.conf file */
-	build_all_nodeline_info(false, slurmctld_tres_cnt);
+	if ((error_code = build_all_nodeline_info(false, slurmctld_tres_cnt)))
+	    goto end_it;
 	/* Increase node table to handle dynamic nodes. */
 	if ((slurm_conf.max_node_cnt != NO_VAL) &&
 	    node_record_count < slurm_conf.max_node_cnt) {
@@ -1552,6 +1525,8 @@ extern int read_slurm_conf(int recover)
 		node_record_count = 1;
 		grow_node_record_table_ptr();
 	}
+
+	bit_cache_init(node_record_count);
 
 	(void)acct_storage_g_reconfig(acct_db_conn, 0);
 	build_all_frontend_info(false);
@@ -1835,7 +1810,7 @@ end_it:
  *	avail_feature_list
  * feature IN - name of the feature to add
  * node_bitmap IN - bitmap of nodes with named feature */
-static void _add_config_feature(List feature_list, char *feature,
+static void _add_config_feature(list_t *feature_list, char *feature,
 				bitstr_t *node_bitmap)
 {
 	node_feature_t *feature_ptr;
@@ -1867,7 +1842,7 @@ static void _add_config_feature(List feature_list, char *feature,
  *	avail_feature_list
  * feature IN - name of the feature to add
  * node_inx IN - index of the node with named feature */
-static void _add_config_feature_inx(List feature_list, char *feature,
+static void _add_config_feature_inx(list_t *feature_list, char *feature,
 				    int node_inx)
 {
 	node_feature_t *feature_ptr;
@@ -2020,11 +1995,11 @@ extern void build_feature_list_ne(void)
 
 /*
  * Update active_feature_list or avail_feature_list
- * feature_list IN - List to update: active_feature_list or avail_feature_list
+ * feature_list IN - list to update: active_feature_list or avail_feature_list
  * new_features IN - New active_features
  * node_bitmap IN - Nodes with the new active_features value
  */
-extern void update_feature_list(List feature_list, char *new_features,
+extern void update_feature_list(list_t *feature_list, char *new_features,
 				bitstr_t *node_bitmap)
 {
 	node_feature_t *feature_ptr;
@@ -2074,9 +2049,11 @@ static void _gres_reconfig(void)
 		 * time, which can take a while for a node in the cloud
 		 * to boot.
 		 */
-		gres_g_node_config_load(
-			node_ptr->config_ptr->cpus, node_ptr->name,
-			node_ptr->gres_list, NULL, NULL);
+		if (gres_g_node_config_load(node_ptr->config_ptr->cpus,
+					    node_ptr->name, node_ptr->gres_list,
+					    NULL, NULL) != SLURM_SUCCESS)
+			continue; /* No need to validate if load failed */
+
 		gres_node_config_validate(
 			node_ptr->name, node_ptr->config_ptr->gres,
 			&node_ptr->gres, &node_ptr->gres_list,
@@ -2395,15 +2372,12 @@ static int _sync_nodes_to_active_job(job_record_t *job_ptr)
 	int cnt = 0;
 	uint32_t node_flags;
 	node_record_t *node_ptr;
-	bitstr_t *node_bitmap, *orig_job_node_bitmap;
-	bool job_resized = false;
+	bitstr_t *node_bitmap, *orig_job_node_bitmap = NULL;
 
 	if (job_ptr->node_bitmap_cg) /* job completing */
 		node_bitmap = job_ptr->node_bitmap_cg;
 	else
 		node_bitmap = job_ptr->node_bitmap;
-
-	orig_job_node_bitmap = bit_copy(job_ptr->job_resrcs->node_bitmap);
 
 	job_ptr->node_cnt = bit_set_count(node_bitmap);
 	for (int i = 0; (node_ptr = next_node_bitmap(node_bitmap, &i)); i++) {
@@ -2459,16 +2433,31 @@ static int _sync_nodes_to_active_job(job_record_t *job_ptr)
 			 */
 			save_accounting_enforce = accounting_enforce;
 			accounting_enforce &= (~ACCOUNTING_ENFORCE_LIMITS);
+			if (job_ptr->job_resrcs &&
+			    job_ptr->job_resrcs->node_bitmap) {
+				/*
+				 * node_bitmap is eventually changed within
+				 * extract_job_resources_node() so we need to
+				 * copy it before that.
+				 */
+				if (!orig_job_node_bitmap)
+					orig_job_node_bitmap = bit_copy(
+						job_ptr->job_resrcs->
+						node_bitmap);
+			} else {
+				error("We resized job %pJ, but the original node bitmap is unavailable. Unable to resize step node bitmaps for job's steps, this should never happen",
+				      job_ptr);
+			}
 			job_pre_resize_acctg(job_ptr);
 			srun_node_fail(job_ptr, node_ptr->name);
 			kill_step_on_node(job_ptr, node_ptr, true);
 			excise_node_from_job(job_ptr, node_ptr);
 			job_post_resize_acctg(job_ptr);
-			job_resized = true;
 			accounting_enforce = save_accounting_enforce;
 		} else if (IS_NODE_DOWN(node_ptr) && IS_JOB_RUNNING(job_ptr)) {
 			info("Killing %pJ on DOWN node %s",
 			     job_ptr, node_ptr->name);
+			job_ptr->exit_code = 1;
 			_abort_job(job_ptr, JOB_NODE_FAIL, FAIL_DOWN_NODE,
 				   NULL);
 			cnt++;
@@ -2480,9 +2469,8 @@ static int _sync_nodes_to_active_job(job_record_t *job_ptr)
 	}
 
 	/* If the job was resized then resize the bitmaps of the job's steps */
-	if (job_resized) {
+	if (orig_job_node_bitmap)
 		rebuild_step_bitmaps(job_ptr, orig_job_node_bitmap);
-	}
 	FREE_NULL_BITMAP(orig_job_node_bitmap);
 
 	if ((IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr)) &&
@@ -2518,7 +2506,7 @@ static void _restore_job_accounting(void)
 	job_record_t *job_ptr;
 	list_itr_t *job_iterator;
 	bool valid = true;
-	List license_list;
+	list_t *license_list = NULL;
 
 	assoc_mgr_clear_used_info();
 
@@ -2553,7 +2541,7 @@ static void _restore_job_accounting(void)
 			if (IS_JOB_RUNNING(job_ptr) ||
 			    IS_JOB_SUSPENDED(job_ptr)) {
 				acct_policy_job_begin(job_ptr, false);
-				job_claim_resv(job_ptr);
+				resv_replace_update(job_ptr);
 			} else if (IS_JOB_PENDING(job_ptr) &&
 				   job_ptr->details &&
 				   job_ptr->details->accrue_time) {
@@ -2623,9 +2611,8 @@ static void _acct_restore_active_jobs(void)
 
 extern int dump_config_state_lite(void)
 {
-	static int high_buffer_size = (1024 * 1024);
-	int error_code = 0, log_fd;
-	char *old_file = NULL, *new_file = NULL, *reg_file = NULL;
+	static uint32_t high_buffer_size = (1024 * 1024);
+	int error_code = 0;
 	buf_t *buffer = init_buf(high_buffer_size);
 
 	DEF_TIMERS;
@@ -2637,49 +2624,8 @@ extern int dump_config_state_lite(void)
 	packstr(slurm_conf.accounting_storage_type, buffer);
 
 	/* write the buffer to file */
-	reg_file = xstrdup_printf("%s/last_config_lite",
-	                          slurm_conf.state_save_location);
-	old_file = xstrdup_printf("%s.old", reg_file);
-	new_file = xstrdup_printf("%s.new", reg_file);
-
-	log_fd = creat(new_file, 0600);
-	if (log_fd < 0) {
-		error("Can't save state, create file %s error %m",
-		      new_file);
-		error_code = errno;
-	} else {
-		int pos = 0, nwrite = get_buf_offset(buffer), amount;
-		char *data = (char *)get_buf_data(buffer);
-		high_buffer_size = MAX(nwrite, high_buffer_size);
-		while (nwrite > 0) {
-			amount = write(log_fd, &data[pos], nwrite);
-			if ((amount < 0) && (errno != EINTR)) {
-				error("Error writing file %s, %m", new_file);
-				error_code = errno;
-				break;
-			}
-			nwrite -= amount;
-			pos    += amount;
-		}
-		fsync(log_fd);
-		close(log_fd);
-	}
-	if (error_code)
-		(void) unlink(new_file);
-	else {			/* file shuffle */
-		(void) unlink(old_file);
-		if (link(reg_file, old_file))
-			debug4("unable to create link for %s -> %s: %m",
-			       reg_file, old_file);
-		(void) unlink(reg_file);
-		if (link(new_file, reg_file))
-			debug4("unable to create link for %s -> %s: %m",
-			       new_file, reg_file);
-		(void) unlink(new_file);
-	}
-	xfree(old_file);
-	xfree(reg_file);
-	xfree(new_file);
+	error_code = save_buf_to_state("last_config_lite", buffer,
+				       &high_buffer_size);
 
 	FREE_NULL_BUFFER(buffer);
 

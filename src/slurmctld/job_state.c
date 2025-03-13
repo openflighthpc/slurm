@@ -201,7 +201,6 @@ static const struct {
 	char *string;
 } job_flags[] = {
 	T(JOB_LAUNCH_FAILED),
-	T(JOB_UPDATE_DB),
 	T(JOB_REQUEUE),
 	T(JOB_REQUEUE_HOLD),
 	T(JOB_SPECIAL_EXIT),
@@ -259,11 +258,6 @@ static void _log_job_state_change(const job_record_t *job_ptr,
 	xfree(after_str);
 }
 
-extern void verify_job_state_cache_synced(void)
-{
-	/* no-op */
-}
-
 #else /* NDEBUG */
 
 /*
@@ -307,15 +301,7 @@ extern void job_state_set_flag(job_record_t *job_ptr, uint32_t flag)
 {
 	uint32_t job_state;
 
-	if (flag == JOB_UPDATE_DB)
-		/*
-		 * As stated in _set_db_inx_thread(), a db update will use the
-		 * JOB_READ_LOCK
-		 */
-		xassert(verify_lock(JOB_LOCK, READ_LOCK));
-	else
-		xassert(verify_lock(JOB_LOCK, WRITE_LOCK));
-
+	xassert(verify_lock(JOB_LOCK, WRITE_LOCK));
 	xassert(!(flag & JOB_STATE_BASE));
 	xassert(flag & JOB_STATE_FLAGS);
 

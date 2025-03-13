@@ -88,7 +88,7 @@ strong_alias(jobacctinfo_create, slurm_jobacctinfo_create);
 strong_alias(jobacctinfo_destroy, slurm_jobacctinfo_destroy);
 
 typedef struct slurm_jobacct_gather_ops {
-	void (*poll_data) (List task_list, uint64_t cont_id, bool profile);
+	void (*poll_data) (list_t *task_list, uint64_t cont_id, bool profile);
 	int (*endpoll)    ();
 	int (*add_task)   (pid_t pid, jobacct_id_t *jobacct_id);
 } slurm_jobacct_gather_ops_t;
@@ -111,7 +111,7 @@ static pthread_mutex_t init_run_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t watch_tasks_thread_id = 0;
 
 static int freq = 0;
-static List task_list = NULL;
+static list_t *task_list = NULL;
 static uint64_t cont_id = NO_VAL64;
 static pthread_mutex_t task_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -569,8 +569,16 @@ done:
 extern int jobacct_gather_fini(void)
 {
 	int rc = SLURM_SUCCESS;
+	static bool fini_ran = false;
 
 	slurm_mutex_lock(&g_context_lock);
+	if (fini_ran) {
+		slurm_mutex_unlock(&g_context_lock);
+		return SLURM_SUCCESS;
+	}
+
+	fini_ran = true;
+
 	if (g_context) {
 		if (watch_tasks_thread_id) {
 			slurm_mutex_unlock(&g_context_lock);

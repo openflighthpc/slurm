@@ -1,6 +1,6 @@
 <!--#include virtual="header.txt"-->
 
-<h1><a id="top">Accounting and Resource Limits</a></h1>
+<h1>Accounting and Resource Limits</h1>
 
 <h2 id="contents">Contents<a class="slurm_link" href="#contents"></a></h2>
 <ul>
@@ -26,6 +26,7 @@
 <li><a href="#limit-enforcement">Limit Enforcement</a></li>
 <li><a href="#modifying-entities">Modifying Entities</a></li>
 <li><a href="#removing-entities">Removing Entities</a></li>
+<li><a href="#accounting-interpretation">Accounting Interpretation</a></li>
 </ul>
 
 <h2 id="Overview">Overview<a class="slurm_link" href="#Overview"></a></h2>
@@ -258,13 +259,9 @@ Slurm Accounting Configuration Before Build
 the creation of user entities called "associations", which consist of the
 cluster, a user, account and optionally a partition.</p>
 
-<p><b>MySQL or MariaDB is the preferred database.</b>
-
-<p><b>NOTE</b>: If you have an existing Slurm accounting database and
-plan to upgrade your database server to MariaDB 10.2.1 or later from an older
-version of MariaDB or any version of MySQL, ensure you are running slurmdbd
-22.05.7 or later. These versions will gracefully handle changes to MariaDB
-default values that can cause problems for slurmdbd.</p>
+<p><b>MySQL or MariaDB is the preferred database.</b> Refer to the
+<a href="upgrades.html#db_server">Upgrade Guide</a> for information on in-place
+upgrades of Slurm and DB server packages.</p>
 
 <p>To enable this database support
 one only needs to have the development package for the database they
@@ -284,25 +281,35 @@ checking for mysql_config... /usr/bin/mysql_config
 MySQL test program built properly.
 </pre>
 
-<p><b>NOTE</b>: Before running the slurmdbd for the first time, review the
-current setting for MySQL's <i>innodb_buffer_pool_size</i>.
-Consider setting this
-value large enough to handle the size of the database. Having this value
-too small can be problematic when converting large tables over to the new
-database schema or when purging old records. We recommend assigning a
-significant portion of the system memory to this, keeping in mind the other
-resource requirements on the machine running MySQL/MariaDB, somewhere between
-5 and 50 percent of the available memory.
-<i>innodb_log_file_size</i> Should also be increased from default to reduce
-unnecessary small writes to disk.  For MySQL 8.0.30+,
-<i>innodb_redo_log_capacity</i> should be used instead.
-When using <b>AccountingStoreFlags=job_env,job_script</b> or older SQL servers,
-it is also important to check the value of <i>max_allowed_packet</i>.  When the
-packet size is too small and a large job script is used, the SQL server may
-reject the sql query as being too large.  This value should be at least 16MB,
-and must be larger than the value of <b>max_script_size</b>.
-Setting <i>innodb_lock_wait_timeout</i> to 900 is reccomended to allow some
-potentially extended queries to complete successfully.</p>
+<p><b>NOTE</b>: Before running the slurmdbd for the first time there are several
+MySQL/MariaDB server settings that should be reviewed.</p>
+<ul>
+<li><b>innodb_buffer_pool_size</b>:
+We recommend assigning between 5 and 50 percent of the available memory on the
+SQL server, and at least 4 GiB. Setting this value too small can cause problems
+when upgrading large Slurm databases or when purging old records.
+</li>
+<li><b>innodb_log_file_size</b>:
+This should be set to 25 percent of <b>innodb_buffer_pool_size</b> divided by
+<b>innodb_log_files_in_group</b> to reduce unnecessary small writes to disk.
+Keep in mind that increasing this can cause recovery times when the SQL server
+shuts down unexpectedly.
+</li>
+<li><b>innodb_redo_log_capacity</b>:
+Use this instead of <b>innodb_log_file_size</b> in MySQL 8.0.30+.
+This should be set to 25 percent of <b>innodb_buffer_pool_size</b>.
+</li>
+<li><b>innodb_lock_wait_timeout</b>:
+Set this to 900 seconds to allow some potentially extended queries to complete
+successfully.
+</li>
+<li><b>max_allowed_packet</b>:
+We recommend at least 16M for this value, and is important to check when using
+older SQL server versions. If you are using
+<b>AccountingStoreFlags=job_env,job_script</b>, this must be greater than
+<b>max_script_size</b>.
+</li>
+</ul>
 
 <p>
 See the following example:
@@ -321,7 +328,7 @@ $cat my.cnf
 ...
 [mysqld]
 <i>innodb_buffer_pool_size=4096M</i>
-<i>innodb_log_file_size=64M</i>
+<i>innodb_log_file_size=1024M</i>
 <i>innodb_lock_wait_timeout=900</i>
 <i>max_allowed_packet=16M</i>
 ...
@@ -540,8 +547,8 @@ and is not root, it must be added to accounting with AdminLevel=Admin and
 <li><b>StorageHost</b>:
 Define the name of the host the database is running where we are going
 to store the data.
-Ideally this should be the host on which SlurmDBD executes, but could
-be a different machine.</li>
+This can be the host on which slurmdbd executes, but for larger systems, we
+recommend keeping the database on a separate machine.</li>
 
 <li><b>StorageLoc</b>:
 Specifies the name of the database where accounting
@@ -594,11 +601,6 @@ purged at one time.</p>
 <h2 id="mysql-configuration">MySQL Configuration
 <a class="slurm_link" href="#mysql-configuration"></a>
 </h2>
-
-<p><b>NOTE</b>: If you have an existing Slurm accounting database and
-plan to upgrade your database server to MariaDB 10.2.1 (or newer) from a
-pre-10.2.1 version or from any version of MySQL, please contact SchedMD
-for assistance.</p>
 
 <p>While Slurm will create the database tables automatically you will need to
 make sure the StorageUser is given permissions in the MySQL or MariaDB database
@@ -966,7 +968,65 @@ completely. This is meant to clean up after typographical errors.
 Removing user associations or accounts, however, will cause slurmctld to lose
 track of usage data for that user/account.</p>
 
-<p style="text-align:center;">Last modified 17 July 2024</p>
+<h2 id="accounting-interpretation">Accounting Interpretation
+<a class="slurm_link" href="#accounting-interpretation"></a>
+</h2>
+<p>Slurm accounting is mainly focused on parallel computing. For this reason it
+gathers statistics at a "task level". A task is a set of user processes which
+run in a step, which is part of a job. A user can submit a step with many
+parallel tasks, e.g. by calling <code>srun -n</code>.
+</p>
+<p>
+The <a href="slurm.conf.html#OPT_JobAcctGatherType">JobAcctGather</a> plugin
+gathers metrics for some <a href="tres.html">Trackable Resources (TRES)</a>,
+like cpu, memory, energy, etc., at a given interval in the <a
+href="slurm.conf.html#OPT_JobAcctGatherFrequency">JobAcctGatherFrequency</a>
+defined in slurm.conf, or by using the <code>--acct-freq</code> option in the
+command line. A poll of data is also triggered at the start or the end of a
+step.
+</p>
+<p>Depending on the nature of the metric, the values will be recorded as
+standalone values or aggregated/calculated into a data structure.
+<p>
+For example, the <b>TresUsageInTot</b> field can be queried with
+<a href="sstat.thml">sstat</a> during job runtime, and for every TRES, it
+stores the sum of the gathered metrics of all tasks. For example, if we have 5
+tasks, all of them consuming 1GB of memory, then the <b>TresUsageInTot</b>
+would read "memory=5G". With the same example, and for the
+<b>TresUsageInMax</b> instead, it will store the maximum memory peak seen by
+any task of this step, so it would read "memory=1G".
+If we then query <b>TresUsageInMaxNode</b> and <b>TresUsageInMaxTask</b>, we
+will be able to see which task id had the largest memory peak and in which node
+this event occurred. These values can be queried in the dedicated fields
+<b>MaxRSS</b>, <b>MaxRSSNode</b> and <b>MaxRSSTask</b>.
+</p>
+<p>
+Other considerations to be taken into account are that in some cases, like for
+energy, the consumption is calculated by node. We don't have a value specific to
+the task so if there are other jobs in the system, or many tasks, the
+consumption at the time of running will be affected by all the processes in the
+node.
+</p>
+<p>
+After the job is done, the data will be stored in the database, and can be
+queried with other tools, like <a href="sacct.html">sacct</a>. In that case the
+<b>TresUsage*</b> fields could have different meanings. For example in the case
+of memory, <b>TresUsageInTot</b> will now store the sum of all peaks of memory
+of all tasks of the step seen at any time. This value is not useful per-se, but
+it is used to calculate <b>TresUsageInAve</b> to get the average memory peaks,
+that can then be compared with <b>TresUsageInMax</b> (or <b>MaxRSS</b>) to see
+if there was at least one outlier task in the step which consumed too much
+memory, indication of some issue.
+</p>
+<p>
+Note that for single task processes, <b>TresUsageInTot</b> could be used as the
+maximum memory that the step consumed at any time, which will be equal to
+<b>MaxRSS</b> and effectively represent the step memory peak.
+Profiling works similarly, and we provide
+<a href="slurm.conf.html#OPT_AcctGatherProfileType">plugins</a> like HDF5
+and InfluxDB that can help to visualize accounting data in other ways.
+</p>
+
+<p style="text-align:center;">Last modified 29 January 2025</p>
 
 <!--#include virtual="footer.txt"-->
-
