@@ -4,7 +4,7 @@ Version:	25.05.0
 %if %{defined patch} && %{undefined extraver}
 %define extraver .patched
 %endif
-Release:	%{rel}%{?extraver}%{?dist}
+Release:       %{rel}%{?extraver}.flight1%{?dist}
 Summary:	Slurm Workload Manager
 
 Group:		System Environment/Base
@@ -13,9 +13,9 @@ URL:		https://slurm.schedmd.com/
 
 # when the rel number is one, the directory name does not include it
 %if "%{rel}" == "1"
-%global slurm_source_dir %{name}-%{version}
+%global slurm_source_dir %{name}-%{version}.flight1
 %else
-%global slurm_source_dir %{name}-%{version}-%{rel}
+%global slurm_source_dir %{name}-%{version}-%{rel}.flight1
 %endif
 
 Source:		%{slurm_source_dir}.tar.bz2
