@@ -1,10 +1,11 @@
-Name:		slurm
+Name:		flight-slurm
 Version:	25.05.0
 %define rel	1
 %if %{defined patch} && %{undefined extraver}
 %define extraver .patched
 %endif
-Release:	%{rel}%{?extraver}%{?dist}
+%define flrel 1
+Release:	%{rel}%{?extraver}.flight%{flrel}%{?dist}
 Summary:	Slurm Workload Manager
 
 Group:		System Environment/Base
@@ -13,9 +14,9 @@ URL:		https://slurm.schedmd.com/
 
 # when the rel number is one, the directory name does not include it
 %if "%{rel}" == "1"
-%global slurm_source_dir %{name}-%{version}
+%global slurm_source_dir %{name}-%{version}.flight%{flrel}
 %else
-%global slurm_source_dir %{name}-%{version}-%{rel}
+%global slurm_source_dir %{name}-%{version}-%{rel}.flight%{flrel}
 %endif
 
 Source:		%{slurm_source_dir}.tar.bz2
@@ -344,14 +345,14 @@ is preferred over the compatibility libraries shipped by the PMIx project.
 %package torque
 Summary: Torque/PBS wrappers for transition from Torque/PBS to Slurm
 Group: Development/System
-Requires: slurm-perlapi
+Requires: flight-slurm-perlapi
 %description torque
 Torque wrapper scripts used for helping migrate from Torque/PBS to Slurm
 
 %package openlava
 Summary: openlava/LSF wrappers for transition from OpenLava/LSF to Slurm
 Group: Development/System
-Requires: slurm-perlapi
+Requires: flight-slurm-perlapi
 %description openlava
 OpenLava wrapper scripts used for helping migrate from OpenLava/LSF to Slurm
 
@@ -457,6 +458,19 @@ rm -rf %{buildroot}
 make install DESTDIR=%{buildroot}
 make install-contrib DESTDIR=%{buildroot}
 
+install -D -m644 etc/slurmctld.service %{buildroot}/%{_unitdir}/flight-slurmctld.service
+install -D -m644 etc/slurmd.service    %{buildroot}/%{_unitdir}/flight-slurmd.service
+install -D -m644 etc/slurmdbd.service  %{buildroot}/%{_unitdir}/flight-slurmdbd.service
+install -D -m644 etc/sackd.service  %{buildroot}/%{_unitdir}/flight-sackd.service
+
+# Install Flight Starter Profile Scripts
+install -D -m755 etc/profile.d/25-slurm.sh %{buildroot}/opt/flight/etc/profile.d/25-slurm.sh
+install -D -m755 etc/profile.d/25-slurm.csh %{buildroot}/opt/flight/etc/profile.d/25-slurm.csh
+
+%if %{with slurmrestd}
+install -D -m644 etc/slurmrestd.service  %{buildroot}/%{_unitdir}/flight-slurmrestd.service
+%endif
+
 # Do not package Slurm's version of libpmi on Cray systems in the usual location.
 # Cray's version of libpmi should be used. Move it elsewhere if the site still
 # wants to use it with other MPI stacks.
@@ -549,6 +563,7 @@ rm -rf %{buildroot}
 %defattr(-,root,root,0755)
 %{_datadir}/doc
 %{_bindir}/s*
+/opt/flight/etc/profile.d/25-slurm*
 %exclude %{_bindir}/seff
 %exclude %{_bindir}/sjobexitmod
 %exclude %{_bindir}/sjstat
@@ -603,27 +618,27 @@ rm -rf %{buildroot}
 %files sackd
 %defattr(-,root,root)
 %{_sbindir}/sackd
-%{_unitdir}/sackd.service
+%{_unitdir}/flight-sackd.service
 #############################################################################
 
 %files slurmctld
 %defattr(-,root,root)
 %{_sbindir}/slurmctld
-%{_unitdir}/slurmctld.service
+%{_unitdir}/flight-slurmctld.service
 #############################################################################
 
 %files slurmd
 %defattr(-,root,root)
 %{_sbindir}/slurmd
 %{_sbindir}/slurmstepd
-%{_unitdir}/slurmd.service
+%{_unitdir}/flight-slurmd.service
 #############################################################################
 
 %files slurmdbd
 %defattr(-,root,root)
 %{_sbindir}/slurmdbd
 %{_libdir}/slurm/accounting_storage_mysql.so
-%{_unitdir}/slurmdbd.service
+%{_unitdir}/flight-slurmdbd.service
 #############################################################################
 
 %files libpmi
@@ -678,7 +693,7 @@ rm -rf %{buildroot}
 %if %{with slurmrestd}
 %files slurmrestd
 %{_sbindir}/slurmrestd
-%{_unitdir}/slurmrestd.service
+%{_unitdir}/flight-slurmrestd.service
 %endif
 #############################################################################
 
@@ -733,40 +748,40 @@ if [ $1 -eq 0 ]; then
 fi
 
 %post sackd
-%systemd_post sackd.service
+%systemd_post flight-sackd.service
 %preun sackd
-%systemd_preun sackd.service
+%systemd_preun flight-sackd.service
 %postun sackd
-%systemd_postun_with_restart sackd.service
+%systemd_postun_with_restart flight-sackd.service
 
 %post slurmctld
-%systemd_post slurmctld.service
+%systemd_post flight-slurmctld.service
 %preun slurmctld
-%systemd_preun slurmctld.service
+%systemd_preun flight-slurmctld.service
 %postun slurmctld
-%systemd_postun_with_restart slurmctld.service
+%systemd_postun_with_restart flight-slurmctld.service
 
 %post slurmd
-%systemd_post slurmd.service
+%systemd_post flight-slurmd.service
 %preun slurmd
-%systemd_preun slurmd.service
+%systemd_preun flight-slurmd.service
 %postun slurmd
-%systemd_postun_with_restart slurmd.service
+%systemd_postun_with_restart flight-slurmd.service
 
 %post slurmdbd
-%systemd_post slurmdbd.service
+%systemd_post flight-slurmdbd.service
 %preun slurmdbd
-%systemd_preun slurmdbd.service
+%systemd_preun flight-slurmdbd.service
 %postun slurmdbd
-%systemd_postun_with_restart slurmdbd.service
+%systemd_postun_with_restart flight-slurmdbd.service
 
 %if %{with slurmrestd}
 %post slurmrestd
-%systemd_post slurmrestd.service
+%systemd_post flight-slurmrestd.service
 %preun slurmrestd
-%systemd_preun slurmrestd.service
+%systemd_preun flight-slurmrestd.service
 %postun slurmrestd
-%systemd_postun_with_restart slurmrestd.service
+%systemd_postun_with_restart flight-slurmrestd.service
 %endif
 
 %if %{defined patch}
