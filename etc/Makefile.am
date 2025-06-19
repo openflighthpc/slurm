@@ -8,6 +8,7 @@ edit = sed \
         -e 's|@bindir[@]|$(bindir)|g' \
         -e 's|@includedir[@]|$(includedir)|g' \
         -e 's|@libdir[@]|$(libdir)|g' \
+        -e 's|@prefix[@]|$(prefix)|g' \
         -e 's|@sbindir[@]|$(sbindir)|g' \
         -e 's|@sysconfdir[@]|$(sysconfdir)|g' \
 	-e 's|@sharedstatedir[@]|$(sharedstatedir)|g' \
