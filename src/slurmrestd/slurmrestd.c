@@ -614,9 +614,9 @@ static void _check_user(void)
 	if (gid_from_uid(slurm_conf.slurm_user_id) == getgid())
 		fatal("slurmrestd should not be run with SlurmUser's group.");
 
-	if (!getuid())
+	if (!getuid() && !become_user)
 		fatal("slurmrestd should not be run as the root user.");
-	if (!getgid())
+	if (!getgid() && !become_user)
 		fatal("slurmrestd should not be run with the root group.");
 
 	if ((gid_count = getgroups(0, NULL)) > 0) {
@@ -629,7 +629,7 @@ static void _check_user(void)
 			if (list[i] == slurm_conf.slurm_user_id)
 				fatal("slurmrestd should not be run with SlurmUser's group.");
 
-			if (!list[i])
+			if (!list[i] && !become_user)
 				fatal("slurmrestd should not be run with the root group.");
 
 			if (list[i] == SLURM_AUTH_NOBODY)
@@ -729,15 +729,17 @@ int main(int argc, char **argv)
 		    max_connections, callbacks);
 
 	/*
-	 * Check if TLS is available after conmgr_init() as it will attempt to
-	 * load the TLS plugin. If the TLS plugin fails to load the slurmrestd
-	 * daemon certificate, then unload the TLS plugin to avoid
-	 * tls_available() returning true but TLS not being possible.
+	 * Attempt to load TLS plugin and then attempt to load the certificate
+	 * or give user warning TLS will not be supported
 	 */
-	if (tls_available() && (rc = tls_g_load_own_cert(NULL, 0, NULL, 0))) {
+	if (!tls_g_init() && tls_available() &&
+	    (rc = tls_g_load_own_cert(NULL, 0, NULL, 0))) {
 		warning("Disabling TLS support due to failure loading TLS certificate: %s",
 			slurm_strerror(rc));
-		(void) tls_g_fini();
+
+		if ((rc = tls_g_fini()))
+			fatal("Unable to unload TLS plugin: %s",
+			      slurm_strerror(rc));
 	}
 
 	conmgr_add_work_signal(SIGINT, _on_signal_interrupt, NULL);
