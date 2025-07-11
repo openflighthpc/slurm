@@ -1,5 +1,5 @@
 Name:		flight-slurm
-Version:	25.05.0
+Version:	25.05.1
 %define rel	1
 %if %{defined patch} && %{undefined extraver}
 %define extraver .patched
@@ -198,8 +198,8 @@ Requires: libjwt >= 1.10.0
 %endif
 
 %if %{with yaml}
-Requires: libyaml >= 0.2.5
-BuildRequires: libyaml-devel >= 0.2.5
+Requires: libyaml >= 0.1.7
+BuildRequires: libyaml-devel >= 0.1.7
 %endif
 
 %if %{with freeipmi}
@@ -227,7 +227,7 @@ BuildRequires: libselinux-devel
 %define _mandir %{_slurm_mandir}
 
 #  Allow override of bashcompdir via _slurm_bashcompdir.
-%{!?_slurm_bashcompdir: %global _slurm_bashcompdir /usr/share}
+%{!?_slurm_bashcompdir: %global _slurm_bashcompdir %{_datadir}}
 %define _bashcompdir %{_slurm_bashcompdir}
 
 #
