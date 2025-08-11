@@ -1162,7 +1162,10 @@ extern ssize_t tls_p_send(tls_conn_t *conn, const void *buf, size_t n)
 				     (n - bytes_written), &blocked);
 
 		if (w < 0) {
-			on_s2n_error(conn, s2n_send);
+			/* blocked is expected */
+			if (s2n_error_get_type(s2n_errno) != S2N_ERR_T_BLOCKED)
+				on_s2n_error(conn, s2n_send);
+
 			bytes_written = SLURM_ERROR;
 			break;
 		}
@@ -1277,7 +1280,8 @@ extern bool tls_p_is_client_authenticated(tls_conn_t *conn)
 
 extern int tls_p_get_conn_fd(tls_conn_t *conn)
 {
-	xassert(conn);
+	if (!conn)
+		return -1;
 
 	if (conn->input_fd != conn->output_fd)
 		debug("%s: asymmetric connection %d->%d",

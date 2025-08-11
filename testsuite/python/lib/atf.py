@@ -1034,6 +1034,20 @@ def require_slurm_running():
 
     if properties["auto-config"]:
         if not is_slurmctld_running(quiet=True):
+
+            # Check and report the mixed components
+            versions = dict()
+            versions["slurmdbd"] = get_version("sbin/slurmdbd")
+            versions["slurmctld"] = get_version("sbin/slurmctld")
+            versions["slurmd"] = get_version("sbin/slurmd")
+            versions["scontrol"] = get_version("bin/scontrol")
+            if len(set(versions.values())) == 1:
+                logging.info(
+                    f"Starting Slurm with all components in the same version: {versions['slurmctld']}"
+                )
+            else:
+                logging.info(f"Starting Slurm in a mixed version setup: {versions}")
+
             properties["slurm-started"] = True
             start_slurm(clean=True, quiet=True)
     else:
@@ -1046,6 +1060,24 @@ def require_slurm_running():
     nodes = get_nodes(quiet=True)
 
 
+def is_upgrade_setup(
+    old_slurm_prefix="/opt/slurm-old", new_slurm_prefix="/opt/slurm-new"
+):
+    """
+    Return True if we have two Slurms configured in the system.
+    """
+
+    if not os.path.exists(old_slurm_prefix):
+        logging.debug(f"Old prefix {old_slurm_prefix} not exists.")
+        return False
+
+    if not os.path.exists(new_slurm_prefix):
+        logging.debug(f"New prefix {new_slurm_prefix} not exists.")
+        return False
+
+    return True
+
+
 def require_upgrades(
     old_slurm_prefix="/opt/slurm-old", new_slurm_prefix="/opt/slurm-new"
 ):
@@ -1056,15 +1088,8 @@ def require_upgrades(
     if not properties["auto-config"]:
         require_auto_config("to change/upgrade Slurm setup")
 
-    if not os.path.exists(old_slurm_prefix):
-        pytest.skip(
-            f"This test needs the upgrade setup. Old prefix {old_slurm_prefix} not exists."
-        )
-
-    if not os.path.exists(new_slurm_prefix):
-        pytest.skip(
-            f"This test needs the upgrade setup. New prefix {new_slurm_prefix} not exists."
-        )
+    if not is_upgrade_setup():
+        pytest.skip("This test needs an upgrade setup")
 
     # Double-check that old_version <= new_version
     old_version = get_version(slurm_prefix=old_slurm_prefix)
@@ -3106,8 +3131,19 @@ def get_jobs(job_id=None, dbd=False, **run_command_kwargs):
         command = "scontrol -d -o show jobs"
         if job_id is not None:
             command += f" {job_id}"
-        output = run_command_output(command, fatal=True, **run_command_kwargs)
+        # TODO: Remove extra debug info for t22858 instead of fatal
+        result = run_command(command, fatal=False, **run_command_kwargs)
+        if result["exit_code"]:
+            logging.debug(
+                f"Fatal failure of {command}, probably due 'Unable to contact slurm controller' (t22858)"
+            )
+            logging.debug("Getting gcore from slurmctld before fatal.")
+            gcore("slurmctld")
+            pytest.fail(
+                f"Command {command} failed with rc={result['exit_code']}: {result['stderr']}"
+            )
 
+        output = result["stdout"]
         job_dict = {}
         for line in output.splitlines():
             if line == "":
@@ -4310,25 +4346,48 @@ def run_check_test(source_file, build_args=""):
         build_args (string): Additional string to be appended to the build command.
     """
 
+    import xmltodict
+
     check_test = (
-        f"{module_tmp_path}/{os.path.splitext(os.path.basename(source_file))[0]}.exe"
+        f"{module_tmp_path}/{os.path.splitext(os.path.basename(source_file))[0]}"
     )
+    xml_test = check_test + ".xml"
 
     compile_against_libslurm(
         f"{properties['testsuite_check_dir']}/{source_file}",
         check_test,
         full=True,
         build_args=build_args + "-lcheck -lm -lsubunit",
+        fatal=True,
+        quiet=True,
     )
 
-    result = run_command(check_test, quiet=True)
-    logging.info(f"{result['stdout']}")
+    # Run the libcheck test setting an xml output
+    result = run_command(
+        check_test, quiet=True, env_vars=f"CK_XML_LOG_FILE_NAME={xml_test}"
+    )
 
-    assert not result["exit_code"]
+    # Parse the xml output
+    if not os.path.exists(xml_test):
+        pytest.fail(f"Test results not found: {xml_test}")
+
+    with open(xml_test) as f:
+        xml_data = xmltodict.parse(f.read())
+
+    logging.info(f"{result['stdout']}")
+    if result["exit_code"]:
+        logging.error(f"\n{result['stderr']}")
+
+    return xml_data["testsuites"]["suite"]
 
 
 def compile_against_libslurm(
-    source_file, dest_file, build_args="", full=False, shared=False
+    source_file,
+    dest_file,
+    build_args="",
+    full=False,
+    shared=False,
+    **run_command_kwargs,
 ):
     """Compiles a test program against either libslurm.so or libslurmfull.so.
 
@@ -4342,6 +4401,8 @@ def compile_against_libslurm(
         full (boolean): Use libslurmfull.so instead of libslurm.so.
         shared (boolean): Produces a shared library (adds the -shared compiler option
             and adds a .so suffix to the output file name).
+        **run_command_kwargs: Auxiliary arguments to be passed to the
+            run_command function (e.g., quiet, fatal, timeout, etc.).
 
     Returns:
         None
@@ -4372,7 +4433,7 @@ def compile_against_libslurm(
     command += f" -I{properties['slurm-source-dir']} -I{properties['slurm-build-dir']} -I{properties['slurm-prefix']}/include -Wl,-rpath={lib_path} -L{lib_path} -l{slurm_library} -lresolv"
     if build_args != "":
         command += f" {build_args}"
-    run_command(command, fatal=True)
+    run_command(command, **run_command_kwargs)
 
 
 def get_partitions(**run_command_kwargs):
