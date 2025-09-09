@@ -553,7 +553,7 @@ def gcore(component, pid=None, sbin=True):
         pids = [pid]
 
     if not pids:
-        logging.warning("Process {prefix}/{component} not found")
+        logging.warning(f"Process {prefix}/{component} not found")
     logging.debug(f"Getting gcores for PIDs: {pids}")
     for pid in pids:
         run_command(
@@ -1061,7 +1061,13 @@ def require_slurm_running():
 
 
 def is_upgrade_setup(
-    old_slurm_prefix="/opt/slurm-old", new_slurm_prefix="/opt/slurm-new"
+    old_slurm_prefix="/opt/slurm-old",
+    new_slurm_prefix="/opt/slurm-new",
+    old_build_prefix="",
+    new_build_prefix="",
+    old_source_prefix="",
+    new_source_prefix="",
+    force_old=False,
 ):
     """
     Return True if we have two Slurms configured in the system.
@@ -1075,11 +1081,27 @@ def is_upgrade_setup(
         logging.debug(f"New prefix {new_slurm_prefix} not exists.")
         return False
 
+    # Add the right properties
+    setup_upgrades(
+        old_slurm_prefix,
+        new_slurm_prefix,
+        old_build_prefix,
+        new_build_prefix,
+        old_source_prefix,
+        new_source_prefix,
+        force_old,
+    )
     return True
 
 
 def require_upgrades(
-    old_slurm_prefix="/opt/slurm-old", new_slurm_prefix="/opt/slurm-new"
+    old_slurm_prefix="/opt/slurm-old",
+    new_slurm_prefix="/opt/slurm-new",
+    old_build_prefix="",
+    new_build_prefix="",
+    old_source_prefix="",
+    new_source_prefix="",
+    force_old=True,
 ):
     """Checks if has two different versions installed.
 
@@ -1088,7 +1110,15 @@ def require_upgrades(
     if not properties["auto-config"]:
         require_auto_config("to change/upgrade Slurm setup")
 
-    if not is_upgrade_setup():
+    if not is_upgrade_setup(
+        old_slurm_prefix,
+        new_slurm_prefix,
+        old_build_prefix,
+        new_build_prefix,
+        old_source_prefix,
+        new_source_prefix,
+        force_old,
+    ):
         pytest.skip("This test needs an upgrade setup")
 
     # Double-check that old_version <= new_version
@@ -1100,37 +1130,71 @@ def require_upgrades(
         )
     logging.info(f"Required upgrade setup found: {old_version} and {new_version}")
 
+
+def setup_upgrades(
+    old_slurm_prefix="/opt/slurm-old",
+    new_slurm_prefix="/opt/slurm-new",
+    old_build_prefix="",
+    new_build_prefix="",
+    old_source_prefix="",
+    new_source_prefix="",
+    force_old=False,
+):
+    """
+    Adds the necessary atf.properties[] with the old/new paths.
+    If force_old is specified itt also update the links pointing to the old
+    paths, and they will be restored in the global teardown.
+    """
+    # TODO: We should use slurm-new(-build) instead of slurm-git(-build)
+    if old_build_prefix == "":
+        old_build_prefix = properties["slurm-build-dir"]
+    if new_build_prefix == "":
+        new_build_prefix = f"{properties['slurm-build-dir']}/../slurm-git-build"
+    if old_source_prefix == "":
+        old_source_prefix = properties["slurm-source-dir"]
+    if new_source_prefix == "":
+        new_source_prefix = f"{properties['slurm-source-dir']}/../slurm-git"
+
     properties["old-slurm-prefix"] = old_slurm_prefix
     properties["new-slurm-prefix"] = new_slurm_prefix
 
-    logging.debug(
-        "Setting bin/ and sbin/ pointing to old version and saving a backup..."
-    )
-    run_command(
-        f"sudo mv {properties['slurm-sbin-dir']} {module_tmp_path}/upgrade-sbin",
-        quiet=True,
-        fatal=True,
-    )
-    run_command(
-        f"sudo mv {properties['slurm-bin-dir']} {module_tmp_path}/upgrade-bin",
-        quiet=True,
-        fatal=True,
-    )
-    run_command(
-        f"sudo mkdir {properties['slurm-sbin-dir']} {properties['slurm-bin-dir']}",
-        quiet=True,
-        fatal=True,
-    )
-    run_command(
-        f"sudo ln -s {properties['old-slurm-prefix']}/sbin/* {properties['slurm-sbin-dir']}/",
-        quiet=True,
-        fatal=True,
-    )
-    run_command(
-        f"sudo ln -s {properties['old-slurm-prefix']}/bin/* {properties['slurm-bin-dir']}/",
-        quiet=True,
-        fatal=True,
-    )
+    properties["old-build-prefix"] = old_build_prefix
+    properties["new-build-prefix"] = new_build_prefix
+
+    properties["old-source-prefix"] = old_source_prefix
+    properties["new-source-prefix"] = new_source_prefix
+
+    properties["forced_upgrade_setup"] = force_old
+
+    if force_old:
+        logging.debug(
+            "Setting bin/ and sbin/ pointing to old version and saving a backup..."
+        )
+        run_command(
+            f"sudo mv {properties['slurm-sbin-dir']} {module_tmp_path}/upgrade-sbin",
+            quiet=True,
+            fatal=True,
+        )
+        run_command(
+            f"sudo mv {properties['slurm-bin-dir']} {module_tmp_path}/upgrade-bin",
+            quiet=True,
+            fatal=True,
+        )
+        run_command(
+            f"sudo mkdir {properties['slurm-sbin-dir']} {properties['slurm-bin-dir']}",
+            quiet=True,
+            fatal=True,
+        )
+        run_command(
+            f"sudo ln -s {properties['old-slurm-prefix']}/sbin/* {properties['slurm-sbin-dir']}/",
+            quiet=True,
+            fatal=True,
+        )
+        run_command(
+            f"sudo ln -s {properties['old-slurm-prefix']}/bin/* {properties['slurm-bin-dir']}/",
+            quiet=True,
+            fatal=True,
+        )
 
 
 def upgrade_component(component, new_version=True):
@@ -1191,40 +1255,54 @@ def get_version(component="sbin/slurmctld", slurm_prefix=""):
 
     Args:
         component (string): The bin/ or sbin/ component of Slurm to check.
+                            It also supports "config.h" to obtain the VERSION in the header.
         slurm_prefix (string): The path where the component is. By default the defined in testsuite.conf.
+                               If component is "config.h", then it's the build dir.
 
     Returns:
         A tuple representing the version. E.g. (25.05.0).
     """
-    if slurm_prefix == "":
-        slurm_prefix = f"{properties['slurm-sbin-dir']}/.."
+    if component == "config.h":
+        if slurm_prefix == "":
+            slurm_prefix = properties["slurm-build-dir"]
+        header = pathlib.Path(f"{slurm_prefix}/config.h")
+        if not header.exists():
+            pytest.fail("Unable to access to config.h to get Slurm version")
 
-    return tuple(
-        int(part) if part.isdigit() else 0
-        for part in run_command_output(
-            f"sudo {slurm_prefix}/{component} -V", quiet=True
+        version_str = re.search(
+            r'#define\s+VERSION\s+"([^"]+)"', header.read_text()
+        ).group(1)
+
+    else:
+        if slurm_prefix == "":
+            slurm_prefix = f"{properties['slurm-sbin-dir']}/.."
+
+        version_str = (
+            run_command_output(f"sudo {slurm_prefix}/{component} -V", quiet=True)
+            .strip()
+            .replace("slurm ", "")
         )
-        .replace("slurm ", "")
-        .split(".")
-    )
+
+    return tuple(int(part) if part.isdigit() else 0 for part in version_str.split("."))
 
 
-def require_version(version, component="sbin/slurmctld", slurm_prefix=""):
+def require_version(version, component="sbin/slurmctld", slurm_prefix="", reason=None):
     """Checks if the component is at least the required version, or skips.
 
     Args:
         version (tuple): The tuple representing the version.
         component (string): The bin/ or sbin/ component of Slurm to check.
         slurm_prefix (string): The path where the component is. By default the defined in testsuite.conf.
+        reason (string): The reason why the version of the component is required.
 
     Returns:
         A tuple representing the version. E.g. (25.05.0).
     """
     component_version = get_version(component, slurm_prefix)
     if component_version < version:
-        pytest.skip(
-            f"The version of {component} is {component_version}, required is {version}"
-        )
+        if not reason:
+            reason = f"The version of {component} is {component_version}, required is {version}"
+        pytest.skip(reason)
 
 
 def request_slurmrestd(request):
@@ -1515,7 +1593,6 @@ def get_config(live=True, source="slurm", quiet=False, delimiter="="):
                 )
                 if parameter_name.lower() in [
                     "downnodes",
-                    "frontendname",
                     "name",
                     "nodename",
                     "nodeset",
@@ -4387,6 +4464,7 @@ def compile_against_libslurm(
     build_args="",
     full=False,
     shared=False,
+    new_prefixes=False,
     **run_command_kwargs,
 ):
     """Compiles a test program against either libslurm.so or libslurmfull.so.
@@ -4411,26 +4489,32 @@ def compile_against_libslurm(
         >>> compile_against_libslurm("my_test.c", "my_test", build_args="-Wall -Werror")
     """
 
+    slurm_prefix = properties["slurm-prefix"]
+    slurm_source = properties["slurm-source-dir"]
+    slurm_build = properties["slurm-build-dir"]
+    if new_prefixes:
+        slurm_prefix = properties["new-slurm-prefix"]
+        slurm_source = properties["new-source-prefix"]
+        slurm_build = properties["new-build-prefix"]
+
     if full:
         slurm_library = "slurmfull"
     else:
         slurm_library = "slurm"
-    if os.path.isfile(
-        f"{properties['slurm-prefix']}/lib64/slurm/lib{slurm_library}.so"
-    ):
+    if os.path.isfile(f"{slurm_prefix}/lib64/slurm/lib{slurm_library}.so"):
         lib_dir = "lib64"
     else:
         lib_dir = "lib"
     if full:
-        lib_path = f"{properties['slurm-prefix']}/{lib_dir}/slurm"
+        lib_path = f"{slurm_prefix}/{lib_dir}/slurm"
     else:
-        lib_path = f"{properties['slurm-prefix']}/{lib_dir}"
+        lib_path = f"{slurm_prefix}/{lib_dir}"
 
     command = f"gcc {source_file} -g -pthread"
     if shared:
         command += " -fPIC -shared"
     command += f" -o {dest_file}"
-    command += f" -I{properties['slurm-source-dir']} -I{properties['slurm-build-dir']} -I{properties['slurm-prefix']}/include -Wl,-rpath={lib_path} -L{lib_path} -l{slurm_library} -lresolv"
+    command += f" -I{slurm_source} -I{slurm_build} -I{slurm_prefix}/include -Wl,-rpath={lib_path} -L{lib_path} -l{slurm_library} -lresolv"
     if build_args != "":
         command += f" {build_args}"
     run_command(command, **run_command_kwargs)
