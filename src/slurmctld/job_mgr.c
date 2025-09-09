@@ -788,7 +788,7 @@ static job_array_resp_msg_t *_resp_array_xlate(resp_array_struct_t *resp,
 
 static int _add_job_record(job_record_t *job_ptr, int num_jobs)
 {
-	if ((job_count + num_jobs) >= slurm_conf.max_job_cnt) {
+	if ((job_count + num_jobs) > slurm_conf.max_job_cnt) {
 		error("%s: MaxJobCount limit from slurm.conf reached (%u)",
 		      __func__, slurm_conf.max_job_cnt);
 		return SLURM_ERROR;
@@ -4083,7 +4083,7 @@ extern int job_allocate(job_desc_msg_t *job_desc, int immediate,
 	else
 		i = 1;
 
-	if ((job_count + i) >= slurm_conf.max_job_cnt) {
+	if ((job_count + i) > slurm_conf.max_job_cnt) {
 		error("%s: MaxJobCount limit from slurm.conf reached (%u)",
 		      __func__, slurm_conf.max_job_cnt);
 		return EAGAIN;
@@ -7751,6 +7751,16 @@ static void _figure_out_num_tasks(
 	uint32_t max_nodes = job_desc->max_nodes;
 	uint16_t ntasks_per_node = job_desc->ntasks_per_node;
 	uint16_t ntasks_per_tres = job_desc->ntasks_per_tres;
+
+	/*
+	 * Don't figure out num tasks / bitflags if updating the job and none
+	 * of the relevant influencing fields in job_desc are set.
+	 */
+	if (job_ptr &&
+	    (job_desc->num_tasks == NO_VAL && job_desc->min_nodes == NO_VAL &&
+	     job_desc->ntasks_per_node == NO_VAL16 &&
+	     job_desc->ntasks_per_tres == NO_VAL16))
+		return;
 
 	if (num_tasks != NO_VAL) {
 		job_desc->bitflags |= JOB_NTASKS_SET;

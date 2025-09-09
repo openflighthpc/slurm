@@ -199,14 +199,13 @@ test2.2    Validate scontrol help command.
 test2.3    Validate scontrol ping command.
 test2.4    Validate scontrol exit, quit, and !! commands.
 test2.5    Validate scontrol show commands for configuration, daemons,
-	   nodes, frontends, and partitions.
+	   nodes and partitions.
 test2.6    Validate scontrol verbose and quiet options.
 test2.7    Validate scontrol pidinfo command.
 test2.8    Validate scontrol show commands for jobs and steps.
 test2.9    Validate scontrol completing command.
 test2.10   Validate scontrol oneliner mode (--oneliner option).
 test2.11   Validate scontrol listpids command.
-test2.12   Validate scontrol show topology option.
 test2.13   Validate scontrol update command for job steps.
 test2.14   Validate scontrol update size of running job.
 test2.15   Validate scontrol update size of running job with some running tasks.
@@ -237,7 +236,6 @@ test3.8    Test of batch job requeue.
 test3.9    Test of "scontrol show slurmd"
 test3.10   Test of "scontrol notify <jobid> <message>"
 test3.11   Validate scontrol create, delete, and update of reservations.
-test3.12   Validate scontrol update command for front end nodes.
 test3.13   Validate scontrol update command for jobs by JobName and UserID.
 test3.14   Test of advanced reservation "replace" option.
 test3.15   Test of advanced reservation of licenses.
@@ -830,6 +828,7 @@ test_108_2   /commands/scontrol/test_--version.py
 test_108_3   /commands/scontrol/test_--help.py
 test_108_4   /commands/scontrol/test_reconfigure.py
 test_108_5   /commands/scontrol/test_--json.py
+test_108_6   Test scontrol show topology option
 
 test_109_#   Testing of sdiag options.
 ======================================
@@ -1041,6 +1040,7 @@ test_144_3   Test --exact with GPUs and multiple steps
 test_144_4   Test gres with file or type and --overlap
 test_144_6   Test gres with no_consume flag
 test_144_7   Test allocating sub-sets of GRES to job steps
+test_144_8   Test various parameters with and without enforce binding
 
 test_145_#   Testing --constraint.
 ==================================
@@ -1054,6 +1054,7 @@ test_146_1   Test MaxCPUsPerNode and MaxCPUsPerSocket
 test_147_#   Testing SPANK.
 ===========================
 test_147_1   Test SPANK contained when SlurmdParameters=contain_spank
+test_147_2   Test SPANK remote spank init failure modes
 
 test_149_#   Testing AcctGatherProfileType.
 ===========================================
