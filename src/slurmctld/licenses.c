@@ -601,6 +601,8 @@ static void _add_res_rec_2_lic_list(slurmdb_res_rec_t *rec, bool sync)
 	license_entry->id.lic_id = next_lic_id++;
 	xassert(license_entry->id.lic_id != NO_VAL16);
 
+	license_entry->id.hres_id = NO_VAL16;
+
 	list_append(cluster_license_list, license_entry);
 	last_license_update = time(NULL);
 }
@@ -2179,6 +2181,7 @@ static int _set_licenses_alloc(job_record_t *job_ptr, bool lic_or,
 		xassert(license_entry ==
 			(licenses_t *) list_peek(job_ptr->license_list));
 	}
+	xfree(job_ptr->licenses_allocated);
 	job_ptr->licenses_allocated =
 		license_list_to_string(job_ptr->license_list);
 

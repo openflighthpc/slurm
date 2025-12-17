@@ -1213,10 +1213,12 @@ static int _unpack_node_registration_status_msg(slurm_msg_t *smsg,
 			goto unpack_error;
 		safe_xcalloc(node_reg_ptr->step_id, node_reg_ptr->job_count,
 			     sizeof(*node_reg_ptr->step_id));
-		for (i = 0; i < node_reg_ptr->job_count; i++)
+		for (i = 0; i < node_reg_ptr->job_count; i++) {
 			safe_unpack_step_id_members(&node_reg_ptr->step_id[i],
 						    buffer,
 						    smsg->protocol_version);
+			node_reg_ptr->step_id[i].sluid = 0;
+		}
 
 		safe_unpack16(&node_reg_ptr->flags, buffer);
 
@@ -1271,10 +1273,12 @@ static int _unpack_node_registration_status_msg(slurm_msg_t *smsg,
 			goto unpack_error;
 		safe_xcalloc(node_reg_ptr->step_id, node_reg_ptr->job_count,
 			     sizeof(*node_reg_ptr->step_id));
-		for (i = 0; i < node_reg_ptr->job_count; i++)
+		for (i = 0; i < node_reg_ptr->job_count; i++) {
 			safe_unpack_step_id_members(&node_reg_ptr->step_id[i],
 						    buffer,
 						    smsg->protocol_version);
+			node_reg_ptr->step_id[i].sluid = 0;
+		}
 
 		safe_unpack16(&node_reg_ptr->flags, buffer);
 
@@ -14899,7 +14903,7 @@ unpack_msg(slurm_msg_t * msg, buf_t *buffer)
 		rc = _unpack_job_id_response_msg(msg, buffer);
 		break;
 	case REQUEST_CONFIG:
-		_unpack_config_request_msg(msg, buffer);
+		rc = _unpack_config_request_msg(msg, buffer);
 		break;
 	case REQUEST_RECONFIGURE_SACKD:
 	case REQUEST_RECONFIGURE_WITH_CONFIG:

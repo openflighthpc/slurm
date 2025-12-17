@@ -856,7 +856,7 @@ started before the upgrade have been completed.
 
 .TP
 \fBdisable_http\fR
-Disable responding to incoming HTTP requests for all Slurm daemons.
+Prevent slurmctld and slurmd from responding to incoming HTTP requests.
 .IP
 
 .TP
@@ -1880,16 +1880,23 @@ Acceptable values at present include:
 .IP
 .RS
 .TP 20
-\fBNoShared\fR
-Exclude shared memory from RSS. This option cannot be used with UsePSS.
-Only compatible with \fBjobacct_gather/linux\fR plugin.
+\fBDisableGPUAcct\fR
+Do not do accounting of GPU usage and skip any gpu driver library call. This
+parameter can help to improve performance if the GPU driver response is slow.
 .IP
 
 .TP
-\fBUsePss\fR
-Use PSS value instead of RSS to calculate real usage of memory. The PSS value
-will be saved as RSS. This option cannot be used with NoShared. Only compatible
-with \fBjobacct_gather/linux\fR plugin.
+\fBno_file_cache\fR
+Filesystem-backed memory (active_file and inactive_file) will be subtracted
+from the reported memory. This disables the use of the memory.peak interface,
+which can result in MaxRSS failing to record short memory spikes.
+Only compatible with \fBcgroup/v2\fR plugin.
+.IP
+
+.TP
+\fBNoShared\fR
+Exclude shared memory from RSS. This option cannot be used with UsePSS.
+Only compatible with \fBjobacct_gather/linux\fR plugin.
 .IP
 
 .TP
@@ -1914,9 +1921,10 @@ possibly with other processes left running.
 .IP
 
 .TP
-\fBDisableGPUAcct\fR
-Do not do accounting of GPU usage and skip any gpu driver library call. This
-parameter can help to improve performance if the GPU driver response is slow.
+\fBUsePss\fR
+Use PSS value instead of RSS to calculate real usage of memory. The PSS value
+will be saved as RSS. This option cannot be used with NoShared. Only compatible
+with \fBjobacct_gather/linux\fR plugin.
 .RE
 .IP
 
@@ -2786,24 +2794,29 @@ performed as usual.
 .TP
 \fBNamespaceType\fR
 Identifies the plugin to be used for job isolation through namespaces. To use
-these plugins, 'PrologFlags=Contain' must be set.
+these plugins, 'PrologFlags=Contain' must be set. Refer to the namespace page
+for further details: <https://slurm.schedmd.com/namespace.html>
+
 \fBNOTE\fR: See \fBProctrackType\fR for resource containment and usage tracking.
+
 Acceptable values at present include:
 .IP
 .RS
 .TP 20
-\fBnamespace/tmpfs\fR
-Used to create a private namespace on the filesystem for jobs, which houses
-temporary file systems (/tmp and /dev/shm) for each job.
-.IP
-.TP
 \fBnamespace/linux\fR
 Used to create a private filesystem namespace and optionally user and pid
 namespaces. The filesystem namespace houses temporary filesystems (/tmp and
 /dev/shm) for each job.
+
 \fBNOTE\fR: This plugin requires cgroup/v2 to operate correctly.
+.br
 \fBNOTE\fR: When using user namespaces, bpf token support (added in kernel 6.9)
 is required to use ConstrainDevices in \fBcgroup.conf\fR.
+.IP
+.TP
+\fBnamespace/tmpfs\fR
+Used to create a private namespace on the filesystem for jobs, which houses
+temporary file systems (/tmp and /dev/shm) for each job.
 .RE
 .IP
 
@@ -3179,16 +3192,29 @@ decrease in value.
 
 .TP
 \fBMAX_TRES\fR
-If set, the weighted TRES value (e.g. TRESBillingWeights) is calculated as the
-MAX of individual TRESs on a node (e.g. cpus, mem, gres) plus the sum of all
-global TRESs (e.g. licenses).
+If set, the weighted TRES value (\fBTRESBillingWeights\fR) is calculated as the
+sum of the following:
+.RS
+- MAX of individual TRESs (those tied to a specific node, e.g., cpus, mem, gres)
+.br
+- SUM of all global TRESs (those available on any nodes, e.g., licenses)
+.RE
+Refer to the TRES page for more details: <https://slurm.schedmd.com/tres.html>
 .IP
 
 .TP
 \fBMAX_TRES_GRES\fR
-If set, the weighted TRES value (e.g. TRESBillingWeights) is calculated as the
-MAX of individual TRESs on a node (e.g. cpus, mem), plus the billable gres, plus
-the sum of all global TRESs (e.g. licenses).
+If set, the weighted TRES value (\fBTRESBillingWeights\fR) is calculated as the
+sum of the following:
+.RS
+- SUM of all billable GRESs (e.g., GPUs)
+.br
+- MAX of other individual TRESs (those tied to a specific node, e.g., cpus, mem)
+.br
+- SUM of all global TRESs (those available on any nodes, e.g., licenses)
+.RE
+Added in Slurm 25.05. Refer to the TRES page for more details:
+<https://slurm.schedmd.com/tres.html>
 .IP
 
 .TP
@@ -4831,7 +4857,8 @@ partition will be scheduled.
 An exception is made for jobs that can not run due to partition constraints
 (e.g. the time limit) or down/drained nodes.
 In that case, lower priority jobs can be initiated and not impact the higher
-priority job.
+priority job. Setting this scheduler type will disable heterogeneous jobs, since
+they are handled by the backfill scheduler.
 .RE
 .IP
 
@@ -8155,42 +8182,17 @@ partition.
 
 .TP
 \fBTRESBillingWeights\fR
-TRESBillingWeights is used to define the billing weights of each tracked TRES
-type (see \fBAccountingStorageTRES\fR) that
-will be used in calculating the usage of a job. The calculated usage is used
-when calculating fairshare and when enforcing the TRES billing limit on jobs.
+Comma\-separated list of <\fITRES Type\fR>=<\fINumeric Weight\fR> pairs defining
+the billing weights of one or more tracked TRES types (see
+\fBAccountingStorageTRES\fR) that will be used in calculating the usage of a job
+in this partition. The resulting usage amount is used when calculating fairshare
+and when enforcing the TRES billing limit on jobs. See also
+\fBPriorityWeightTRES\fR to adjust job priority directly based on TRES usage.
 
-Billing weights are specified as a comma\-separated list of
-\fI<TRES Type>\fR=\fI<TRES Billing Weight>\fR pairs.
+By default, jobs are billed against the total number of allocated CPUs
+(TRESBillingWeights="CPU=1").
 
-Any TRES Type is available for billing. Note that the base unit for memory and
-burst buffers is megabytes.
-
-By default the billing of TRES is calculated as the sum of all TRES types
-multiplied by their corresponding billing weight.
-
-The weighted amount of a resource can be adjusted by adding a suffix of K,M,G,T
-or P after the billing weight. For example, a memory weight of "mem=.25" on a
-job allocated 8GB will be billed 2048 (8192MB *.25) units. A memory weight of
-"mem=.25G" on the same job will be billed 2 (8192MB * (.25/1024)) units.
-
-Negative values are allowed.
-
-When a job is allocated 1 CPU and 8 GB of memory on a partition configured with
-TRESBillingWeights="CPU=1.0,Mem=0.25G,GRES/gpu=2.0,license/licA=1.5", the
-billable TRES will be: (1*1.0) + (8*0.25) + (0*2.0) + (0*1.5) = 3.0.
-
-If PriorityFlags=MAX_TRES is configured, the billable TRES is calculated as the
-MAX of individual TRESs on a node (e.g. cpus, mem, gres) plus the sum of all
-global TRESs (e.g. licenses). Using the same example above the billable TRES
-will be MAX(1*1.0, 8*0.25, 0*2.0) + (0*1.5) = 2.0.
-
-If TRESBillingWeights is not defined then the job is billed against the total
-number of allocated CPUs.
-
-\fBNOTE\fR: TRESBillingWeights doesn't affect job priority directly as it is
-currently not used for the size of the job. If you want TRESs to play a role in
-the job's priority then refer to the PriorityWeightTRES option.
+Refer to the TRES page for more details: <https://slurm.schedmd.com/tres.html>
 .RE
 .IP
 

@@ -5313,6 +5313,10 @@ static void _resv_node_replace(slurmctld_resv_t *resv_ptr)
 	resv_select_t resv_select = {
 		.allowed_parts_list = resv_ptr->allowed_parts_list,
 	};
+	slurmctld_resv_t *resv_backup;
+
+	/* Required for accounting update if node list changes */
+	resv_backup = _copy_resv(resv_ptr);
 
 	/* Identify nodes which can be preserved in this reservation */
 	preserve_bitmap = bit_copy(resv_ptr->node_bitmap);
@@ -5444,9 +5448,11 @@ static void _resv_node_replace(slurmctld_resv_t *resv_ptr)
 	}
 	FREE_NULL_BITMAP(preserve_bitmap);
 	if (replaced) {
+		_set_tres_cnt(resv_ptr, resv_backup);
 		last_resv_update = time(NULL);
 		schedule_resv_save();
 	}
+	_del_resv_rec(resv_backup);
 }
 
 /*
@@ -7659,6 +7665,15 @@ extern int job_test_resv(job_record_t *job_ptr, time_t *when,
 	job_start_time = *when;
 	job_end_time   = *when + _get_job_duration(job_ptr, reboot);
 	*node_bitmap = (bitstr_t *) NULL;
+
+	/*
+	 * Prevent jobs that exceed the end time of the reservation from being
+	 * attracted to a magnetic reservation
+	 */
+	if ((job_ptr->bit_flags & JOB_MAGNETIC) && (job_ptr->resv_name) &&
+	    (job_end_time > job_ptr->resv_ptr->end_time)) {
+		return ESLURM_RESERVATION_INVALID;
+	}
 
 	if (job_ptr->resv_name) {
 		if (!job_ptr->resv_ptr) {
