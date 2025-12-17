@@ -2573,6 +2573,7 @@ static job_record_t *_get_last_relevant_job(job_record_t *job_ptr,
 					    &relevant_job_args);
 
 	xfree(relevant_job_args.needed_licenses);
+	FREE_NULL_BITMAP(relevant_job_args.effective_nodes);
 
 	return last_relevant_job;
 }
@@ -2781,6 +2782,8 @@ static int _future_run_test(job_record_t *job_ptr, bitstr_t *node_bitmap,
 			break;
 		}
 		do {
+			if (time_window > YEAR_SECONDS)
+				break;
 			if (bf_window_scale)
 				time_window += bf_window_scale;
 			else

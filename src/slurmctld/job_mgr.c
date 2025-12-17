@@ -7638,10 +7638,10 @@ static int _job_create(job_desc_msg_t *job_desc, int allocate, int will_run,
 		if (!job_ptr->details->std_out) {
 			if (!job_desc->array_inx)
 				job_ptr->details->std_out =
-					xstrdup("slurm-%j.out");
+					xstrdup(DEFAULT_BATCH_STDOUT_PATH);
 			else
-				job_ptr->details->std_out =
-					xstrdup("slurm-%A_%a.out");
+				job_ptr->details->std_out = xstrdup(
+					DEFAULT_BATCH_ARRAY_STDOUT_PATH);
 		}
 
 		if (slurm_conf.conf_flags & CONF_FLAG_SJE) {
@@ -13620,6 +13620,15 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			xfree(job_ptr->state_desc);
 		}
 
+		/*
+		 * The update did not explicit a time limit, but did
+		 * explicit a new QoS. Now that we have changed the QoS, we are
+		 * sure that we can use whatever is set in its QoS limits to set
+		 * the final job's time limit later.
+		 */
+		if (job_desc->time_limit == NO_VAL)
+			job_desc->time_limit = new_qos_ptr->max_wall_pj;
+
 		info("%s: setting QOS to %s for %pJ",
 		     __func__, detail_ptr->qos_req, job_ptr);
 	}
@@ -15000,7 +15009,9 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 				   __func__, job_ptr->licenses,
 				   job_desc->licenses, job_ptr);
 			xfree(job_ptr->licenses);
-			job_ptr->licenses = xstrdup(job_desc->licenses);
+			if (job_desc->licenses && *job_desc->licenses)
+				job_ptr->licenses = xstrdup(job_desc->licenses);
+			xfree(job_ptr->licenses_allocated);
 			license_job_get(job_ptr, false);
 		} else {
 			/*
@@ -15995,6 +16006,7 @@ static int _foreach_purge_missing_jobs(void *x, void *arg)
 	job_record_t *job_ptr = x;
 	foreach_purge_missing_jobs_t *foreach_purge_missing_jobs = arg;
 	time_t startup_time = foreach_purge_missing_jobs->batch_startup_time;
+	slurm_step_id_t step_id;
 
 	if ((IS_JOB_CONFIGURING(job_ptr) ||
 	     (!IS_JOB_RUNNING(job_ptr) &&
@@ -16009,6 +16021,7 @@ static int _foreach_purge_missing_jobs(void *x, void *arg)
 	     foreach_purge_missing_jobs->node_boot_time))
 		startup_time -= slurm_conf.resume_timeout;
 
+	step_id = STEP_ID_FROM_JOB_RECORD(job_ptr);
 	if (job_ptr->batch_flag &&
 	    !job_ptr->het_job_offset &&
 	    (job_ptr->time_last_active < startup_time) &&
@@ -16017,7 +16030,6 @@ static int _foreach_purge_missing_jobs(void *x, void *arg)
 	     find_node_record(job_ptr->batch_host))) {
 		bool requeue = false;
 		char *requeue_msg = "";
-		slurm_step_id_t step_id = STEP_ID_FROM_JOB_RECORD(job_ptr);
 		if (job_ptr->details && job_ptr->details->requeue) {
 			requeue = true;
 			requeue_msg = ", Requeuing job";
@@ -16034,6 +16046,29 @@ static int _foreach_purge_missing_jobs(void *x, void *arg)
 		(void) list_for_each(job_ptr->step_list,
 				     _foreach_notify_srun_missing_step,
 				     foreach_purge_missing_jobs);
+
+		/*
+		 * The RPC agent for REQUEST_LAUNCH_PROLOG is now able to cancel
+		 * an interactive job if some slurmd never received that RPC.
+		 *
+		 * But if we restart slurmctld we never hit that logic, so we
+		 * need this block here to clean up these jobs too.
+		 *
+		 * Note: There's still a chance for this cleanup to be delayed.
+		 * If slurmd is restarted after slurmctld, but before
+		 * prolog_timeout, this logic is skipped. And we need to wait
+		 * the ping logic to cycle over MAX_REG_FREQUENCY before
+		 * triggering this logic again in the worst case.
+		 */
+		if ((job_ptr->state_reason == WAIT_PROLOG) &&
+		    !job_ptr->batch_flag &&
+		    (difftime(time(NULL), job_ptr->prolog_launch_time) >
+		     slurm_conf.prolog_timeout)) {
+			error("%s: Revoking job %pI due to nodes not responding",
+			      __func__, &step_id);
+			job_complete(&step_id, slurm_conf.slurm_user_id, false,
+				     true, 1);
+		}
 	}
 	return 0;
 }
