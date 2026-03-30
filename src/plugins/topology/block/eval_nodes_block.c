@@ -183,7 +183,7 @@ static void _jobinfo_init(
 	 * --network=unique-channel-per-segment option. If that option is not
 	 *  specified, no segment data needs to be collected here.
 	 */
-	if (!xstrstr("unique-channel-per-segment", job_ptr->network)) {
+	if (!xstrstr(job_ptr->network, "unique-channel-per-segment")) {
 		log_flag(SELECT_TYPE, "Not recording segment information for %pJ",
 			 job_ptr);
 		return;
@@ -233,6 +233,10 @@ int _get_block_level(int rem_nodes, int *llblock_level, block_context_t *ctx)
 			bit_fls_from_bit(ctx->block_levels, block_level - 1);
 	else if (llblock_level)
 		*llblock_level = 0;
+
+	/* rem_nodes may have been zero */
+	if (block_level < 0)
+		return -1;
 
 	block_level = bit_ffs_from_bit(ctx->block_levels, block_level);
 

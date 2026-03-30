@@ -16709,6 +16709,11 @@ void batch_requeue_fini(job_record_t *job_ptr)
 		return;
 
 	if (IS_JOB_EXPEDITING(job_ptr)) {
+		if (job_ptr->epilog_running) {
+			debug("%s: unexpected call with epilog still running for %pJ",
+			     __func__, job_ptr);
+			return;
+		}
 		if (!job_ptr->epilog_failed) {
 			job_state_unset_flag(job_ptr, JOB_EXPEDITING);
 			job_state_set_flag(job_ptr, JOB_REQUEUE_HOLD);
@@ -17894,12 +17899,14 @@ static int _job_requeue_op(uid_t uid, job_record_t *job_ptr, bool preempt,
 		if (preempt) {
 			job_state_set(job_ptr, JOB_PREEMPTED);
 			build_cg_bitmap(job_ptr);
-			job_completion_logger(job_ptr, true);
+			if (!is_completed && !is_completing)
+				job_completion_logger(job_ptr, true);
 			job_state_set(job_ptr, JOB_REQUEUE);
 		} else {
 			job_state_set(job_ptr, JOB_REQUEUE);
 			build_cg_bitmap(job_ptr);
-			job_completion_logger(job_ptr, true);
+			if (!is_completed && !is_completing)
+				job_completion_logger(job_ptr, true);
 		}
 	}
 
@@ -19124,8 +19131,10 @@ static void _set_job_requeue_exit_value(job_record_t *job_ptr)
 
 	exit_code = WEXITSTATUS(job_ptr->exit_code);
 
-	if (job_ptr->bit_flags & EXPEDITED_REQUEUE) {
-		verbose("%s: %pJ starting expedited requeue", __func__, job_ptr);
+	/* Only requeue on failure; success (exit 0) completes the job. */
+	if ((job_ptr->bit_flags & EXPEDITED_REQUEUE) && exit_code) {
+		verbose("%s: %pJ starting expedited requeue",
+			__func__, job_ptr);
 		job_state_set_flag(job_ptr, JOB_REQUEUE | JOB_EXPEDITING);
 		return;
 	}
