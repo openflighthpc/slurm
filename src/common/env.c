@@ -1463,15 +1463,36 @@ env_array_for_step(char ***dest,
 		   uint16_t launcher_port,
 		   bool preserve_env)
 {
-	char *tmp, *tpn;
+	char *cluster_name, *tmp, *tpn;
 	uint32_t node_cnt, task_cnt;
 
 	if (!step || !launch)
 		return;
 
+	if (working_cluster_rec && working_cluster_rec->name)
+		cluster_name = working_cluster_rec->name;
+	else
+		cluster_name = slurm_conf.cluster_name;
+	env_array_overwrite_fmt(dest, "SLURM_CLUSTER_NAME", "%s", cluster_name);
+
 	node_cnt = step->step_layout->node_cnt;
 	env_array_overwrite_fmt(dest, "SLURM_STEP_ID", "%u",
 				step->step_id.step_id);
+
+	if (launch->cred && launch->cred->arg &&
+	    launch->cred->arg->job_account) {
+		env_array_overwrite_fmt(dest, "SLURM_JOB_ACCOUNT", "%s",
+					launch->cred->arg->job_account);
+	}
+
+	if (launch->cred && launch->cred->arg) {
+		tmp = gid_to_string_or_null(launch->cred->arg->gid);
+		if (tmp) {
+			env_array_overwrite_fmt(dest, "SLURM_JOB_GROUP", "%s",
+						tmp);
+			xfree(tmp);
+		}
+	}
 
 	if (launch->het_job_node_list) {
 		tmp = launch->het_job_node_list;
@@ -2234,7 +2255,7 @@ char **env_array_user_default(const char *username)
 				starttoken, env_loc, stoptoken);
 	xfree(stepd_path);
 
-	if (pipe(fildes) < 0) {
+	if (pipe2(fildes, O_CLOEXEC) < 0) {
 		fatal("pipe: %m");
 		return NULL;
 	}
@@ -2305,7 +2326,7 @@ char **env_array_user_default(const char *username)
 		timeleft -= (now.tv_usec - begin.tv_usec) / 1000;
 		if (timeleft <= 0) {
 			verbose("timeout waiting for "SUCMD" to complete");
-			kill(-child, 9);
+			kill(child, 9);
 			break;
 		}
 		if ((rc = poll(&ufds, 1, timeleft)) <= 0) {
@@ -2348,7 +2369,7 @@ char **env_array_user_default(const char *username)
 	env_array_free(child_args.tmp_env);
 
 	for (config_timeout=0; ; config_timeout++) {
-		kill(-child, SIGKILL);	/* Typically a no-op */
+		kill(child, SIGKILL); /* Typically a no-op */
 		if (config_timeout)
 			sleep(1);
 		if (waitpid(child, &rc, WNOHANG) > 0)

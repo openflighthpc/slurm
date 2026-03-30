@@ -1,3 +1,75 @@
+## Changes in 25.11.4
+
+* slurmrestd - Remove ExecReload from unit file since the daemon does not handle SIGHUP (reload would terminate the process).
+* Prevent "period_start should already be set" errors when purging slurmdbd data and fix file names for archives of purged slurmdbd data.
+* Skip x11 shutdown when x11 functionality was not requested.
+* Fix build errors with recent versions of libcurl (8.16+).
+* Fix scrun segfault with step_mgr and if environment is set.
+* Fix two memory leaks located in the job info struct.
+* Fix sacct not accepting -R flag.
+* switch/nvidia_imex - Fix parsing of --network=unique-channel-per-segment option.
+* topology/block - Fix parsing of --network=unique-channel-per-segment option.
+* Fix compile errors building against glibc-2.43
+* Prevent potential race that could cause process/script completion to go undetected. In the case of prolog/epilog, this would leave jobs stuck in CG state on nodes running many concurrent jobs. In the case of --get-user-env, it may time out resulting in jobs being requeued and held.
+* switch/nvidia_imex - fix use-after-free when switch plugin debug logging is enabled.
+* Fix bad umask() if switch/nvidia_imex fails to initialize.
+* switch/nvidia_imex - fix memory leak if imex_dev_major is set.
+* switch/nvidia_imex - fix potential memory leaks when unpacking the jobinfo structure.
+* switch/nvidia_imex - prevent job from starting when imex channel allocation fails.
+* When bf_continue is set, prevent backfill from potentially ending its cycle early due to the reason "System state changed" because of a node state change.
+* Fix underflow in GRES selection when RestrictedCoresPerGPU is configured and the job is exclusive.
+* Fix race on reconfigure that caused slurmctld to crash.
+* Docs - Update the version constraints for libjwt to reflect the fact that only 1.x may be used with Slurm.
+* Fix case when using sacctmgr where user assoc failed to be removed when removing an account with parent specified.
+* cgroup/v2 - Fix issue which caused memory.peak to be inconsistently used.
+* Prevent flex reservations from taking nodes from other reservations if those reservations do not request full nodes.
+* Fix slurmctld crash situation with srun --overcommit.
+* Adding log message to notify user of queries which are too large
+
+## Changes in 25.11.3
+
+* Fix regression from af2c0bd which caused usercpu and systemcpu to be missing for job steps.
+* Fixed issue where RestrictedCoresPerGPU with shared gres are limited to using restricted cores on one job per sharing gres.
+* slurmd - Fix regression that could cause thread limits to not be enforced for handling incoming RPCs.
+* Fix "sacctmgr show conf" to properly display CommitDelay in seconds instead of as a boolean.
+* Fix cron/requeued jobs being incorrectly reported as runaway
+* slurmctld - Prevent the double-removal of accounting usage for jobs being requeued that are in the COMPLETED or COMPLETING state.
+* When deleting a QOS from the DB, also remove it from partition QOS, AllowQOS and DenyQOS fields.
+* Fixed bug that could cause the detected CPU count to be lower than actual available CPU count. This bug could have resulted in the default value for conmgr_threads being lower than the number of available CPUs in sackd, scrun, slurmctld, slurmscriptd, slurmd, slurmstepd, slurmdbd, and slurmrestd when the assigned CPUs are not sequential.
+* slurmdbd - Prevent the following slurmdbd.conf options from overriding the default values of any in the list not specified: AllowNoDefAcct, AllResourcesAbsolute, DisableCoordDBD, DisableArchiveCommands.
+* salloc/sbatch - Nesting a non-stepmgr salloc or sbatch inside an existing job allocation that enabled the stepmgr will no longer result in the inner job’s steps failing to launch.
+* Prevent slurmd -G from initializing sack processing thread.
+* Added SLURM_CLUSTER_NAME, SLURM_JOB_ACCOUNT and SLURM_JOB_GROUP environment variables when a step is launched.
+* slurmctld - Prevent marking external nodes as being unresponsive when reconfiguring if SlurmctldParameters=enable_configless is used.
+* Fix potential segfault when attempting to look up the controller address via DNS in configless mode.
+* Fix "undefined symbol: gpu_common_underscorify_tolower" when gpu/nrt plugin in use.
+* slurmrestd - Avoid memory leak on authentication failures with invalid bearer tokens.
+* Fix potential deadlock in _x11_signal_handler() during stepd_cleanup().
+* slurmctld - Fix reservations AllowedPartitions logic leading to incorrect purge of valid reservations in some use-cases.
+* slurmcltd - Avoid persistent connections hangs when enable_async_reply is configured.
+* Prevent potential controller segfault when reconfiguring after gres file updates.
+* Reparent slurmd to a subcgroup to avoid conflicting with systemd.
+* Fix sprio regression not handling comma separated list of jobids.
+* slurmctld,slurmd - Fix memory leak when container ID is populated.
+* slurmd - Fix P-core detection on processors with varying P-core frequencies and in cpuset-restricted environments.
+* namespace/linux - add disable_bpf_token option.
+* slurmctld - Avoid expedited requeue triggering a job to requeue when job exit code was zero.
+* slurmctld - Avoid expedited requeue of jobs while waiting for job epilog script to complete.
+* slurmctld - Prevent removing cloud nodes from the topology when putting them in the POWERED_DOWN state if they are present in topology.conf or topology.yaml and their node configuration did not specify the Topology option.
+* interfaces/topology - When modifying a nodes topology with the Topology option in slurm.conf or the slurmd --conf Topology, change the topology to fully match the new topology.
+* slurmctld - Allow changes to topology.conf or topology.yaml, and slurm.conf node configuration Topology option to take effect on a reconfigure or restart when power saving is enabled.
+* slurmctld - Prevent backfill from combining future timeslots if they have different license reservations.
+* Fix CLOUD nodes infrequently becoming FUTURE on slurmctld restart.
+* slurmdbd - Avoid race condition that could cause a hang during shutdown when incoming connection fails.
+* slurmdbd - Avoid crash during shutdown due to `sacctmgr shutdown` request.
+* Fix slurmctld assertion when using "enable_async_reply" and certmgr is used for a TLS enabled cluster.
+* Fix potential slurmd process leak when handling --get-user-env.
+* slurmcltd - Avoid race condition that could cause the StateSaveLocation updates to be missed during shutdown.
+* slurmcltd - Avoid race condition that could cause slurmctld to hang during shutdown before updating StateSaveLocation.
+* slurmctld - Avoid race condition that could cause shutdown to wait on the wrong thread.
+* Fix handling of 0 node test allocations in topology/block.
+* slurmctld - In backfill, prevent unnecessarily testing jobs at future times using the select plugin if it is guaranteed to fail.
+
 ## Changes in 25.11.2
 
 * slurmstepd - Revert regression that would apply job environment to container runtime invocation.
