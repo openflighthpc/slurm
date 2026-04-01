@@ -1,3 +1,38 @@
+## Changes in 25.05.7
+
+* Fix regression from af2c0bd which caused usercpu and systemcpu to be missing for job steps.
+* slurmd - Fix regression that could cause thread limits to not be enforced for handling incoming RPCs.
+* Fix "undefined symbol: gpu_common_underscorify_tolower" when gpu/nrt plugin in use.
+* Fix CLOUD nodes infrequently becoming FUTURE on slurmctld restart.
+* slurmrestd - Remove ExecReload from unit file since the daemon does not handle SIGHUP (reload would terminate the process).
+* Fix compile errors building against glibc-2.43
+* Fix race on reconfigure that caused slurmctld to crash.
+
+## Changes in 25.05.6
+
+* Updating a job's qos will always replace the previous timelimit with the new qos' timelimit, unless another time limit is explicitly specified in the update command.
+* slurmctld - Prevent memory corruption when fanning out messages to the slurmds if TreeWidth is more then or equal to 46341 and the number of nodes in the cluster is more then or equal to (TreeWidth + 1).
+* Fix slurmctld potential deadlock when trying to schedule jobs starting many years in the future. Slurm only supports one year time limits.
+* Fix accounting for memory on steps without pids, like the extern step, which caused them to be killed if OvermemoryKill was set.
+* slurmrestd - Revert tagging `.script` field as deprecated in 'POST /slurm/v0.0.42/job/submit'.
+* slurmrestd - Revert tagging `.script` field as deprecated in 'POST /slurm/v0.0.43/job/submit'.
+* slurmrestd - Revert tagging `.script` field as deprecated in 'POST /slurm/v0.0.44/job/submit'.
+* slurmctld - Fixed segfault when running configless and a malformed REQUEST_CONFIG RPC is received.
+* slurmctld - Fixed segfault when using newly added remote licenses.
+* Fix memory leak on slurmctld for jobs that use --exclusive=topo
+* Fix double unlock issue in _slurm_rpc_job_sbcast_cred()
+* slurmctld/slurmdbd - Prevent segfaulting if a persistent connection closes right before reconfiguring or shutting down.
+
+## Changes in 25.05.5
+
+* Fix slurmdbd error triggered by "sreport user topusage" when trying to get data from monthly usage tables.
+* scontrol - fix regression where "scontrol update jobid=<id> qos=" was not considered a valid command.
+* slurmstepd - Prevent the slurmstepd from segfaulting if the switch/hpe_slingshot plugin is enabled and SwitchParameters is not specified.
+* Avoid deadlock that occurs on a failed reconfigure when there are issues with slurmdbd connections and AccountingStoreFlags is set with job_script or job_env.
+* slurmctld - Avoid regression that caused POSIX signals to be ignored after quiesce timeout triggers.
+* Fix potential file descriptor leak to child processes.
+* slurmctld - Prevent a fatal when min_exempt_priority is not the last option listed in PreemptParameters.
+
 ## Changes in 25.05.4
 
 * scontrol/sacct/sacctmgr - Prevent hitting a double free when slurm is compiled with --enable-memory-leak-debug and using the --json or --yaml options.

@@ -582,16 +582,6 @@ Use Slurm's internal authentication plugin.
 .IP
 
 .TP
-\fBBackupAddr\fR
-Deprecated option, see \fBSlurmctldHost\fR.
-.IP
-
-.TP
-\fBBackupController\fR
-Deprecated option, see \fBSlurmctldHost\fR.
-.IP
-
-.TP
 \fBBatchStartTimeout\fR
 The maximum time (in seconds) that a batch job is permitted for
 launching before being considered missing and releasing the
@@ -946,16 +936,6 @@ The value may not exceed 65533.
 
 \fBNOTE\fR: Setting \fBreduce_completing_frag\fR affects the behavior
 of \fBCompleteWait\fR.
-.IP
-
-.TP
-\fBControlAddr\fR
-Deprecated option, see \fBSlurmctldHost\fR.
-.IP
-
-.TP
-\fBControlMachine\fR
-Deprecated option, see \fBSlurmctldHost\fR.
 .IP
 
 .TP
@@ -5105,17 +5085,16 @@ DNS, this step can be avoided by configuring this option.
 \fBconmgr_max_connections\fR=\fI<connection_count>\fR
 Specify the maximum number of connections to be processed at any given time.
 This does not influence the maximum number of pending connections as that is
-controlled by the kernel. Defaults to 512.
+controlled by the kernel. Increasing this value will increase \fBslurmctld\fR's
+memory footprint. Sites are advised to monitor memory consumption when
+increasing this value. Defaults to 512.
 .IP
 
 .TP
 \fBconmgr_threads\fR=\fI<thread_count>\fR
-The number of process threads in thread pool used to for receiving and
-processing connections on the listening sockets. While increasing this
-value may improve the capacity of conmgr to handle a larger number of
-connections, it does not generally improve the speed at which RPCs are
-processed. It is highly recommended that benchmarking be conducted when
-this value is changed to ensure optimal performance.
+The number of process threads in thread pool used for receiving and
+processing connections on the listening sockets. In most cases, you should
+decrease \fBconmgr_threads\fR to improve scheduling performance.
 .IP
 
 .TP
@@ -5532,13 +5511,16 @@ Equivalent to the now deprecated FastSchedule=2 option.
 \fBconmgr_max_connections\fR=\fI<connection_count>\fR
 Specify the maximum number of connections to be processed at any given time.
 This does not influence the maximum number of pending connections as that is
-controlled by the kernel.
+controlled by the kernel. Increasing this value will increase \fBslurmd\fR's
+memory footprint. Sites are advised to monitor memory consumption when
+increasing this value. Defaults to 150.
 .IP
 
 .TP
 \fBconmgr_threads\fR=\fI<thread_count>\fR
-The number of process threads to use for the receiving connections on the
-listening socket.
+The number of process threads in thread pool used for receiving and
+processing connections on the listening sockets. In most cases you should
+decrease \fBconmgr_threads\fR to improve scheduling performance.
 .IP
 
 .TP
@@ -8026,7 +8008,7 @@ execute with various permissions and at various times.
 The four options most likely to be used are:
 \fBProlog\fR and \fBEpilog\fR (executed once on each compute node
 for each job) plus \fBPrologSlurmctld\fR and \fBEpilogSlurmctld\fR
-(executed once on the \fBControlMachine\fR for each job).
+(executed once on the \fBSlurmctldHost\fR for each job).
 
 \fBNOTE\fR: Standard output and error messages are normally not preserved.
 Explicitly write output and error messages to an appropriate location

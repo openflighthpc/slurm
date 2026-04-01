@@ -242,8 +242,6 @@ static char *	slurm_conf_filename;
 static int reconfig_rc = SLURM_SUCCESS;
 static bool reconfig = false;
 static list_t *reconfig_reqs = NULL;
-static pthread_mutex_t shutdown_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t shutdown_cond = PTHREAD_COND_INITIALIZER;
 static bool under_systemd = false;
 
 /* Array of listening sockets */
@@ -531,9 +529,10 @@ static void _retry_init_db_conn(assoc_init_args_t *args)
 		struct timespec ts = timespec_now();
 		ts.tv_sec += 2;
 
-		slurm_mutex_lock(&shutdown_mutex);
-		slurm_cond_timedwait(&shutdown_cond, &shutdown_mutex, &ts);
-		slurm_mutex_unlock(&shutdown_mutex);
+		slurm_mutex_lock(&slurmctld_config.shutdown_lock);
+		slurm_cond_timedwait(&slurmctld_config.shutdown_cond,
+				     &slurmctld_config.shutdown_lock, &ts);
+		slurm_mutex_unlock(&slurmctld_config.shutdown_lock);
 
 		if (slurmctld_config.shutdown_time)
 			fatal("slurmdbd must be up at slurmctld start time");
@@ -1007,6 +1006,9 @@ int main(int argc, char **argv)
 		controller_fini_scheduling(); /* Stop all scheduling */
 		rpc_queue_shutdown();
 		agent_fini();
+		/* kill all scripts running by the slurmctld */
+		track_script_flush();
+		slurmscriptd_flush();
 
 		/* termination of controller */
 		switch_g_save();
@@ -1022,9 +1024,6 @@ int main(int argc, char **argv)
 		slurm_mutex_unlock(&slurmctld_config.acct_update_lock);
 		slurm_thread_join(slurmctld_config.thread_id_acct_update);
 
-		/* kill all scripts running by the slurmctld */
-		track_script_flush();
-		slurmscriptd_flush();
 		run_command_shutdown();
 
 		bb_g_fini();
@@ -1271,6 +1270,8 @@ static void  _init_config(void)
 	slurm_cond_init(&slurmctld_config.acct_update_cond, NULL);
 	slurm_cond_init(&slurmctld_config.backup_finish_cond, NULL);
 	slurm_mutex_init(&slurmctld_config.backup_finish_lock);
+	slurm_cond_init(&slurmctld_config.shutdown_cond, NULL);
+	slurm_mutex_init(&slurmctld_config.shutdown_lock);
 	slurmctld_config.boot_time      = time(NULL);
 	slurmctld_config.resume_backup  = false;
 	slurmctld_config.server_thread_count = 0;
@@ -2412,7 +2413,7 @@ static void *_slurmctld_background(void *no_data)
 	while (1) {
 		bool call_schedule = false, full_queue = false;
 
-		slurm_mutex_lock(&shutdown_mutex);
+		slurm_mutex_lock(&slurmctld_config.shutdown_lock);
 		if (!slurmctld_config.shutdown_time) {
 			struct timespec ts = {0, 0};
 
@@ -2420,10 +2421,11 @@ static void *_slurmctld_background(void *no_data)
 			listeners_unquiesce();
 
 			ts.tv_sec = time(NULL) + 1;
-			slurm_cond_timedwait(&shutdown_cond, &shutdown_mutex,
+			slurm_cond_timedwait(&slurmctld_config.shutdown_cond,
+					     &slurmctld_config.shutdown_lock,
 					     &ts);
 		}
-		slurm_mutex_unlock(&shutdown_mutex);
+		slurm_mutex_unlock(&slurmctld_config.shutdown_lock);
 
 		now = time(NULL);
 		START_TIMER;
@@ -3035,7 +3037,7 @@ int slurmctld_shutdown(void)
 {
 	sched_debug("slurmctld terminating");
 	slurmctld_config.shutdown_time = time(NULL);
-	slurm_cond_signal(&shutdown_cond);
+	slurm_cond_signal(&slurmctld_config.shutdown_cond);
 	pthread_kill(pthread_self(), SIGUSR1);
 	return SLURM_SUCCESS;
 }
@@ -3712,30 +3714,8 @@ static void *_assoc_cache_mgr(void *no_data)
 		{ .assoc = READ_LOCK, .qos = WRITE_LOCK, .tres = WRITE_LOCK,
 		  .user = READ_LOCK };
 
-	if (running_cache != RUNNING_CACHE_STATE_RUNNING) {
-		slurm_mutex_lock(&assoc_cache_mutex);
+	if (running_cache != RUNNING_CACHE_STATE_RUNNING)
 		lock_slurmctld(job_write_lock);
-		/*
-		 * It is ok to have the job_write_lock here as long as
-		 * running_cache != RUNNING_CACHE_STATE_NOTRUNNING. This short
-		 * circuits the association manager to not call callbacks. If
-		 * we come out of cache we need the job_write_lock locked until
-		 * the end to prevent a race condition on the job_list (some
-		 * running without new info and some running with the cached
-		 * info).
-		 *
-		 * Make sure not to have the assoc_mgr or the
-		 * slurmdbd_lock locked when refresh_lists is called or you may
-		 * get deadlock.
-		 */
-		assoc_mgr_refresh_lists(acct_db_conn, 0);
-		if (g_tres_count != slurmctld_tres_cnt) {
-			info("TRES in database does not match cache (%u != %u).  Updating...",
-			     g_tres_count, slurmctld_tres_cnt);
-			_init_tres();
-		}
-		slurm_mutex_unlock(&assoc_cache_mutex);
-	}
 
 	while (running_cache == RUNNING_CACHE_STATE_RUNNING) {
 		slurm_mutex_lock(&assoc_cache_mutex);
