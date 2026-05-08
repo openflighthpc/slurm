@@ -297,7 +297,6 @@ def classify_coredump(bin_path, bt_file, failures, xfailures):
     if (
         component in bin_path
         and "Program terminated with signal SIGABRT" in bt
-        and "OPENSSL_sk_free" in bt
         and "OPENSSL_cleanup" in bt
         and "_int_free_maybe_consolidate" in bt
     ):
