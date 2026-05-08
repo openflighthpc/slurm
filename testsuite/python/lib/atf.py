@@ -408,6 +408,19 @@ def classify_coredump(bin_path, bt_file, failures, xfailures):
         failures.append(reason)
         return
 
+    reason = "Ticket 25193: Known issue with slurmd: SIGABRT: double free or corruption (fasttop)"
+    component = "sbin/slurmd"
+    if (
+        component in bin_path
+        and "Program terminated with signal SIGABRT" in bt
+        and "malloc/malloc.c" in bt
+        and "in malloc_printerr" in bt
+        and "double free or corruption (fasttop)" in bt
+    ):
+        # TODO: Add version when t25193 is fixed
+        failures.append(reason)
+        return
+
     # If coredump is unknown, add it as failure
     failures.append(f"Unknown coredump detected, see {bt_file}")
 
