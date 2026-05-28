@@ -108,7 +108,7 @@ BuildRequires: pkgconfig(dbus-1)
 %endif
 
 %if %{with munge}
-Recommends: munge
+Requires: munge
 BuildRequires: munge-devel munge-libs
 %endif
 
