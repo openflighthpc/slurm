@@ -3377,11 +3377,18 @@ static int arg_set_requeue(slurm_opt_t *opt, const char *arg)
 
 	opt->sbatch_opt->requeue = 1;
 
-	if (!xstrcasecmp(arg, "expedite"))
+	if (!arg || !arg[0]) {
+		/* no op, this is typical requeue */
+	} else if (!xstrcasecmp(arg, "expedite")) {
 		opt->job_flags |= EXPEDITED_REQUEUE;
+	} else {
+		error("Invalid --requeue specification");
+		return SLURM_ERROR;
+	}
 
 	return SLURM_SUCCESS;
 }
+
 /* arg_get_requeue and arg_reset_requeue defined before with --no-requeue */
 static slurm_cli_opt_t slurm_opt_requeue = {
 	.name = "requeue",

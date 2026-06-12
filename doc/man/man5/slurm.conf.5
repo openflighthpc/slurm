@@ -2462,12 +2462,6 @@ completion. This setting will only take effect after reconfiguring, and will
 only take effect for newly launched jobs.
 .IP
 
-.TP 24
-\fBmem_sort\fR
-Sort NUMA memory at step start. User can override this default with
-SLURM_MEM_BIND environment variable or \-\-mem\-bind=nosort command line option.
-.IP
-
 .TP
 \fBmpir_use_nodeaddr\fR
 When launching tasks Slurm creates entries in MPIR_proctable that are used by
@@ -7344,6 +7338,8 @@ The final field must specify a generic resources count.
 A suffix of "K", "M", "G", "T" or "P" may be used to multiply the number by
 1024, 1048576, 1073741824, etc. respectively.
 (e.g."Gres=gpu:tesla:1,gpu:kepler:1,bandwidth:lustre:no_consume:4G").
+If Gres is configured on a default node entry (\fBNodeName\fR=DEFAULT), you can
+set an empty string (Gres="") to configure no Gres on a subsequent entry.
 By default a node has no generic resources and its maximum count is
 that of an unsigned 64bit integer.
 Also see \fBFeatures\fR for Boolean flags to filter nodes using job constraints.
@@ -8283,12 +8279,8 @@ is either 65533 or INFINITE.
 
 .TP
 \fBRootOnly\fR
-Specifies if only user ID zero (i.e. user \fIroot\fR) may allocate resources
-in this partition. User root may allocate resources for any other user,
-but the request must be initiated by user root.
-This option can be useful for a partition to be managed by some
-external entity (e.g. a higher\-level job manager) and prevents
-users from directly using those resources.
+Specifies if only user ID zero (i.e. user \fIroot\fR) or SlurmUser may allocate
+resources in this partition.
 Possible values are "YES" and "NO".
 The default value is "NO".
 .IP
