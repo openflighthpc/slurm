@@ -1,5 +1,6 @@
 Name:		flight-slurm
-Version:	26.05.0
+Version:	26.05.1
+
 %define rel	1
 %if %{defined patch} && %{undefined extraver}
 %define extraver .patched
@@ -124,7 +125,7 @@ Obsoletes: slurm-munge <= %{version}
 Obsoletes: slurm-plugins <= %{version}
 
 # fake systemd support when building rpms on other platforms
-%{!?_unitdir: %global _unitdir /lib/systemd/systemd}
+%{!?_unitdir: %global _unitdir /lib/systemd/system}
 
 %define use_mysql_devel %(perl -e '`rpm -q mysql-devel`; print !$?;')
 # Default for OpenSUSE/SLES builds
