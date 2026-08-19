@@ -562,6 +562,8 @@ static int _build_job_queue_for_qos(void *x, void *arg)
 	job_record_t *job_ptr = setup_job->job_ptr;
 
 	job_ptr->qos_ptr = x;
+	if (job_ptr->qos_ptr)
+		job_ptr->qos_id = job_ptr->qos_ptr->id;
 
 	/*
 	 * priority_array index matches part_ptr_list * qos_list
@@ -1512,6 +1514,8 @@ static int _schedule(bool full_queue)
 		}
 
 		job_ptr->qos_ptr = job_queue_rec->qos_ptr;
+		if (job_ptr->qos_ptr)
+			job_ptr->qos_id = job_ptr->qos_ptr->id;
 		job_ptr->part_ptr = part_ptr;
 		job_ptr->priority = job_queue_rec->priority;
 
@@ -2475,7 +2479,7 @@ static batch_job_launch_msg_t *_build_launch_job_msg(job_record_t *job_ptr,
 
 	_split_env(launch_msg_ptr);
 
-	if (job_ptr->bit_flags & STEPMGR_ENABLED) {
+	if ((job_ptr->bit_flags & STEPMGR_ENABLED) && job_ptr->batch_host) {
 		env_array_overwrite(&launch_msg_ptr->environment,
 				    "SLURM_STEPMGR", job_ptr->batch_host);
 		/* Update envc if env was added to */
@@ -2974,6 +2978,24 @@ extern void launch_job(job_record_t *job_ptr)
 		job_ptr->epilog_failed = false;
 		job_state_unset_flag(job_ptr, JOB_EXPEDITING);
 	}
+}
+
+extern void launch_het_job_leader(job_record_t *job_ptr)
+{
+	job_record_t *het_job_leader = NULL;
+
+	xassert(job_ptr->het_job_id);
+
+	if (!(het_job_leader = find_job_record(job_ptr->het_job_id))) {
+		error("Hetjob leader %pJ not found", job_ptr);
+		return;
+	}
+
+	/* if the leader is also script-less, this is unnecessary */
+	if (!het_job_leader->batch_flag || IS_JOB_CONFIGURING(het_job_leader))
+		return;
+
+	launch_job(het_job_leader);
 }
 
 /*
@@ -4460,7 +4482,9 @@ static void _delayed_job_start_time(job_record_t *job_ptr)
 	if (job_ptr->part_ptr == NULL)
 		return;
 	part_node_cnt = job_ptr->part_ptr->total_nodes;
-	part_cpu_cnt  = job_ptr->part_ptr->total_cpus;
+	part_cpu_cnt = job_ptr->part_ptr->total_cpus;
+	if (!part_node_cnt || !part_cpu_cnt)
+		return;
 	if (part_cpu_cnt > part_node_cnt)
 		delay_start.part_cpus_per_node = part_cpu_cnt / part_node_cnt;
 
@@ -4511,6 +4535,15 @@ static int _foreach_job_start_data_part(void *x, void *arg)
 		return -1;
 	}
 
+	if (job_ptr->part_ptr_list)
+		job_ptr->part_ptr = part_ptr;
+
+	if (!part_ptr->node_bitmap || !part_ptr->total_nodes ||
+	    !part_ptr->total_cpus) {
+		job_start_data->rc = ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
+		return 0;
+	}
+
 	if (job_ptr->details->req_nodes && job_ptr->details->req_nodes[0]) {
 		if (node_name2bitmap(job_ptr->details->req_nodes, false,
 				     &avail_bitmap, NULL)) {
@@ -4523,10 +4556,7 @@ static int _foreach_job_start_data_part(void *x, void *arg)
 	}
 
 	/* Consider only nodes in this job's partition */
-	if (part_ptr->node_bitmap)
-		bit_and(avail_bitmap, part_ptr->node_bitmap);
-	else
-		job_start_data->rc = ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
+	bit_and(avail_bitmap, part_ptr->node_bitmap);
 	if (job_req_node_filter(job_ptr, avail_bitmap, true))
 		job_start_data->rc = ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
 	if (job_ptr->details->exc_node_bitmap) {
@@ -4692,13 +4722,17 @@ extern int job_start_data(job_record_t *job_ptr,
 	if ((job_ptr->details == NULL) || (job_ptr->job_state != JOB_PENDING))
 		return ESLURM_DISABLED;
 
-	if (job_ptr->part_ptr_list)
+	if (job_ptr->part_ptr_list) {
+		part_record_t *save_part_ptr = job_ptr->part_ptr;
+
 		(void) list_for_each(job_ptr->part_ptr_list,
 				     _foreach_job_start_data_part,
 				     &job_start_data);
-	else
+		job_ptr->part_ptr = save_part_ptr;
+	} else {
 		(void) _foreach_job_start_data_part(job_ptr->part_ptr,
 						    &job_start_data);
+	}
 
 	return job_start_data.rc;
 }
@@ -5050,10 +5084,11 @@ extern void prolog_running_decr(job_record_t *job_ptr)
 		info("%s: Configuration for %pJ is complete",
 		     __func__, job_ptr);
 		job_config_fini(job_ptr);
-		if (job_ptr->batch_flag &&
-		    (IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr))) {
+		if (!job_ptr->batch_flag) {
+			if (job_ptr->het_job_id)
+				launch_het_job_leader(job_ptr);
+		} else if (IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr))
 			launch_job(job_ptr);
-		}
 	}
 }
 

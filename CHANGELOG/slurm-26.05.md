@@ -1,3 +1,65 @@
+## Changes in 26.05.3
+
+* async srun steps now honor --kill-on-bad-exit and kill peers.
+* Fix sinfo --states to accept REBOOT_REQUESTED and REBOOT_ISSUED filter names documented in the man page.
+* Harden LicenseParameters=RemoteFuzzyMatch matching for license names that unexpectedly contain an '@' character.
+* scontrol - Fix local licenses not appearing for `scontrol show licenses=<license_name>` when LicenseParameters=RemoteFuzzyMatch is set.
+* auth/jwt - Prevent fatal() on non-RSA keys in mixed JWKS files.
+* slurmctld - Avoid breaking backfill cycle on busy reservation delete.
+* Fix srun intermittently hanging at job or step completion due to a connection manager shutdown race.
+* slurmrestd - Fix HTTP 500 error from GET /slurm/{version}/nodes when the update_time query parameter is passed and only partition data is unchanged.
+* Fix slurmctld segfault when QOS-based SUSPEND preemption occurs on a partition with OverSubscribe=YES.
+* slurmd - Fix corrupted job step cancellation message request when a job exceeds its memory limit with JobAcctGatherParams=OverMemoryKill, resulting in afflicted job steps not being killed.
+* data_parser/v0.0.45 - Avoid hitting an xassert when there is an error while parsing arrays in topology.yaml. The source string in the error will now be the path to the field experiencing the error instead of the function name where the error happened.
+* Fix srun --overlap step being allocated fewer GPUs than the job when the job's allocated cores span fewer sockets than its GPUs.
+* topology/block - Validate BlockSizes and fatal when they are invalid.
+* Give an error at slurmdbd startup when MariaDB sets innodb_snapshot_isolation to ON. Also give a specific fatal message when a write fails with the ER_CHECKREAD error.
+* slurmctld - Fix memory leak when a job update requesting multiple QOS is rejected.
+* slurmctld - Fix memory leak when a job update requesting multiple reservations is rejected.
+* Fix client command crashes when using stepmgr with allocations that are powering up powered down nodes.
+* Fix handling of UIDs and GIDs above 2^31 in gid_from_string(), the data_parser plugins and squeue output.
+* auth/jwt - Fix the token identity being discarded when the requested username matches it, instead of when it differs.
+* sched/backfill - Prevent undoing a job priority update that occurs while backfill is running.
+* sched/backfill - Prevent undoing a job TimeLimit update if the update occurs while backfill is running. Additionally, enforce updates to a job's TimeMin and Deadline during the current backfill cycle.
+* Enable delete/recreate of dynamic cloud/external nodes to schedule jobs.
+* Enable external or mixed external/regular hetjobs
+* Enable external and mixed-type hetjobs to be submitted via sbatch.
+* Enable hetjobs with external components to be submitted via REST interface.
+* Enable sbatch to submit mixed-type regular/external hetjobs.
+
+## Changes in 26.05.2
+
+* slurmctld - Prevent segfaulting from dereferencing stale QOS, association, or user pointers after updating the assoc_mgr.
+* Fix nodes_alloc statistics overcount caused by shared nodes being counted multiple times across jobs.
+* slurmscriptd - Fix support for profiling conmgr on SIGPROF.
+* Add option to use the job id in the cgroup path instead of SLUID, thus allowing to restore the old behavior. Default is still SLUID.
+* Fix undefined behavior that may affect future scheduling decisions for jobs or partitions that use --exclusive=topo.
+* Fix memory leak in slurmstepd's PMIx startup.
+* Fix pmix jobs failing on startup when requesting a large number of tasks.
+* Disabled slurmctldparams=threadpool=enabled in slurm.conf.
+* Make --test-only evaluate multi-partition jobs against the candidate partition being tested.
+* Prevent slurmctld from crashing with a divide-by-zero when --test-only uses an empty partition before a usable one.
+* slurmctld,slurmd - Avoid race condition that could cause a crash in the signal manager during shutdown.
+* sacct,sacctmgr,scontrol,sdiag,sinfo,squeue,sshare - Include all command arguments in '.meta.command' field when using --json or --yaml options.
+* Fix srun --relative placing steps on the wrong node.
+* Fix slurmctld crashing when using job arrays that request mode 3 HRES.
+* slurmctld - Fix regression from 23.02.0rc1 with failed update request for job --prefer, resulting incorrect reset of original options.
+* slurmctld - Fix memory leak when using --prefer option.
+* srun no longer reports a successful (0:0) completion when the step is aborted before any task could start.
+* Fix error resuming a node that has not registered yet.
+* Prevent delaying job cancellation if the slurmstepd was in the middle of launching a task when the job was cancelled.
+* s2n/tls - Fix deadlock in the extern slurmstepd which may occur when doing X11 forwarding.
+* data_parser/v0.0.45 - Fix printing empty list '[]' instead of empty strings for enumerated flag arrays in JSON/YAML.
+* tls/s2n - Fix --async steps not running due to slurmstepd not being able to generate certificates with the certgen plugin.
+* srun - Prevent deferring steps indefinitely that request --relative and -c without specifying the -n option.
+* Fix topology/tree ROUTE debug logging the wrong switch name.
+* Fix topology/tree fan-out for leaves with no common parent.
+* sbatch and srun now emit "Slurm job queue full, sleeping and retrying" when the MaxJobCount limit is reached.
+* Fix a memory leak of the TLS certificate when a task reattach fails.
+* Fix memory leaks in the slurmstepd getpw/getgr/gethost request handlers.
+* Fix a memory leak and a potential deadlock in slurmstepd stepmgr step completion handling.
+* Allow FLEX+MAGNETIC reservations to pick up jobs that extend beyond the reservation's end time.
+
 ## Changes in 26.05.1
 
 * stepmgr - Fix crash when launching async steps with a srun from a different release than the local slurmd.

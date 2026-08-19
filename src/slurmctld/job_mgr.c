@@ -3594,6 +3594,8 @@ extern job_record_t *job_array_split(job_record_t *job_ptr, bool list_add)
 	job_ptr_pend->licenses_allocated = NULL;
 	job_ptr_pend->license_list = license_copy(job_ptr->license_list);
 	job_ptr_pend->licenses_to_preempt = NULL;
+	job_ptr_pend->hres_select = NULL;
+	hres_create_select(job_ptr_pend);
 	job_ptr_pend->lic_req = xstrdup(job_ptr->lic_req);
 	job_ptr_pend->mail_user = xstrdup(job_ptr->mail_user);
 	job_ptr_pend->mcs_label = xstrdup(job_ptr->mcs_label);
@@ -4002,6 +4004,8 @@ static int _foreach_select_nodes_qos(void *object, void *args)
 	job_record_t *job_ptr = job_node_select->job_ptr;
 
 	job_ptr->qos_ptr = qos_ptr;
+	if (qos_ptr)
+		job_ptr->qos_id = qos_ptr->id;
 
 	debug2("Try %pJ on next QOS %s", job_ptr, qos_ptr->name);
 
@@ -4211,7 +4215,7 @@ extern int job_allocate(job_desc_msg_t *job_desc, int immediate, int will_run,
 	if ((job_count + i) > slurm_conf.max_job_cnt) {
 		error("%s: MaxJobCount limit from slurm.conf reached (%u)",
 		      __func__, slurm_conf.max_job_cnt);
-		return EAGAIN;
+		return ESLURM_MAX_JOB_COUNT;
 	}
 
 	error_code = _job_create(job_desc, allocate, will_run, cron,
@@ -7599,12 +7603,9 @@ static int _job_create(job_desc_msg_t *job_desc, bool allocate, int will_run,
 		goto cleanup_fail;
 	}
 
-	if ((error_code = _copy_job_desc_to_job_record(job_desc,
-						       job_pptr,
-						       &req_bitmap,
-						       &exc_bitmap))) {
-		if (error_code == SLURM_ERROR)
-			error_code = ESLURM_ERROR_ON_DESC_TO_RECORD_COPY;
+	if ((error_code =
+		     _copy_job_desc_to_job_record(job_desc, job_pptr,
+						  &req_bitmap, &exc_bitmap))) {
 		job_ptr = *job_pptr;
 		goto cleanup_fail;
 	}
@@ -9448,6 +9449,8 @@ void job_time_limit(void)
 			job_config_fini(job_ptr);
 			if (job_ptr->batch_flag)
 				launch_job(job_ptr);
+			else if (job_ptr->het_job_id)
+				launch_het_job_leader(job_ptr);
 		}
 
 		/*
@@ -12674,6 +12677,9 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
 
+	/* If in backfill yield and this is the current job, show it updated */
+	job_ptr->bit_flags &= ~BF_CURRENT_JOB_NOT_UPDATED;
+
 	if (job_desc->array_inx && job_ptr->array_recs) {
 		int throttle;
 		throttle = strtoll(job_desc->array_inx, (char **) NULL, 10);
@@ -13702,6 +13708,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		xfree(job_ptr->details->resv_req);
 		job_ptr->details->resv_req = xstrdup(job_desc->reservation);
 		job_ptr->resv_list = new_resv_list;
+		new_resv_list = NULL;
 		job_ptr->resv_id = new_resv_ptr->resv_id;
 		job_ptr->resv_ptr = new_resv_ptr;
 
@@ -14504,8 +14511,8 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 				   SLURM_SUCCESS) {
 				FREE_NULL_LIST(detail_ptr->prefer_list);
 				xfree(detail_ptr->prefer);
-				detail_ptr->features = old_prefer;
-				detail_ptr->feature_list = old_list;
+				detail_ptr->prefer = old_prefer;
+				detail_ptr->prefer_list = old_list;
 				error_code = ESLURM_INVALID_PREFER;
 			} else {
 				sched_info("%s: setting prefer to %s for %pJ",
@@ -15353,6 +15360,8 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 fini:
 	FREE_NULL_BITMAP(new_req_bitmap);
 	FREE_NULL_LIST(part_ptr_list);
+	FREE_NULL_LIST(new_qos_list);
+	FREE_NULL_LIST(new_resv_list);
 
 	if ((error_code == SLURM_SUCCESS) && tres_req_cnt_set) {
 		for (tres_pos = 0; tres_pos < slurmctld_tres_cnt; tres_pos++) {

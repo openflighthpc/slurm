@@ -1644,6 +1644,11 @@ extern void slurm_free_node_info_request_msg(node_info_request_msg_t *msg)
 	xfree(msg);
 }
 
+extern void slurm_free_node_health_check_msg(node_health_check_msg_t *msg)
+{
+	xfree(msg);
+}
+
 extern void slurm_free_node_info_single_msg(node_info_single_msg_t *msg)
 {
 	if (msg) {
@@ -1704,6 +1709,7 @@ extern void slurm_free_job_desc_msg(job_desc_msg_t *msg)
 		xfree(msg->network);
 		xfree(msg->origin_cluster);
 		xfree(msg->partition);
+		xfree(msg->prefer);
 		xfree(msg->qos);
 		xfree(msg->req_context);
 		xfree(msg->req_nodes);
@@ -5420,6 +5426,9 @@ extern void slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_SET_SCHEDLOG_LEVEL:
 		slurm_free_set_debug_level_msg(data);
 		break;
+	case REQUEST_NODE_HEALTH_CHECK:
+		slurm_free_node_health_check_msg(data);
+		break;
 	case REQUEST_CONTAINER_PTY:
 	case REQUEST_CONTAINER_START:
 	case REQUEST_CONTAINER_STATE:
@@ -6260,7 +6269,9 @@ extern void slurm_format_tres_string(char **s, char *tres_type)
 }
 
 /*
- * Fuzzy name comparison for remote licenses
+ * Fuzzy name comparison for remote licenses, the "name" MUST refer to a
+ * remote license with the key assumption that no '@' characters exist in
+ * the server name.
  * query IN - query string
  * name IN - license name
  * RET rc - 0 for no match, 1 for exact match, 2 for fuzzy match
@@ -6273,10 +6284,11 @@ extern int slurm_remote_license_fuzzy_match(const char *query, const char *name)
 	if ((query == NULL) || (name == NULL))
 		return LIC_NO_MATCH;
 
-	query_split = xstrchr(query, '@');
-	split = xstrchr(name, '@');
+	query_split = xstrrchr(query, '@');
+	split = xstrrchr(name, '@');
 	if (split)
 		cnt = split - name;
+
 	/*
 	 * fuzzy match cases
 	 * check1:
@@ -6657,6 +6669,9 @@ extern void purge_agent_args(agent_arg_t *agent_arg_ptr)
 			slurm_free_config_response_msg(agent_arg_ptr->msg_args);
 		else if (agent_arg_ptr->msg_type == REQUEST_RECONFIGURE_WITH_CONFIG)
 			slurm_free_config_response_msg(agent_arg_ptr->msg_args);
+		else if (agent_arg_ptr->msg_type == REQUEST_NODE_HEALTH_CHECK)
+			slurm_free_node_health_check_msg(
+				agent_arg_ptr->msg_args);
 		else
 			xfree(agent_arg_ptr->msg_args);
 	}

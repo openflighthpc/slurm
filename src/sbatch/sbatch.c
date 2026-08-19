@@ -130,7 +130,8 @@ int main(int argc, char **argv)
 		log_alter(logopt, 0, NULL);
 	}
 
-	if (opt.job_flags & EXTERNAL_JOB) {
+	/* Only the leader of a hetjob carries the script */
+	if (is_het_job ? het_leader_external : (opt.job_flags & EXTERNAL_JOB)) {
 		script_body = NULL;
 	} else if (sbopt.wrap) {
 		script_body = _script_wrap(sbopt.wrap);
@@ -300,7 +301,7 @@ int main(int argc, char **argv)
 			rc = slurm_submit_batch_job(desc, &resp);
 		if (rc >= 0)
 			break;
-		if (errno == ESLURM_ERROR_ON_DESC_TO_RECORD_COPY) {
+		if (errno == ESLURM_MAX_JOB_COUNT) {
 			msg = "Slurm job queue full, sleeping and retrying";
 		} else if ((errno == ESLURM_NODES_BUSY) ||
 			   (errno == ESLURM_PORTS_BUSY)) {

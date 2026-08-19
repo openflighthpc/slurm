@@ -128,10 +128,13 @@ See \fB\-\-parsable\fR for details on output format.
 
 Output is written directly on the compute nodes to the files named by
 \fB\-\-output\fR and \fB\-\-error\fR; if neither is given, \fIslurm-%J.out\fR
-(relative to each task's working directory) is used. Standard input redirection
-is not supported. Options that affect \fBsrun\fR's local I/O handling
-(\fB\-\-label\fR, \fB\-\-unbuffered\fR, terminal \fB\-\-input\fR) therefore have
-no visible effect.
+(relative to each task's working directory) is used. Input is also supported
+by naming a file with \fB\-\-input\fR=<\fIfile\fR>. Forms that require
+\fBsrun\fR to forward its own stdin to the tasks (\fB\-\-input=all\fR or
+\fB\-\-input\fR=<\fItaskid\fR>) do not work because \fBsrun\fR has no I/O
+connection to the step. Some options, such as \fB\-\-label\fR and
+\fB\-\-unbuffered\fR, are applied on the compute node by the \fBslurmstepd\fR(8)
+process that writes the output, rather than by \fBsrun\fR.
 
 Since \fBsrun\fR exits before the step finishes, it does not propagate the
 step's exit code and does not forward signals (e.g., SIGINT from Ctrl\-C) to the
@@ -748,10 +751,9 @@ attempts to use the PowerSave CPU governor
 .TP
 \fBUserSpace\fR
 attempts to use the UserSpace CPU governor
+.RE
 .IP
 
-.TP
-.RE
 The following informational environment variable is set in the job
 step when \fB\-\-cpu\-freq\fR option is requested.
 .nf
@@ -1689,7 +1691,6 @@ Forwarded as-is to tasks.
 .TP
 \fBSIGUSR2\fR
 Forwarded as-is to tasks.
-.IP
 .RE
 .IP
 
@@ -2187,40 +2188,8 @@ step allocations.
 \fB\-\-network\fR=<\fItype\fR>
 Specify information pertaining to the switch or network.
 The interpretation of \fItype\fR is system dependent.
-It is used to request using Network Performance Counters.
-Only one value per request is valid.
-All options are case in\-sensitive.
-In this configuration supported values include:
-.IP
-.RS
-.TP 6
-\fBsystem\fR
-Use the system\-wide network performance counters. Only nodes requested
-will be marked in use for the job allocation. If the job does not
-fill up the entire system the rest of the nodes are not
-able to be used by other jobs using NPC, if idle their state will appear as
-PerfCnts. These nodes are still available for other jobs not using NPC.
-.IP
 
-.TP
-\fBblade\fR
-Use the blade network performance counters. Only nodes requested
-will be marked in use for the job allocation. If the job does not
-fill up the entire blade(s) allocated to the job those blade(s) are not
-able to be used by other jobs using NPC, if idle their state will appear as
-PerfCnts. These nodes are still available for other jobs not using NPC.
-.RE
-.IP
-
-In all cases the job allocation request \fBmust specify the
-\-\-exclusive option\fR and the step cannot specify the \fB\-\-overlap\fR
-option. Otherwise the request will be denied.
-
-Also with any of these options steps are not allowed to share blades,
-so resources would remain idle inside an allocation if the step
-running on a blade does not take up all the nodes on the blade.
-
-The \fBnetwork\fR option is also available on systems with HPE Slingshot
+The \fBnetwork\fR option is available on systems with HPE Slingshot
 networks. It can be used to request a job VNI (to be used for communication
 between job steps in a job). It also can be used to override the default
 network resources allocated for the job step. Multiple values may be specified

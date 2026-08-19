@@ -1834,6 +1834,8 @@ skip_test0:
 		if (!jp_ptr->row[c - 1].row_bitmap)
 			jp_ptr->row[c - 1].row_bitmap = build_core_array();
 		for (int i = 0; i < (c - 1); i++) {
+			if (!jp_ptr->row[i].row_bitmap)
+				continue;
 			core_array_or(jp_ptr->row[c - 1].row_bitmap,
 				      jp_ptr->row[i].row_bitmap);
 		}
@@ -2439,6 +2441,7 @@ static bitstr_t *_select_topo_bitmap(job_record_t *job_ptr,
 	if (IS_JOB_WHOLE_TOPO(job_ptr)) {
 		if (!(*efctv_bitmap)) {
 			*efctv_bitmap = bit_copy(node_bitmap);
+			*topology_idx = job_ptr->part_ptr->topology_idx;
 			topology_g_whole_topo(*efctv_bitmap,
 					      job_ptr->part_ptr->topology_idx);
 		} else if (*topology_idx != job_ptr->part_ptr->topology_idx) {

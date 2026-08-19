@@ -163,10 +163,11 @@ static void _node_fail_handler(srun_node_fail_msg_t *msg)
 static bool _retry(void)
 {
 	static int  retries = 0;
-	static char *msg = "Slurm controller not responding, "
-		"sleeping and retrying.";
+	char *msg = "Slurm controller not responding, sleeping and retrying.";
 
-	if ((errno == ESLURM_ERROR_ON_DESC_TO_RECORD_COPY) || (errno == EAGAIN)) {
+	if ((errno == ESLURM_MAX_JOB_COUNT) || (errno == EAGAIN)) {
+		if (errno == ESLURM_MAX_JOB_COUNT)
+			msg = "Slurm job queue full, sleeping and retrying.";
 		if (retries == 0)
 			error("%s", msg);
 		else if (retries < MAX_RETRIES)
@@ -726,6 +727,8 @@ extern list_t *existing_allocation(void)
 	old_job_id = (uint32_t) sropt.jobid;
 	slurm_step_id_t step_id = SLURM_STEP_ID_INITIALIZER;
 	step_id.job_id = old_job_id;
+	step_id.step_id = sropt.array_task_id;
+	sropt.array_task_id = NO_VAL;
 	if (slurm_het_job_lookup(step_id, &job_resp_list) < 0) {
 		if (sropt.parallel_debug)
 			return NULL;    /* create new allocation as needed */

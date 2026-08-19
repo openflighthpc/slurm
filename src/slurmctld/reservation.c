@@ -4900,6 +4900,11 @@ extern int delete_resv(reservation_name_msg_t *resv_desc_ptr)
 		    ESLURM_RESERVATION_BUSY) {
 			_clear_job_resv(resv_ptr);
 			list_delete_item(iter);
+			/* Only update timestamps when resv is deleted */
+			last_resv_update = time(NULL);
+			_flush_node_down_cache(node_down_bitmap,
+					       last_resv_update);
+			schedule_resv_save();
 		}
 		break;
 	}
@@ -4912,10 +4917,7 @@ extern int delete_resv(reservation_name_msg_t *resv_desc_ptr)
 		return ESLURM_RESERVATION_INVALID;
 	}
 
-	last_resv_update = time(NULL);
-	_flush_node_down_cache(node_down_bitmap, last_resv_update);
 	FREE_NULL_BITMAP(node_down_bitmap);
-	schedule_resv_save();
 	return rc;
 }
 
@@ -5275,6 +5277,39 @@ static bool _validate_one_reservation(slurmctld_resv_t *resv_ptr)
 		gres_resv_list_remap_global_indices(resv_ptr->gres_list_alloc);
 
 	return true;
+}
+
+extern int resv_cache_update_qos_list(void *x, void *arg)
+{
+	slurmctld_resv_t *resv_ptr = x;
+	char *last = NULL, *tmp = NULL, *tok = NULL;
+
+	xassert(verify_assoc_lock(QOS_LOCK, READ_LOCK));
+
+	if (!resv_ptr->qos_list)
+		return 0;
+
+	/*
+	 * resv_ptr->qos_list caches pointers into assoc_mgr_qos_list with a
+	 * NULL destructor. After the qos list has been refreshed those
+	 * pointers are dangling, so rebuild from the canonical resv_ptr->qos
+	 * string.
+	 */
+	list_flush(resv_ptr->qos_list);
+	if (!resv_ptr->qos)
+		return 0;
+
+	tmp = xstrdup(resv_ptr->qos);
+	tok = strtok_r(tmp, ",", &last);
+	while (tok) {
+		if ((tok[0] == '-') || (tok[0] == '+'))
+			tok++;
+		(void) _append_to_qos_list(resv_ptr->qos_list, tok);
+		tok = strtok_r(NULL, ",", &last);
+	}
+	xfree(tmp);
+
+	return 0;
 }
 
 extern void validate_all_reservations(bool run_now, bool run_locked)
@@ -7741,6 +7776,8 @@ extern int job_test_resv(job_record_t *job_ptr, time_t *when,
 	 * attracted to a magnetic reservation
 	 */
 	if ((job_ptr->bit_flags & JOB_MAGNETIC) && (job_ptr->resv_name) &&
+	    (job_ptr->resv_ptr) &&
+	    !(job_ptr->resv_ptr->flags & RESERVE_FLAG_FLEX) &&
 	    (job_end_time > job_ptr->resv_ptr->end_time)) {
 		return ESLURM_RESERVATION_INVALID;
 	}

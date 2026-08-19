@@ -2383,6 +2383,12 @@ int update_node(update_node_msg_t *update_node_msg, uid_t auth_uid)
 					err_code = error_code =
 						ESLURM_REBOOT_IN_PROGRESS;
 				}
+			} else if (state_val == NODE_STATE_UNKNOWN) {
+				/*
+				 * Node has not registered yet; leave it UNKNOWN
+				 * (drain/fail cleared above) until registration
+				 * sets its real state.
+				 */
 			} else {
 				info("Invalid node state specified %u",
 				     state_val);
@@ -4993,6 +4999,13 @@ static int _build_node_callback(char *alias, char *hostname, char *address,
 		} else {
 			bit_set(external_node_bitmap, node_ptr->index);
 		}
+
+		/*
+		 * share_node_bitmap is normally set as part of a node
+		 * registration/ping that external/cloud nodes cannot reach (no
+		 * slurmd, or not until power on), so set bit explicitly here.
+		 */
+		bit_set(share_node_bitmap, node_ptr->index);
 
 		if (conf_node->gres_conf) {
 			gres_add_dynamic_gres(conf_node->gres_conf,

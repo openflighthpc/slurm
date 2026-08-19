@@ -1273,6 +1273,11 @@ typedef enum {
 					  * while resources are available */
 #define JOB_IMPLICIT_MAX_NODES SLURM_BIT(47) /* max_nodes was implicitly set
 					      * from num_tasks */
+#define BF_CURRENT_JOB_NOT_UPDATED SLURM_BIT(51) /* Set if backfill is
+						  * evaluating this job but is
+						  * yielding locks to track if
+						  * the job has been updated in
+						  * the yield */
 
 /* These bits are set in the x11 field of job_desc_msg_t */
 #define X11_FORWARD_ALL		0x0001	/* all nodes should setup forward */
@@ -3014,6 +3019,7 @@ typedef struct reservation_name_msg {
 #define CONF_FLAG_CONTAIN_SPANK SLURM_BIT(15) /* SlurmdParameters=contain_spank */
 #define CONF_FLAG_NO_STDIO	SLURM_BIT(16) /* AccountingStoreFlags=no_stdio */
 #define CONF_FLAG_DISABLE_HTTP	SLURM_BIT(17) /* CommunicationParameters=disable_http */
+#define CONF_FLAG_HC_REPORT_HEALTH SLURM_BIT(18) /* SlurmctldParameters=health_check_report */
 
 #define LOG_FMT_ISO8601_MS      0
 #define LOG_FMT_ISO8601         1
