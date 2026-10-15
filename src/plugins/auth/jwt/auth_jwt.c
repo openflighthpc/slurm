@@ -143,6 +143,10 @@ static data_for_each_cmd_t _build_jwks_keys(data_t *d, void *arg)
 	    xstrcasecmp(alg, "RS256"))
 		return DATA_FOR_EACH_CONT;
 
+	/* Ignore non-RSA keys (kty is REQUIRED per RFC 7517) */
+	if (xstrcmp(data_get_string(data_key_get(d, "kty")), "RSA"))
+		return DATA_FOR_EACH_CONT;
+
 	if (!(e = data_get_string(data_key_get(d, "e"))))
 		fatal("%s: failed to load e field", __func__);
 	if (!(n = data_get_string(data_key_get(d, "n"))))
@@ -317,9 +321,13 @@ static data_for_each_cmd_t _verify_rs256_jwt(data_t *d, void *arg)
 	int rc;
 	foreach_rs256_args_t *args = (foreach_rs256_args_t *) arg;
 
-	/* Ignore non-RS256 keys in the JWKS */
-	alg = data_get_string(data_key_get(d, "alg"));
-	if (xstrcasecmp(alg, "RS256"))
+	/* Ignore non-RS256 keys in the JWKS if algorithm is provided */
+	if ((alg = data_get_string(data_key_get(d, "alg"))) &&
+	    xstrcasecmp(alg, "RS256"))
+		return DATA_FOR_EACH_CONT;
+
+	/* Ignore non-RSA keys (kty is REQUIRED per RFC 7517) */
+	if (xstrcmp(data_get_string(data_key_get(d, "kty")), "RSA"))
 		return DATA_FOR_EACH_CONT;
 
 	/* Return early if this key doesn't match */
@@ -364,7 +372,7 @@ static void _handle_identity(jwt_t *jwt, auth_token_t *cred)
 
 	if (cred->id) {
 		if (cred->username &&
-		    !xstrcmp(cred->username, cred->id->pw_name)) {
+		    xstrcmp(cred->username, cred->id->pw_name)) {
 			error("%s: cannot override identity for %s with requested user %s",
 			      __func__, cred->id->pw_name, cred->username);
 			FREE_NULL_IDENTITY(cred->id);

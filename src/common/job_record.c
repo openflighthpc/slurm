@@ -73,6 +73,7 @@ extern job_record_t *job_record_create(void)
 	job_ptr->requid = -1; /* force to -1 for sacct to know this
 			       * hasn't been set yet  */
 	job_ptr->billable_tres = (double)NO_VAL;
+	job_ptr->booked_usage_factor = 1.0;
 
 	return job_ptr;
 }
@@ -2718,6 +2719,7 @@ extern int job_record_unpack_common(job_record_t *job_ptr,
 		safe_unpack64(&job_ptr->bit_flags, buffer);
 		job_ptr->bit_flags &= ~BACKFILL_TEST;
 		job_ptr->bit_flags &= ~BF_WHOLE_NODE_TEST;
+		job_ptr->bit_flags &= ~BF_CURRENT_JOB_NOT_UPDATED;
 		safe_unpackstr(&job_ptr->burst_buffer, buffer);
 		safe_unpackstr(&job_ptr->burst_buffer_state, buffer);
 		safe_unpackdouble(&job_ptr->billable_tres, buffer);
@@ -2762,6 +2764,14 @@ extern int job_record_unpack_common(job_record_t *job_ptr,
 		safe_unpackstr(&job_ptr->network, buffer);
 
 		safe_unpack_time(&job_ptr->preempt_time, buffer);
+		/*
+		 * A job restored with preempt_time still set is mid-GraceTime;
+		 * leave GRACE_PREEMPT so a completion during the remainder of
+		 * the window is still treated as preemption. Otherwise scrub
+		 * the bit so it does not survive an upgrade.
+		 */
+		if (!job_ptr->preempt_time)
+			job_ptr->bit_flags &= ~GRACE_PREEMPT;
 		safe_unpack_time(&job_ptr->pre_sus_time, buffer);
 		safe_unpack32(&job_ptr->priority, buffer);
 		safe_unpack32(&job_ptr->profile, buffer);
@@ -2814,6 +2824,7 @@ extern int job_record_unpack_common(job_record_t *job_ptr,
 		safe_unpack64(&job_ptr->bit_flags, buffer);
 		job_ptr->bit_flags &= ~BACKFILL_TEST;
 		job_ptr->bit_flags &= ~BF_WHOLE_NODE_TEST;
+		job_ptr->bit_flags &= ~BF_CURRENT_JOB_NOT_UPDATED;
 		safe_unpackstr(&job_ptr->burst_buffer, buffer);
 		safe_unpackstr(&job_ptr->burst_buffer_state, buffer);
 		safe_unpackdouble(&job_ptr->billable_tres, buffer);
@@ -2857,6 +2868,14 @@ extern int job_record_unpack_common(job_record_t *job_ptr,
 		safe_unpackstr(&job_ptr->network, buffer);
 
 		safe_unpack_time(&job_ptr->preempt_time, buffer);
+		/*
+		 * A job restored with preempt_time still set is mid-GraceTime;
+		 * leave GRACE_PREEMPT so a completion during the remainder of
+		 * the window is still treated as preemption. Otherwise scrub
+		 * the bit so it does not survive an upgrade.
+		 */
+		if (!job_ptr->preempt_time)
+			job_ptr->bit_flags &= ~GRACE_PREEMPT;
 		safe_unpack_time(&job_ptr->pre_sus_time, buffer);
 		safe_unpack32(&job_ptr->priority, buffer);
 		safe_unpack32(&job_ptr->profile, buffer);
@@ -2907,6 +2926,7 @@ extern int job_record_unpack_common(job_record_t *job_ptr,
 		safe_unpack64(&job_ptr->bit_flags, buffer);
 		job_ptr->bit_flags &= ~BACKFILL_TEST;
 		job_ptr->bit_flags &= ~BF_WHOLE_NODE_TEST;
+		job_ptr->bit_flags &= ~BF_CURRENT_JOB_NOT_UPDATED;
 		safe_unpackstr(&job_ptr->burst_buffer, buffer);
 		safe_unpackstr(&job_ptr->burst_buffer_state, buffer);
 		safe_unpackdouble(&job_ptr->billable_tres, buffer);
@@ -2952,6 +2972,14 @@ extern int job_record_unpack_common(job_record_t *job_ptr,
 		safe_unpackstr(&job_ptr->network, buffer);
 
 		safe_unpack_time(&job_ptr->preempt_time, buffer);
+		/*
+		 * A job restored with preempt_time still set is mid-GraceTime;
+		 * leave GRACE_PREEMPT so a completion during the remainder of
+		 * the window is still treated as preemption. Otherwise scrub
+		 * the bit so it does not survive an upgrade.
+		 */
+		if (!job_ptr->preempt_time)
+			job_ptr->bit_flags &= ~GRACE_PREEMPT;
 		safe_unpack_time(&job_ptr->pre_sus_time, buffer);
 		safe_unpack32(&job_ptr->priority, buffer);
 		safe_unpack32(&job_ptr->profile, buffer);
@@ -3002,6 +3030,7 @@ extern int job_record_unpack_common(job_record_t *job_ptr,
 		safe_unpack64(&job_ptr->bit_flags, buffer);
 		job_ptr->bit_flags &= ~BACKFILL_TEST;
 		job_ptr->bit_flags &= ~BF_WHOLE_NODE_TEST;
+		job_ptr->bit_flags &= ~BF_CURRENT_JOB_NOT_UPDATED;
 		safe_unpackstr(&job_ptr->burst_buffer, buffer);
 		safe_unpackstr(&job_ptr->burst_buffer_state, buffer);
 		safe_unpackdouble(&job_ptr->billable_tres, buffer);
@@ -3046,6 +3075,14 @@ extern int job_record_unpack_common(job_record_t *job_ptr,
 		safe_unpackstr(&job_ptr->network, buffer);
 
 		safe_unpack_time(&job_ptr->preempt_time, buffer);
+		/*
+		 * A job restored with preempt_time still set is mid-GraceTime;
+		 * leave GRACE_PREEMPT so a completion during the remainder of
+		 * the window is still treated as preemption. Otherwise scrub
+		 * the bit so it does not survive an upgrade.
+		 */
+		if (!job_ptr->preempt_time)
+			job_ptr->bit_flags &= ~GRACE_PREEMPT;
 		safe_unpack_time(&job_ptr->pre_sus_time, buffer);
 		safe_unpack32(&job_ptr->priority, buffer);
 		safe_unpack32(&job_ptr->profile, buffer);

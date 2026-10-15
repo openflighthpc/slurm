@@ -2539,6 +2539,69 @@ _log_task_exit(unsigned long taskid, unsigned long pid, int status)
 }
 
 /*
+ * Enforce --kill-on-bad-exit for async steps, which have no srun to drive
+ * the kill (sync steps use _step_signal() in srun).
+ * IN t - task that just exited.
+ */
+static void _maybe_kill_peers_on_bad_exit(stepd_step_task_info_t *t)
+{
+	static bool signaled = false;
+	int estatus = t->estatus;
+	slurm_msg_t msg, resp_msg;
+	job_step_kill_msg_t req = { 0 };
+
+	/* Fire once: several local tasks may fail before the kill returns. */
+	if (signaled)
+		return;
+	/*
+	 * A task signaled to be killed shouldn't send out additional kill RPCs
+	 */
+	if (t->killed_by_cmd)
+		return;
+	if (!(step->flags & LAUNCH_KILL_ON_BAD_EXIT))
+		return;
+
+	/*
+	 * LAUNCH_LOCAL_IO is set iff SSF_ASYNC; sync steps are driven by srun.
+	 */
+	if (!(step->flags & LAUNCH_LOCAL_IO))
+		return;
+
+	/*
+	 * Any non-zero status or cgroup-OOM is abnormal; honor --no-sig-fail.
+	 */
+	if (!estatus && !step->oom_error)
+		return;
+	if (!step->oom_error && WIFSIGNALED(estatus) &&
+	    (step->flags & LAUNCH_NO_SIG_FAIL))
+		return;
+
+	debug2("kill-on-bad-exit: async task exit (0x%x); signaling peers",
+	       estatus);
+
+	/*
+	 * Async steps only exist under stepmgr, so signal peers by sending the
+	 * cancel straight to the stepmgr rather than routing through slurmctld.
+	 */
+	xassert(step->stepmgr);
+	req.step_id = step->step_id;
+	req.signal = SIG_TERM_KILL;
+
+	slurm_msg_t_init(&msg);
+	slurm_msg_t_init(&resp_msg);
+	msg.msg_type = REQUEST_CANCEL_JOB_STEP;
+	msg.data = &req;
+	slurm_conf_get_addr(step->stepmgr, &msg.address, msg.flags);
+	slurm_msg_set_r_uid(&msg, slurm_conf.slurmd_user_id);
+	if (slurm_send_recv_node_msg(&msg, &resp_msg, 0))
+		error("%s: failed to signal peer tasks via stepmgr %s",
+		      __func__, step->stepmgr);
+	else
+		signaled = true;
+	slurm_free_msg_members(&resp_msg);
+}
+
+/*
  * If waitflag is true, perform a blocking wait for a single process
  * and then return.
  *
@@ -2669,6 +2732,8 @@ static int _wait_for_any_task(bool waitflag)
 					step_complete.step_rc = t->estatus;
 				slurm_mutex_unlock(&step_complete.lock);
 			}
+
+			_maybe_kill_peers_on_bad_exit(t);
 		}
 
 	} while ((pid > 0) && !waitflag);
@@ -3067,25 +3132,25 @@ static void _set_prio_process(void)
 	char *env_val;
 	int prio_daemon, prio_process;
 
-	if (!(env_val = getenvp( step->env, env_name ))) {
-		error( "Couldn't find %s in environment", env_name );
+	if (!(env_val = getenvp(step->env, env_name))) {
+		error("Couldn't find %s in environment", env_name);
 		prio_process = 0;
 	} else {
+		prio_process = atoi(env_val);
 		/* Users shouldn't get this in their environment */
-		unsetenvp( step->env, env_name );
-		prio_process = atoi( env_val );
+		unsetenvp(step->env, env_name);
 	}
 
 	if (slurm_conf.propagate_prio_process == PROP_PRIO_NICER) {
-		prio_daemon = getpriority( PRIO_PROCESS, 0 );
-		prio_process = MAX( prio_process, (prio_daemon + 1) );
+		prio_daemon = getpriority(PRIO_PROCESS, 0);
+		prio_process = MAX(prio_process, (prio_daemon + 1));
 	}
 
-	if (setpriority( PRIO_PROCESS, 0, prio_process ))
-		error( "setpriority(PRIO_PROCESS, %d): %m", prio_process );
+	if (setpriority(PRIO_PROCESS, 0, prio_process))
+		error("setpriority(PRIO_PROCESS, %d): %m", prio_process);
 	else {
-		debug2( "_set_prio_process: setpriority %d succeeded",
-			prio_process);
+		debug2("_set_prio_process: setpriority %d succeeded",
+		       prio_process);
 	}
 }
 

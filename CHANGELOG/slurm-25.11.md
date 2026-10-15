@@ -1,3 +1,48 @@
+## Changes in 25.11.8
+
+* Allow FLEX+MAGNETIC reservations to pick up jobs that extend beyond the reservation's end time.
+* Fix slurmctld segfault when QOS-based SUSPEND preemption occurs on a partition with OverSubscribe=YES.
+* slurmctld - Fix double-free when a job partition, QOS, or account update request fails for a job in a reservation.
+* Fix memory leak in slurmd and slurmstepd when unpacking a job credential.
+* Fix possible slurmstepd crash on invalid step socket requests. CVE-2026-65168.
+* Fix sbcast shared objects skipping credential verification. CVE-2026-65107.
+* Fix possible slurmd crash on invalid sbcast filenames. CVE-2026-65107.
+* Fix a slurmstepd stack overflow when a job environment contains an oversized SPANK option variable. CVE-2026-65108.
+* Fix slurmstepd removing files outside the container spool directory when cleaning up an OCI container. CVE-2026-65109.
+* Fix slurmstepd leaving OCI container spool directories behind when ContainerPath contains a task id pattern. CVE-2026-65109.
+* Fix heap over-read when unpacking a malformed forward data RPC in slurmd. CVE-2026-65138.
+* Fix a slurmd crash when handling a malformed forward data RPC with a missing socket address. CVE-2026-65138.
+* Reject cluster names containing characters that are unsafe to use in an accounting database query. CVE-2026-65139.
+* Reject unsafe cluster names on the accounting usage, add and runaway job paths. CVE-2026-65139.
+* Reject unsafe cluster names when opening a connection to the slurmdbd. CVE-2026-65139.
+* Reject non-numeric id values in accounting database queries. CVE-2026-65139.
+* Fix a privilege escalation where an operator could alter Administrator accounts through the accounting database. CVE-2026-65140.
+* Fix node count of a job step using arbitrary distribution. CVE-2026-65165.
+* Reject a hostlist function in the node list of a job step using arbitrary distribution. CVE-2026-65165.
+* Reject a job step whose arbitrary node list disagrees with its node count. CVE-2026-65165.
+
+## Changes in 25.11.7
+
+* slurmctld - return 303 See Other from GET /metrics/* when in backup standby, pointing to the configured primary controller
+* Prevent the slurmctld's background thread from waiting on the purge files thread while holding the job and node write locks.
+* Prevent slurmctld crash when a HetJob component fails to start.
+* Requeue --no-requeue jobs when powering-up nodes are drained and requeue_on_resume_failure SchedulerParameter is set.
+* Fix JobAccountGather failing on glibc 2.43+ due to a sscanf() %Nc behavior change.
+* Fix sdiag RPC-by-user and RPC-by-type output for a full user stats table.
+* Fix a regression in slurm 25.05 that caused requeued jobs to lose their license/HRES requests, which results in Slurm allowing the job to run without having sufficient licenses/HRES.
+* Fix slurmctld crash and shutdown/reconfigure deadlock caused by accounting_storage callers racing the plugin teardown.
+* Fixed a crash caused by a race condition in the mysql code caused by checking the connection before it was safely locked.
+* accounting_storage/slurmdbd - Fix slurmctld performance regression caused by unnecessary lock contention when packing a message to the slurmdbd agent.
+* Fix warning in shtml2html.py when using Python 3.14+
+* Fix runtime-added assoc/wckey uid NO_VAL under use_client_ids.
+* Fix potential crash when reconfiguring with auth/slurm.
+* slurmctld - Prevent segfaulting from dereferencing stale QOS, association, or user pointers after updating the assoc_mgr.
+* Fix memory leak in slurmstepd's PMIx startup.
+* Fix pmix jobs failing on startup when requesting a large number of tasks.
+* Make --test-only evaluate multi-partition jobs against the candidate partition being tested.
+* Prevent slurmctld from crashing with a divide-by-zero when --test-only uses an empty partition before a usable one.
+* Fix slurmctld crashing when using job arrays that request mode 3 HRES.
+
 ## Changes in 25.11.6
 
 * scontrol - Allow updating InstanceId for batches of nodes as is possible for updating NodeAddr and NodeHosts.

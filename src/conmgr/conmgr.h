@@ -397,6 +397,13 @@ typedef enum {
 	/* output_fd is a socket with TCP_NODELAY set */
 	CON_FLAG_TCP_NODELAY = SLURM_BIT(14),
 	/*
+	 * Send a TLS close_notify (half-close via s2n_shutdown_send()) before
+	 * closing the connection, so the peer's next read returns EOF instead of
+	 * an error. Used for persistent connections where the peer must be able
+	 * to tell an intentional close from a failure. Normal RPCs omit this.
+	 */
+	CON_FLAG_ENABLE_TLS_SHUTDOWN = SLURM_BIT(16),
+	/*
 	 * Incoming and outgoing is wrapped by TLS (or connection will fail)
 	 * in CONN_SERVER mode.
 	 * Mutually exclusive with CON_FLAG_TLS_CLIENT.
@@ -546,6 +553,28 @@ extern int conmgr_queue_write_msg(conmgr_fd_t *con, slurm_msg_t *msg);
  * RET SLURM_SUCCESS or error
  */
 extern int conmgr_con_queue_write_msg(conmgr_fd_ref_t *ref, slurm_msg_t *msg);
+
+/*
+ * Send a RESPONSE_SLURM_RC reply carrying the given return code to an RPC
+ * connection, then queue a close of the connection.
+ * NOTE: type=CON_TYPE_RPC only
+ * IN ref - reference to connection to reply on
+ * IN rc - return code to send back to the client in the RESPONSE_SLURM_RC reply
+ * IN protocol_version - protocol version to pack the reply with.
+ * RET SLURM_SUCCESS or error
+ */
+extern int conmgr_con_reply_rc_and_close(conmgr_fd_ref_t *ref, int rc,
+					 uint16_t protocol_version);
+
+/*
+ * Peek the protocol version of the RPC currently pending (unparsed) in the
+ * connection's input buffer. Does not consume the pending RPC.
+ * NOTE: type=CON_TYPE_RPC only
+ * IN ref - reference to connection with a pending RPC
+ * RET the pending request's protocol version, or SLURM_MIN_PROTOCOL_VERSION if
+ *	it cannot be read or is not a version this binary supports
+ */
+extern uint16_t conmgr_con_peek_rpc_protocol_version(conmgr_fd_ref_t *ref);
 
 /*
  * Request soft close of connection

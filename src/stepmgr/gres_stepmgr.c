@@ -1889,9 +1889,15 @@ static char *_build_shared_gres_details(char *nodes, int node_index,
 	/*
 	 * Fill shared gres details string with info about allocated shared gres
 	 * from gres_js->gres_bit_alloc, and info about available shared gres
-	 * from gres_ns->topo_gres_cnt_avail
+	 * from gres_ns->topo_gres_cnt_avail. If the shared topology was removed
+	 * (e.g. shard GRES deleted under a running job), return NULL rather
+	 * than dereferencing a NULL topology array during job-state recovery.
 	 */
 	gres_cnt_on_node = bit_size(gres_js->gres_bit_alloc[node_index]);
+	if (!gres_ns->topo_gres_cnt_avail ||
+	    (gres_ns->topo_cnt < gres_cnt_on_node))
+		return NULL;
+
 	for (int i = 0; i < gres_cnt_on_node; i++) {
 		xstrfmtcatat(shared_gres_details_str, &pos,
 			     "%"PRIu64"/%"PRIu64",",
@@ -1991,7 +1997,9 @@ extern void gres_stepmgr_job_build_details(
 				xstrfmtcat(my_gres_details[j],
 					   "%s%s:%" PRIu64 "(%s)", sep1,
 					   gres_name, alloc_cnt,
-					   shared_gres_details);
+					   (shared_gres_details ?
+						    shared_gres_details :
+						    "(null)"));
 				xfree(shared_gres_details);
 
 			} else if (gres_js->gres_bit_alloc[j]) {
@@ -2368,6 +2376,21 @@ static int _set_step_gres_bit_alloc(gres_step_state_t *gres_ss,
 	    !gres_id_shared(gres_state_job->config_flags)) {
 		bit_and_not(gres_bit_avail,
 			    gres_js->gres_bit_step_alloc[node_offset]);
+	}
+
+	/*
+	 * Exclude GRES already allocated to this step on a previous pass of
+	 * _foreach_step_alloc_outer(), which calls this twice: pass 1 with a core
+	 * bitmap (cores-local GRES only) and pass 2 with no core bitmap (any
+	 * GRES). For overlapping steps (decr_job_alloc == false) the job's
+	 * gres_bit_step_alloc is never updated, so without this the second
+	 * pass can re-select a GRES already picked in pass 1, consuming a
+	 * gres_alloc slot and leaving the step short one device.
+	 */
+	if (gres_ss->gres_bit_alloc && gres_ss->gres_bit_alloc[node_offset] &&
+	    !gres_id_shared(gres_state_job->config_flags)) {
+		bit_and_not(gres_bit_avail,
+			    gres_ss->gres_bit_alloc[node_offset]);
 	}
 
 	for (int i = 0; i < len && gres_alloc; i++) {

@@ -72,7 +72,7 @@
 
 static int   _fill_job_desc_from_opts(job_desc_msg_t *desc);
 static void *_get_script_buffer(const char *filename, int *size);
-static int _job_wait(slurm_step_id_t step_id);
+static int _job_wait(uint32_t job_id);
 static char *_script_wrap(char *command_string);
 static void  _set_exit_code(void);
 static int   _set_rlimit_env(void);
@@ -130,7 +130,8 @@ int main(int argc, char **argv)
 		log_alter(logopt, 0, NULL);
 	}
 
-	if (opt.job_flags & EXTERNAL_JOB) {
+	/* Only the leader of a hetjob carries the script */
+	if (is_het_job ? het_leader_external : (opt.job_flags & EXTERNAL_JOB)) {
 		script_body = NULL;
 	} else if (sbopt.wrap) {
 		script_body = _script_wrap(sbopt.wrap);
@@ -300,7 +301,7 @@ int main(int argc, char **argv)
 			rc = slurm_submit_batch_job(desc, &resp);
 		if (rc >= 0)
 			break;
-		if (errno == ESLURM_ERROR_ON_DESC_TO_RECORD_COPY) {
+		if (errno == ESLURM_MAX_JOB_COUNT) {
 			msg = "Slurm job queue full, sleeping and retrying";
 		} else if ((errno == ESLURM_NODES_BUSY) ||
 			   (errno == ESLURM_PORTS_BUSY)) {
@@ -353,7 +354,7 @@ int main(int argc, char **argv)
 	}
 
 	if (sbopt.wait)
-		rc = _job_wait(resp->step_id);
+		rc = _job_wait(resp->step_id.job_id);
 
 #ifdef MEMORY_LEAK_DEBUG
 	cli_filter_fini();
@@ -367,13 +368,15 @@ int main(int argc, char **argv)
 }
 
 /* Wait for specified job ID to terminate, return it's exit code */
-static int _job_wait(slurm_step_id_t step_id)
+static int _job_wait(uint32_t job_id)
 {
 	slurm_job_info_t *job_ptr;
 	job_info_msg_t *resp = NULL;
 	int ec = 0, ec2, i, rc;
 	int sleep_time = 2;
 	bool complete = false;
+	slurm_step_id_t step_id = SLURM_STEP_ID_INITIALIZER;
+	step_id.job_id = job_id;
 
 	while (!complete) {
 		complete = true;

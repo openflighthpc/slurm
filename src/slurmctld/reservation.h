@@ -119,6 +119,16 @@ extern int load_all_resv_state(int recover);
 extern void validate_all_reservations(bool run_now, bool run_locked);
 
 /*
+ * Re-resolve a reservation's qos_list pointers from its canonical qos string.
+ * Used by the assoc_mgr cache-update path after the qos list has been replaced,
+ * which leaves the qos_rec pointers cached in resv_ptr->qos_list dangling.
+ * IN x   - reservation to update (slurmctld_resv_t *)
+ * IN arg - unused
+ * RET 0
+ */
+extern int resv_cache_update_qos_list(void *x, void *arg);
+
+/*
  * Determine if a job request can use the specified reservations
  *
  * IN/OUT job_ptr - job to validate, set its resv_id and resv_type
@@ -174,10 +184,9 @@ extern int job_test_lic_resv(job_record_t *job_ptr, licenses_id_t id,
  *	ESLURM_NODES_BUSY job has no reservation, but required nodes are
  *			  reserved
  */
-extern int job_test_resv(job_record_t *job_ptr, time_t *when,
-			 bool move_time, bitstr_t **node_bitmap,
-			 resv_exc_t *resv_exc_ptr, bool *resv_overlap,
-			 bool reboot);
+extern int job_test_resv(job_record_t *job_ptr, time_t *when, bool move_time,
+			 bitstr_t **node_bitmap, resv_exc_t *resv_exc_ptr,
+			 bool *resv_maint, bool *resv_overlap, bool reboot);
 
 /*
  * Note that a job is starting or finishing execution. If that job is associated

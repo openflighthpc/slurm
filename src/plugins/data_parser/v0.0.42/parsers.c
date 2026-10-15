@@ -2129,8 +2129,17 @@ static int PARSE_FUNC(USER_ID)(const parser_t *const parser, void *obj,
 					   src);
 		/* fall through */
 	case DATA_TYPE_INT_64:
-		uid = data_get_int(src);
+	{
+		int64_t tmp_val = data_get_int(src);
+		if ((tmp_val < 0) || (tmp_val > UINT32_MAX))
+			return parse_error(
+				parser, args, parent_path,
+				ESLURM_USER_ID_INVALID,
+				"Invalid user ID (overflow): %" PRId64,
+				tmp_val);
+		uid = tmp_val;
 		break;
+	}
 	case DATA_TYPE_STRING:
 	{
 		int rc;
@@ -2168,11 +2177,6 @@ static int PARSE_FUNC(USER_ID)(const parser_t *const parser, void *obj,
 		fatal_abort("invalid type");
 	}
 
-	if (uid >= INT_MAX)
-		return parse_error(parser, args, parent_path,
-				   ESLURM_USER_ID_INVALID,
-				   "Invalid user ID: %d", uid);
-
 	*uid_ptr = uid;
 
 	return SLURM_SUCCESS;
@@ -2193,8 +2197,17 @@ static int PARSE_FUNC(GROUP_ID)(const parser_t *const parser, void *obj,
 					   src);
 		/* fall through */
 	case DATA_TYPE_INT_64:
-		gid = data_get_int(src);
+	{
+		int64_t tmp_val = data_get_int(src);
+		if ((tmp_val < 0) || (tmp_val > UINT32_MAX))
+			return parse_error(
+				parser, args, parent_path,
+				ESLURM_GROUP_ID_INVALID,
+				"Invalid group ID (overflow): %" PRId64,
+				tmp_val);
+		gid = tmp_val;
 		break;
+	}
 	case DATA_TYPE_STRING:
 	{
 		int rc;
@@ -2231,11 +2244,6 @@ static int PARSE_FUNC(GROUP_ID)(const parser_t *const parser, void *obj,
 	case DATA_TYPE_MAX:
 		fatal_abort("invalid type");
 	}
-
-	if (gid >= INT_MAX)
-		return parse_error(parser, args, parent_path,
-				   ESLURM_GROUP_ID_INVALID,
-				   "Invalid group ID: %d", gid);
 
 	*gid_ptr = gid;
 
@@ -7484,7 +7492,7 @@ static const parser_t PARSER_ARRAY(NODE)[] = {
 	add_parse(UINT64_NO_VAL, free_mem, "free_mem", "Total memory in MB currently free as reported by the OS"),
 	add_parse(UINT16, cpus, "cpus", "Total CPUs, including cores and threads"),
 	add_parse(UINT16, cpus_efctv, "effective_cpus", "Number of effective CPUs (excluding specialized CPUs)"),
-	add_parse(STRING, cpu_spec_list, "specialized_cpus", "Abstract CPU IDs on this node reserved for exclusive use by slurmd and slurmstepd"),
+	add_parse(STRING, cpu_spec_list, "specialized_cpus", "Slurm abstract CPU IDs on this node reserved for exclusive use by slurmd and slurmstepd"),
 	add_parse(ACCT_GATHER_ENERGY_PTR, energy, "energy", "Energy usage data"),
 	add_removed(EXT_SENSORS_DATA_PTR, "external_sensors", NULL, SLURM_MIN_PROTOCOL_VERSION),
 	add_parse(STRING, extra, "extra", "Arbitrary string used for node filtering if extra constraints are enabled"),

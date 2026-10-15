@@ -620,6 +620,10 @@ typedef struct set_debug_level_msg {
 	uint32_t debug_level;
 } set_debug_level_msg_t;
 
+typedef struct node_health_check_msg {
+	bool healthy;
+} node_health_check_msg_t;
+
 typedef struct job_step_specs {
 	char *container; /* OCI container bundle path */
 	char *container_id; /* OCI container ID */
@@ -1607,6 +1611,7 @@ extern void slurm_free_job_info_request_msg(job_info_request_msg_t *msg);
 extern void slurm_free_job_state_request_msg(job_state_request_msg_t *msg);
 extern void slurm_free_job_step_info_request_msg(
 		job_step_info_request_msg_t *msg);
+extern void slurm_free_node_health_check_msg(node_health_check_msg_t *msg);
 extern void slurm_free_node_info_request_msg(node_info_request_msg_t *msg);
 extern void slurm_free_node_info_single_msg(node_info_single_msg_t *msg);
 extern void slurm_free_part_info_request_msg(part_info_request_msg_t *msg);
@@ -2004,7 +2009,9 @@ enum {
 };
 
 /*
- * Fuzzy name comparison for remote licenses
+ * Fuzzy name comparison for remote licenses. "name" MUST refer to a remote
+ * license with the key assumption that no '@' characters exist in the server
+ * name portion.
  * query IN - query string
  * name IN - license name
  * RET rc - 0 for no match, 1 for exact match, 2 for fuzzy match

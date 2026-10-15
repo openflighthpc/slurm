@@ -109,6 +109,7 @@ static const struct {
 	T(FLAG_IS_FIFO),
 	T(FLAG_IS_CHR),
 	T(FLAG_TCP_NODELAY),
+	T(FLAG_ENABLE_TLS_SHUTDOWN),
 	T(FLAG_TLS_SERVER),
 	T(FLAG_TLS_CLIENT),
 	T(FLAG_IS_TLS_CONNECTED),
@@ -278,12 +279,13 @@ extern void close_con(bool locked, conmgr_fd_t *con)
 		return;
 	}
 
-	if (!mgr.shutdown_requested && con->tls &&
+	if (con_flag(con, FLAG_ENABLE_TLS_SHUTDOWN) &&
+	    !mgr.shutdown_requested && con->tls &&
 	    con_flag(con, FLAG_IS_TLS_CONNECTED) &&
 	    !con_flag(con, FLAG_INITIATE_TLS_SHUTDOWN) &&
 	    !con_flag(con, FLAG_IS_TLS_SHUTTING_DOWN) &&
 	    !con_flag(con, FLAG_READ_EOF) && !(con->output_fd < 0)) {
-		/* Attempt graceful TLS shutdown once */
+		/* Send our TLS close_notify one time only before closing */
 		con_set_flag(con, FLAG_INITIATE_TLS_SHUTDOWN);
 
 		if (!locked)
@@ -711,6 +713,22 @@ extern int add_connection(conmgr_con_type_t type,
 				 __func__, fd);
 		}
 	}
+
+	/*
+	 * When TLS is enabled, fingerprint inbound inet RPC listeners so that
+	 * accepted connections detect an incoming TLS handshake. Unix domain
+	 * sockets and connections already pinned to TLS_SERVER or TLS_CLIENT
+	 * are exempt.
+	 *
+	 * NOTE: This only enables TLS fingerprinting on these connections.
+	 * Rejection of non-TLS connections is handled by
+	 * on_rpc_connection_data() for CON_TYPE_RPC connections. Any other
+	 * connection type must handle rejection in the caller.
+	 */
+	if (is_listen && (type == CON_TYPE_RPC) && conn_tls_enabled() &&
+	    (con->address.ss_family != AF_LOCAL) &&
+	    !con_flag(con, FLAG_TLS_SERVER) && !con_flag(con, FLAG_TLS_CLIENT))
+		con_set_flag(con, FLAG_TLS_FINGERPRINT);
 
 	if (has_out) {
 		int bytes = -1;

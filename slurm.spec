@@ -1,6 +1,5 @@
 Name:		flight-slurm
-Version:	26.05.1
-
+Version:	26.05.5
 %define rel	1
 %if %{defined patch} && %{undefined extraver}
 %define extraver .patched

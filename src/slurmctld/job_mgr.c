@@ -226,6 +226,7 @@ typedef struct {
 } foreach_hetcomp_args_t;
 
 typedef struct {
+	bool found;
 	job_step_kill_msg_t *job_step_kill_msg;
 	int rc;
 	uint32_t uid;
@@ -950,8 +951,7 @@ static slurmdb_qos_rec_t *_determine_and_validate_qos(
 
 static list_t *_get_qos_ptr_list(char *qos_req, char *resv_name,
 				 slurmdb_assoc_rec_t *assoc_ptr,
-				 bool privileged, int *error_code, bool locked,
-				 log_level_t log_lvl)
+				 bool privileged, int *error_code, bool locked)
 {
 	list_t *qos_ptr_list = NULL;
 	char *token, *last = NULL, *tmp_qos_req;
@@ -971,7 +971,7 @@ static list_t *_get_qos_ptr_list(char *qos_req, char *resv_name,
 			_determine_and_validate_qos(resv_name, assoc_ptr,
 						    privileged, &qos_rec,
 						    error_code, locked,
-						    log_lvl);
+						    LOG_LEVEL_ERROR);
 
 		if (*error_code != SLURM_SUCCESS)
 			break;
@@ -1013,10 +1013,15 @@ static list_t *_get_qos_ptr_list(char *qos_req, char *resv_name,
 	return qos_ptr_list;
 }
 
+/*
+ * For multi-QOS requests, qos_id == 0 means select the first QOS from the
+ * priority-sorted request list. A nonzero qos_id means the caller already has
+ * a selected QOS to preserve, such as when reloading an existing job.
+ */
 static int _get_qos_info(char *qos_req, uint32_t qos_id, list_t **qos_plist,
 			 slurmdb_qos_rec_t **qos_pptr, char *resv_name,
 			 slurmdb_assoc_rec_t *assoc_ptr, bool privileged,
-			 bool locked, log_level_t log_lvl)
+			 bool locked)
 {
 	int rc = SLURM_SUCCESS;
 
@@ -1025,7 +1030,7 @@ static int _get_qos_info(char *qos_req, uint32_t qos_id, list_t **qos_plist,
 	xassert(!*qos_plist);
 
 	*qos_plist = _get_qos_ptr_list(qos_req, resv_name, assoc_ptr,
-				       privileged, &rc, locked, log_lvl);
+				       privileged, &rc, locked);
 
 	if (!*qos_plist) {
 		slurmdb_qos_rec_t qos_rec = {
@@ -1033,13 +1038,25 @@ static int _get_qos_info(char *qos_req, uint32_t qos_id, list_t **qos_plist,
 			.id = qos_id,
 		};
 
-		*qos_pptr = _determine_and_validate_qos(resv_name, assoc_ptr,
-							privileged, &qos_rec,
-							&rc, locked, log_lvl);
-	} else {
-		*qos_pptr = list_peek(*qos_plist);
+		*qos_pptr =
+			_determine_and_validate_qos(resv_name, assoc_ptr,
+						    privileged, &qos_rec, &rc,
+						    locked, LOG_LEVEL_ERROR);
+		return rc;
 	}
 
+	if (qos_id) {
+		*qos_pptr =
+			list_find_first_ro(*qos_plist, slurmdb_find_qos_in_list,
+					   &qos_id);
+		if (*qos_pptr)
+			return rc;
+
+		info("%s: qos %u is not part of qos_req '%s', using the highest priority one",
+		     __func__, qos_id, qos_req);
+	}
+
+	*qos_pptr = list_peek(*qos_plist);
 	return rc;
 }
 /*
@@ -1585,6 +1602,15 @@ extern int job_mgr_load_job_state(buf_t *buffer,
 		job_ptr->node_cnt_wag = job_ptr->total_nodes;
 
 	/*
+	 * Drop a resize_time left set by a requeue on an unpatched controller,
+	 * which already pushed submit_time past it. A requeue still completing
+	 * has not, so batch_requeue_fini() is still the one to clear that.
+	 */
+	if (job_ptr->resize_time && job_ptr->details &&
+	    (job_ptr->details->submit_time > job_ptr->resize_time))
+		job_ptr->resize_time = 0;
+
+	/*
 	 * This needs to always to initialized to "true".  The select
 	 * plugin will deal with it every time it goes through the
 	 * logic if req_switch or wait4switch are set.
@@ -1661,14 +1687,12 @@ extern int job_mgr_load_job_state(buf_t *buffer,
 
 	if (!job_finished && (job_ptr->qos_id || job_ptr->details->qos_req) &&
 	    (job_ptr->state_reason != FAIL_ACCOUNT)) {
-		int qos_error = _get_qos_info(job_ptr->details->qos_req,
-					      job_ptr->qos_id,
-					      &job_ptr->qos_list,
-					      &job_ptr->qos_ptr,
-					      job_ptr->resv_name,
-					      job_ptr->assoc_ptr,
-					      job_ptr->limit_set.qos,
-					      true, LOG_LEVEL_ERROR);
+		int qos_error =
+			_get_qos_info(job_ptr->details->qos_req,
+				      job_ptr->qos_id, &job_ptr->qos_list,
+				      &job_ptr->qos_ptr, job_ptr->resv_name,
+				      job_ptr->assoc_ptr,
+				      job_ptr->limit_set.qos, true);
 
 		if ((qos_error != SLURM_SUCCESS) &&
 		    !job_ptr->limit_set.qos) {
@@ -2618,7 +2642,6 @@ static int _kill_job_step(job_step_kill_msg_t *job_step_kill_msg,
 	DEF_TIMERS;
 	int error_code = SLURM_SUCCESS;
 	xassert(job_ptr);
-	xassert(job_ptr->job_id == job_step_kill_msg->step_id.job_id);
 
 	START_TIMER;
 
@@ -2696,13 +2719,24 @@ static int _foreach_kill_hetjob_step(void *x, void *arg)
 	foreach_kill_hetjob_step_t *foreach_kill_hetjob_step = arg;
 	job_step_kill_msg_t *job_step_kill_msg =
 		foreach_kill_hetjob_step->job_step_kill_msg;
+	slurm_step_id_t step_id = STEP_ID_FROM_JOB_RECORD(het_job_ptr);
 	int rc;
 
-	job_step_kill_msg->step_id = STEP_ID_FROM_JOB_RECORD(het_job_ptr);
+	/*
+	 * Retarget the request to this component job but keep the requested
+	 * step, otherwise the whole component job would be signaled instead
+	 * of only its step and flags like KILL_NO_SIG_FAIL would be dropped.
+	 */
+	step_id.step_id = job_step_kill_msg->step_id.step_id;
+	step_id.step_het_comp = job_step_kill_msg->step_id.step_het_comp;
+	job_step_kill_msg->step_id = step_id;
 	rc = _kill_job_step(job_step_kill_msg, het_job_ptr,
 			    foreach_kill_hetjob_step->uid);
 
-	if (rc != SLURM_SUCCESS)
+	if (rc == SLURM_SUCCESS)
+		foreach_kill_hetjob_step->found = true;
+	else if ((rc != ESLURM_INVALID_JOB_ID) &&
+		 (foreach_kill_hetjob_step->rc == SLURM_SUCCESS))
 		foreach_kill_hetjob_step->rc = rc;
 
 	return 0;
@@ -2758,7 +2792,8 @@ extern int kill_job_step(job_step_kill_msg_t *job_step_kill_msg, uint32_t uid)
 		goto endit;
 
 	if (job_ptr->het_job_list &&
-	    (job_step_kill_msg->signal == SIGKILL) &&
+	    ((job_step_kill_msg->signal == SIGKILL) ||
+	     (job_step_kill_msg->signal == SIG_TERM_KILL)) &&
 	    (job_step_kill_msg->step_id.step_id != NO_VAL)) {
 		foreach_kill_hetjob_step_t foreach_kill_hetjob_step = {
 			.job_step_kill_msg = job_step_kill_msg,
@@ -2768,6 +2803,15 @@ extern int kill_job_step(job_step_kill_msg_t *job_step_kill_msg, uint32_t uid)
 		(void) list_for_each(job_ptr->het_job_list,
 				     _foreach_kill_hetjob_step,
 				     &foreach_kill_hetjob_step);
+		/*
+		 * A step does not need to exist in every component. Keep the
+		 * first real error so that it is not masked by the components
+		 * simply not having the step, and report the step as not found
+		 * only when no component had it and nothing else failed.
+		 */
+		if (!foreach_kill_hetjob_step.found &&
+		    (foreach_kill_hetjob_step.rc == SLURM_SUCCESS))
+			foreach_kill_hetjob_step.rc = ESLURM_INVALID_JOB_ID;
 		if (foreach_kill_hetjob_step.rc != SLURM_SUCCESS)
 			error_code = foreach_kill_hetjob_step.rc;
 	} else {
@@ -3506,6 +3550,9 @@ extern job_record_t *job_array_split(job_record_t *job_ptr, bool list_add)
 	job_ptr_pend->db_index = save_db_index;
 	job_ptr_pend->step_id = save_step_id;
 
+	/* No job start has been sent for the split-off task's new record. */
+	job_ptr->db_elig_infinite = false;
+
 	job_ptr_pend->prio_factors = save_prio_factors;
 	slurm_copy_priority_factors(job_ptr_pend->prio_factors,
 				    job_ptr->prio_factors);
@@ -3594,6 +3641,8 @@ extern job_record_t *job_array_split(job_record_t *job_ptr, bool list_add)
 	job_ptr_pend->licenses_allocated = NULL;
 	job_ptr_pend->license_list = license_copy(job_ptr->license_list);
 	job_ptr_pend->licenses_to_preempt = NULL;
+	job_ptr_pend->hres_select = NULL;
+	hres_create_select(job_ptr_pend);
 	job_ptr_pend->lic_req = xstrdup(job_ptr->lic_req);
 	job_ptr_pend->mail_user = xstrdup(job_ptr->mail_user);
 	job_ptr_pend->mcs_label = xstrdup(job_ptr->mcs_label);
@@ -4002,6 +4051,8 @@ static int _foreach_select_nodes_qos(void *object, void *args)
 	job_record_t *job_ptr = job_node_select->job_ptr;
 
 	job_ptr->qos_ptr = qos_ptr;
+	if (qos_ptr)
+		job_ptr->qos_id = qos_ptr->id;
 
 	debug2("Try %pJ on next QOS %s", job_ptr, qos_ptr->name);
 
@@ -4211,7 +4262,7 @@ extern int job_allocate(job_desc_msg_t *job_desc, int immediate, int will_run,
 	if ((job_count + i) > slurm_conf.max_job_cnt) {
 		error("%s: MaxJobCount limit from slurm.conf reached (%u)",
 		      __func__, slurm_conf.max_job_cnt);
-		return EAGAIN;
+		return ESLURM_MAX_JOB_COUNT;
 	}
 
 	error_code = _job_create(job_desc, allocate, will_run, cron,
@@ -7056,9 +7107,17 @@ extern int job_limits_check(job_record_t **job_pptr, bool check_min_time)
 	job_desc.alloc_node = job_ptr->alloc_node;
 	job_desc.min_cpus = detail_ptr->orig_min_cpus;
 	job_desc.min_nodes = detail_ptr->min_nodes;
-	/* _part_access_check looks for NO_VAL instead of 0 */
-	job_desc.max_nodes = detail_ptr->max_nodes ?
-		detail_ptr->max_nodes : NO_VAL;;
+	/*
+	 * _part_access_check looks for NO_VAL instead of 0. An implicit
+	 * max_nodes without --ntasks-per-node is a loose bound; don't let it
+	 * reject the job against MaxNodes (get_node_cnts() still clamps).
+	 */
+	if ((job_ptr->bit_flags & JOB_IMPLICIT_MAX_NODES) &&
+	    !detail_ptr->ntasks_per_node)
+		job_desc.max_nodes = NO_VAL;
+	else
+		job_desc.max_nodes =
+			detail_ptr->max_nodes ? detail_ptr->max_nodes : NO_VAL;
 	if (check_min_time && job_ptr->time_min)
 		job_desc.time_limit = job_ptr->time_min;
 	else
@@ -7418,12 +7477,9 @@ static int _job_create(job_desc_msg_t *job_desc, bool allocate, int will_run,
 		job_desc->account = xstrdup(assoc_rec.acct);
 
 	/* This must be done after we have the assoc_ptr set */
-	error_code = _get_qos_info(job_desc->qos, 0,
-				   &qos_ptr_list,
-				   &qos_ptr,
-				   job_desc->reservation,
-				   assoc_ptr,
-				   false, true, LOG_LEVEL_ERROR);
+	error_code =
+		_get_qos_info(job_desc->qos, 0, &qos_ptr_list, &qos_ptr,
+			      job_desc->reservation, assoc_ptr, false, true);
 	if (error_code != SLURM_SUCCESS) {
 		assoc_mgr_unlock(&assoc_mgr_read_lock);
 		goto cleanup_fail;
@@ -7599,12 +7655,9 @@ static int _job_create(job_desc_msg_t *job_desc, bool allocate, int will_run,
 		goto cleanup_fail;
 	}
 
-	if ((error_code = _copy_job_desc_to_job_record(job_desc,
-						       job_pptr,
-						       &req_bitmap,
-						       &exc_bitmap))) {
-		if (error_code == SLURM_ERROR)
-			error_code = ESLURM_ERROR_ON_DESC_TO_RECORD_COPY;
+	if ((error_code =
+		     _copy_job_desc_to_job_record(job_desc, job_pptr,
+						  &req_bitmap, &exc_bitmap))) {
 		job_ptr = *job_pptr;
 		goto cleanup_fail;
 	}
@@ -8646,6 +8699,21 @@ static int _unroll_min_max_node(job_record_t *job_ptr)
 	return SLURM_SUCCESS;
 }
 
+/*
+ * A job that gave a task count but no node count needs one node per
+ * ntasks_per_node tasks; without that directive assume one task per node.
+ */
+static uint32_t _implicit_max_nodes(job_details_t *detail_ptr)
+{
+	uint32_t max_nodes = detail_ptr->num_tasks;
+
+	if (detail_ptr->ntasks_per_node)
+		max_nodes = ROUNDUP(detail_ptr->num_tasks,
+				    detail_ptr->ntasks_per_node);
+
+	return MAX(max_nodes, detail_ptr->min_nodes);
+}
+
 /* _copy_job_desc_to_job_record - copy the job descriptor from the RPC
  *	structure into the actual slurmctld job record */
 static int _copy_job_desc_to_job_record(job_desc_msg_t *job_desc,
@@ -8993,7 +9061,7 @@ static int _copy_job_desc_to_job_record(job_desc_msg_t *job_desc,
 	} else if ((detail_ptr->max_nodes == 0) &&
 		   (detail_ptr->num_tasks != 0) &&
 		   (detail_ptr->num_tasks != NO_VAL)) {
-		detail_ptr->max_nodes = detail_ptr->num_tasks;
+		detail_ptr->max_nodes = _implicit_max_nodes(detail_ptr);
 		job_ptr->bit_flags |= JOB_IMPLICIT_MAX_NODES;
 	}
 
@@ -9167,7 +9235,8 @@ static bool _valid_pn_min_mem(job_desc_msg_t *job_desc_msg,
 					MAX(min_cpus, job_desc_msg->max_cpus);
 			}
 			cpus_per_node = MAX(cpus_per_node, min_cpus);
-			if (job_desc_msg->ntasks_per_node != NO_VAL16) {
+			if (job_desc_msg->ntasks_per_node &&
+			    (job_desc_msg->ntasks_per_node != NO_VAL16)) {
 				job_desc_msg->cpus_per_task =
 					ROUNDUP(job_desc_msg->pn_min_cpus,
 						job_desc_msg->ntasks_per_node);
@@ -9448,6 +9517,8 @@ void job_time_limit(void)
 			job_config_fini(job_ptr);
 			if (job_ptr->batch_flag)
 				launch_job(job_ptr);
+			else if (job_ptr->het_job_id)
+				launch_het_job_leader(job_ptr);
 		}
 
 		/*
@@ -12370,8 +12441,10 @@ static bool _valid_license_job_expansion(job_record_t *job_ptr1,
 	    xstrchr(job_ptr2->licenses, '|'))
 		return false;
 
-	if (list_find_first_ro(job_ptr1->license_list, _find_hres, NULL) ||
-	    list_find_first_ro(job_ptr2->license_list, _find_hres, NULL))
+	if ((job_ptr1->license_list &&
+	     list_find_first_ro(job_ptr1->license_list, _find_hres, NULL)) ||
+	    (job_ptr2->license_list &&
+	     list_find_first_ro(job_ptr2->license_list, _find_hres, NULL)))
 		return false;
 
 	return true;
@@ -12582,7 +12655,8 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 	bool is_coord_oldacc = false, is_coord_newacc = false;
 	uint32_t save_min_nodes = 0, save_max_nodes = 0;
 	uint32_t save_min_cpus = 0, save_max_cpus = 0;
-	job_details_t *detail_ptr;
+	bool save_implicit_max_nodes = false;
+	job_details_t *detail_ptr = NULL;
 	part_record_t *new_part_ptr = NULL, *use_part_ptr = NULL;
 	bitstr_t *exc_bitmap = NULL, *new_req_bitmap = NULL;
 	bitstr_t *orig_job_node_bitmap = NULL;
@@ -12673,6 +12747,9 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 	}
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
+
+	/* If in backfill yield and this is the current job, show it updated */
+	job_ptr->bit_flags &= ~BF_CURRENT_JOB_NOT_UPDATED;
 
 	if (job_desc->array_inx && job_ptr->array_recs) {
 		int throttle;
@@ -12895,8 +12972,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		error_code =
 			_get_qos_info((job_desc->qos[0] ? job_desc->qos : NULL),
 				      0, &new_qos_list, &new_qos_ptr, resv_name,
-				      use_assoc_ptr, privileged, true,
-				      LOG_LEVEL_ERROR);
+				      use_assoc_ptr, privileged, true);
 		if ((error_code == SLURM_SUCCESS) && new_qos_ptr) {
 			if (!new_qos_list &&
 			    (job_ptr->qos_ptr == new_qos_ptr)) {
@@ -13403,10 +13479,19 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		job_desc->tres_req_cnt[TRES_ARRAY_MEM] = mem_req;
 
 	if (gres_update) {
-		gres_stepmgr_set_job_tres_cnt(
-			gres_list,
-			job_desc->tres_req_cnt[TRES_ARRAY_NODE],
-			job_desc->tres_req_cnt, false);
+		/*
+		 * Recompute the requested GRES TRES counts. When the update
+		 * left no GRES, gres_stepmgr_set_job_tres_cnt() would skip the
+		 * NULL list and leave stale counts behind, so zero the GRES
+		 * counts explicitly instead.
+		 */
+		if (gres_list)
+			gres_stepmgr_set_job_tres_cnt(
+				gres_list,
+				job_desc->tres_req_cnt[TRES_ARRAY_NODE],
+				job_desc->tres_req_cnt, false);
+		else
+			gres_clear_tres_cnt(job_desc->tres_req_cnt, false);
 	}
 
 	/* Check if we are clearing licenses */
@@ -13549,6 +13634,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 				info("%s: exceeded association/QOS limit for user %u: %s",
 				     __func__, job_desc->user_id,
 				     job_state_reason_string(acct_reason));
+				job_desc->time_limit = orig_time_limit;
 				error_code = ESLURM_ACCOUNTING_POLICY;
 				goto fini;
 			}
@@ -13589,18 +13675,15 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			}
 
 			assoc_mgr_lock(&assoc_mgr_read_lock);
-			if ((error_code = _valid_job_part(
-				     job_desc, uid,
-				     new_req_bitmap_given ?
-				     new_req_bitmap :
-				     job_ptr->details->req_node_bitmap,
-				     use_part_ptr,
-				     new_part_ptr ?
-				     part_ptr_list : job_ptr->part_ptr_list,
-				     use_assoc_ptr, use_qos_ptr, NULL))) {
-				assoc_mgr_unlock(&assoc_mgr_read_lock);
-				goto fini;
-			}
+			error_code = _valid_job_part(
+				job_desc, uid,
+				new_req_bitmap_given ?
+					new_req_bitmap :
+					job_ptr->details->req_node_bitmap,
+				use_part_ptr,
+				new_part_ptr ? part_ptr_list :
+					       job_ptr->part_ptr_list,
+				use_assoc_ptr, use_qos_ptr, NULL);
 			assoc_mgr_unlock(&assoc_mgr_read_lock);
 
 			if (min_reset)
@@ -13613,6 +13696,9 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 				job_desc->reservation = resv_orig;
 
 			job_desc->time_limit = orig_time_limit;
+
+			if (error_code)
+				goto fini;
 		}
 
 		/*
@@ -13702,6 +13788,7 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		xfree(job_ptr->details->resv_req);
 		job_ptr->details->resv_req = xstrdup(job_desc->reservation);
 		job_ptr->resv_list = new_resv_list;
+		new_resv_list = NULL;
 		job_ptr->resv_id = new_resv_ptr->resv_id;
 		job_ptr->resv_ptr = new_resv_ptr;
 
@@ -13842,6 +13929,8 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			error_code = ESLURM_JOB_NOT_PENDING;
 		else {
 			save_max_nodes = detail_ptr->max_nodes;
+			save_implicit_max_nodes =
+				(job_ptr->bit_flags & JOB_IMPLICIT_MAX_NODES);
 			detail_ptr->max_nodes = job_desc->max_nodes;
 			job_ptr->bit_flags &= ~JOB_IMPLICIT_MAX_NODES;
 		}
@@ -13852,6 +13941,9 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		     detail_ptr->max_nodes, detail_ptr->min_nodes,
 		     job_ptr);
 		error_code = ESLURM_INVALID_NODE_COUNT;
+	}
+	if (error_code != SLURM_SUCCESS) {
+		/* Undo the node counts so a failed update applies nothing */
 		if (save_min_nodes) {
 			detail_ptr->min_nodes = save_min_nodes;
 			save_min_nodes = 0;
@@ -13859,10 +13951,11 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		if (save_max_nodes) {
 			detail_ptr->max_nodes = save_max_nodes;
 			save_max_nodes = 0;
+			if (save_implicit_max_nodes)
+				job_ptr->bit_flags |= JOB_IMPLICIT_MAX_NODES;
 		}
-	}
-	if (error_code != SLURM_SUCCESS)
 		goto fini;
+	}
 
 	if (save_min_nodes && (save_min_nodes!= detail_ptr->min_nodes)) {
 		info("%s: setting min_nodes from %u to %u for %pJ", __func__,
@@ -13935,19 +14028,6 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 			 */
 			if (job_desc->bitflags & JOB_NTASKS_SET)
 				job_ptr->bit_flags |= JOB_NTASKS_SET;
-
-			if ((job_ptr->bit_flags & JOB_IMPLICIT_MAX_NODES) &&
-			    (detail_ptr->max_nodes != detail_ptr->num_tasks)) {
-				info("%s: setting max_nodes from %u to %u for %pJ",
-				     __func__, detail_ptr->max_nodes,
-				     detail_ptr->num_tasks, job_ptr);
-				detail_ptr->max_nodes = detail_ptr->num_tasks;
-				job_ptr->limit_set.tres[TRES_ARRAY_NODE] =
-					acct_policy_limit_set
-						.tres[TRES_ARRAY_NODE];
-				update_accounting = true;
-				FREE_NULL_BITMAP(detail_ptr->job_size_bitmap);
-			}
 
 			info("%s: setting num_tasks to %u for %pJ",
 			     __func__, job_desc->num_tasks, job_ptr);
@@ -14504,8 +14584,8 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 				   SLURM_SUCCESS) {
 				FREE_NULL_LIST(detail_ptr->prefer_list);
 				xfree(detail_ptr->prefer);
-				detail_ptr->features = old_prefer;
-				detail_ptr->feature_list = old_list;
+				detail_ptr->prefer = old_prefer;
+				detail_ptr->prefer_list = old_list;
 				error_code = ESLURM_INVALID_PREFER;
 			} else {
 				sched_info("%s: setting prefer to %s for %pJ",
@@ -14592,7 +14672,19 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 		job_ptr->gres_list_req = gres_list;
 
 		gres_list = NULL;
+	} else if (gres_update) {
+		/*
+		 * The update removed all GRES; drop the now-stale requested
+		 * GRES list so the job no longer requests it.
+		 */
+		FREE_NULL_LIST(job_ptr->gres_list_req);
 	}
+	/*
+	 * TODO: Revisit gres_list_req_accum lifetime. Partition default updates
+	 * and multi-partition evaluation can also make this cache stale.
+	 */
+	if (gres_update)
+		FREE_NULL_LIST(job_ptr->gres_list_req_accum);
 
 	if (job_desc->name) {
 		if (IS_JOB_FINISHED(job_ptr)) {
@@ -15353,6 +15445,30 @@ static int _update_job(job_record_t *job_ptr, job_desc_msg_t *job_desc,
 fini:
 	FREE_NULL_BITMAP(new_req_bitmap);
 	FREE_NULL_LIST(part_ptr_list);
+	FREE_NULL_LIST(new_qos_list);
+	FREE_NULL_LIST(new_resv_list);
+
+	/*
+	 * num_tasks and ntasks_per_node are applied at several points above,
+	 * and an error can return after num_tasks was already applied, so the
+	 * bound is derived here where every path converges.
+	 */
+	if (detail_ptr && IS_JOB_PENDING(job_ptr) &&
+	    (job_ptr->bit_flags & JOB_IMPLICIT_MAX_NODES) &&
+	    detail_ptr->num_tasks && (detail_ptr->num_tasks != NO_VAL)) {
+		uint32_t new_max_nodes = _implicit_max_nodes(detail_ptr);
+
+		if (detail_ptr->max_nodes != new_max_nodes) {
+			info("%s: setting max_nodes from %u to %u for %pJ",
+			     __func__, detail_ptr->max_nodes, new_max_nodes,
+			     job_ptr);
+			detail_ptr->max_nodes = new_max_nodes;
+			job_ptr->limit_set.tres[TRES_ARRAY_NODE] =
+				acct_policy_limit_set.tres[TRES_ARRAY_NODE];
+			update_accounting = true;
+			FREE_NULL_BITMAP(detail_ptr->job_size_bitmap);
+		}
+	}
 
 	if ((error_code == SLURM_SUCCESS) && tres_req_cnt_set) {
 		for (tres_pos = 0; tres_pos < slurmctld_tres_cnt; tres_pos++) {
@@ -15879,7 +15995,8 @@ extern void job_post_resize_acctg(job_record_t *job_ptr)
 extern void job_mem_resize_complete(job_record_t *job_ptr)
 {
 	xassert(verify_lock(JOB_LOCK, WRITE_LOCK));
-	xassert(verify_lock(NODE_LOCK, READ_LOCK));
+	xassert(verify_lock(NODE_LOCK, WRITE_LOCK));
+	xassert(verify_lock(PART_LOCK, READ_LOCK));
 
 	job_pre_resize_acctg(job_ptr);
 	select_g_job_mem_reduce(job_ptr);
@@ -16827,6 +16944,12 @@ void batch_requeue_fini(job_record_t *job_ptr)
 	job_ptr->total_cpus = 0;
 	job_ptr->pre_sus_time = 0;
 	job_ptr->preempt_time = 0;
+	/*
+	 * GraceTime has already ended (or never applied to this run). Do not
+	 * leave GRACE_PREEMPT set or a later normal completion can be forced
+	 * to requeue as if still in GraceTime.
+	 */
+	job_ptr->bit_flags &= (~GRACE_PREEMPT);
 	job_ptr->suspend_time = 0;
 	job_ptr->tot_sus_time = 0;
 	job_ptr->next_step_id = 0;
@@ -16862,6 +16985,8 @@ void batch_requeue_fini(job_record_t *job_ptr)
 
 	if (job_ptr->details) {
 		time_t now = time(NULL);
+		time_t last_key = MAX(job_ptr->details->submit_time,
+				      job_ptr->resize_time);
 		/* The time stamp on the new batch launch credential must be
 		 * larger than the time stamp on the revoke request. Also the
 		 * I/O must be all cleared out, the named socket purged and
@@ -16888,10 +17013,9 @@ void batch_requeue_fini(job_record_t *job_ptr)
 		}
 
 		/* Since this could happen on a launch we need to make sure the
-		 * submit isn't the same as the last submit so put now + 1 so
-		 * we get different records in the database */
-		if (now == job_ptr->details->submit_time)
-			now++;
+		 * submit is past both the last submit and the resize record's
+		 * key so we get different records in the database. */
+		now = MAX(now, last_key + 1);
 		job_ptr->details->submit_time = now;
 
 		/* clear the accrue flag */
@@ -16951,6 +17075,9 @@ void batch_requeue_fini(job_record_t *job_ptr)
 	_remove_job_hash(job_ptr, JOB_HASH_SLUID);
 	job_record_set_sluid(job_ptr, true);
 	_add_job_hash_sluid(job_ptr);
+
+	/* Cleared here so the submit_time above could be pushed past it. */
+	job_ptr->resize_time = 0;
 	jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 
 	/* Submit new sibling jobs for fed jobs */
@@ -17242,8 +17369,16 @@ extern bool job_independent(job_record_t *job_ptr)
 		/*
 		 * Send begin time to the database if it is already there, or it
 		 * won't get there until the job starts.
+		 *
+		 * Skip this if the reason is still WAIT_ARRAY_TASK_LIMIT and
+		 * the last update already stored an INFINITE eligible time for
+		 * it, as the update would not change the record. Requeued
+		 * array tasks otherwise send one update per task each time the
+		 * array's task limit opens.
 		 */
-		if (IS_JOB_IN_DB(job_ptr))
+		if (IS_JOB_IN_DB(job_ptr) &&
+		    !((job_ptr->state_reason == WAIT_ARRAY_TASK_LIMIT) &&
+		      job_ptr->db_elig_infinite))
 			jobacct_storage_g_job_start(acct_db_conn, job_ptr);
 	} else if (job_ptr->state_reason == WAIT_TIME) {
 		job_ptr->state_reason = WAIT_NO_REASON;
@@ -17996,17 +18131,23 @@ static int _job_requeue_op(uid_t uid, job_record_t *job_ptr, bool preempt,
 		/*
 		 * We want this job to have the requeued/preempted state in the
 		 * accounting logs. Set a new submit time so the restarted
-		 * job looks like a new job.
+		 * job looks like a new job. Do not rebuild node_bitmap_cg for
+		 * a job that is already completing. A bit_copy(node_bitmap)
+		 * would resurrect nodes whose epilog has already finished
+		 * (and which make_node_idle() has therefore already released)
+		 * without updating node_cnt to match.
 		 */
 		if (preempt) {
 			job_state_set(job_ptr, JOB_PREEMPTED);
-			build_cg_bitmap(job_ptr);
+			if (!is_completing)
+				build_cg_bitmap(job_ptr);
 			if (!is_completed && !is_completing)
 				job_completion_logger(job_ptr, true);
 			job_state_set(job_ptr, JOB_REQUEUE);
 		} else {
 			job_state_set(job_ptr, JOB_REQUEUE);
-			build_cg_bitmap(job_ptr);
+			if (!is_completing)
+				build_cg_bitmap(job_ptr);
 			if (!is_completed && !is_completing)
 				job_completion_logger(job_ptr, true);
 		}
@@ -18078,7 +18219,7 @@ reply:
 	 */
 	acct_policy_add_job_submit(job_ptr, false);
 
-	acct_policy_update_pending_job(job_ptr, true);
+	acct_policy_update_pending_job(job_ptr, false);
 
 	if (flags & JOB_SPECIAL_EXIT) {
 		job_state_set_flag(job_ptr, JOB_SPECIAL_EXIT);

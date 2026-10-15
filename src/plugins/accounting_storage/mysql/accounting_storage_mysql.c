@@ -1143,6 +1143,43 @@ extern void reset_mysql_conn(mysql_conn_t *mysql_conn)
 	list_flush(mysql_conn->update_list);
 }
 
+static int _find_unsafe_cluster(void *x, void *key)
+{
+	char *cluster_name = x;
+
+	return (cluster_name && strpbrk(cluster_name, "'\"\\`"));
+}
+
+extern int as_mysql_validate_cluster_name(char *cluster_name)
+{
+	if (_find_unsafe_cluster(cluster_name, NULL)) {
+		error("%s: rejecting unsafe cluster name '%s'",
+		      __func__, cluster_name);
+		errno = ESLURM_INVALID_CLUSTER_NAME;
+		return SLURM_ERROR;
+	}
+
+	return SLURM_SUCCESS;
+}
+
+extern int as_mysql_validate_cluster_list(list_t *cluster_list)
+{
+	char *cluster_name;
+
+	if (!cluster_list || !list_count(cluster_list))
+		return SLURM_SUCCESS;
+
+	if ((cluster_name = list_find_first(cluster_list,
+					    _find_unsafe_cluster, NULL))) {
+		error("%s: rejecting unsafe cluster name '%s'",
+		      __func__, cluster_name);
+		errno = ESLURM_INVALID_CLUSTER_NAME;
+		return SLURM_ERROR;
+	}
+
+	return SLURM_SUCCESS;
+}
+
 extern int create_cluster_assoc_table(
 	mysql_conn_t *mysql_conn, char *cluster_name)
 {
@@ -2756,6 +2793,7 @@ static int _check_database_variables(mysql_conn_t *mysql_conn)
 	const char redo_log_var[] = "innodb_redo_log_capacity";
 	const char allowed_packet_var[] = "max_allowed_packet";
 	const uint64_t allowed_packet = 16777216;
+	const char snapshot_var[] = "innodb_snapshot_isolation";
 	const char *logfile_var_actual = NULL;
 
 	uint64_t value;
@@ -2805,6 +2843,31 @@ static int _check_database_variables(mysql_conn_t *mysql_conn)
 		recommended_values = false;
 		xstrfmtcat(error_msg, " %s", allowed_packet_var);
 	}
+
+	/*
+	 * MariaDB 10.6.18, 10.11.8, 11.0.6, 11.1.5, 11.2.4, and 11.4.2 add
+	 * innodb_snapshot_isolation. MariaDB 11.6.2 and later versions set it
+	 * to ON by default. If it is ON, a locking read or a write to a row
+	 * fails with ER_CHECKREAD when a different transaction changes that
+	 * row. MariaDB then rolls back the whole transaction. Slurm cannot
+	 * recover from this error.
+	 *
+	 * MySQL and older MariaDB versions do not have this variable. If the
+	 * query fails, assume that the variable is OFF. Report this variable
+	 * separately, because it is fatal at run time.
+	 */
+	if (!xstrcasestr(db_info, "mariadb")) {
+		value = 0;
+	} else if (mysql_db_get_var_u64(mysql_conn, snapshot_var, &value)) {
+		value = 0;
+		if (errno == ER_UNKNOWN_SYSTEM_VARIABLE)
+			error("The prior error message regarding an undefined '%s' variable is innocuous.  MariaDB without this variable will operate normally.",
+			      snapshot_var);
+	}
+	debug2("%s: %"PRIu64, snapshot_var, value);
+	if (value)
+		error("%s is enabled, which is not supported by Slurm and will cause slurmdbd to fatal when a write conflicts with a concurrent transaction.  Set %s=OFF.",
+		      snapshot_var, snapshot_var);
 
 	if (!recommended_values) {
 		error("%s", error_msg);
@@ -3017,6 +3080,13 @@ extern void *acct_storage_p_get_connection(
 	mysql_conn_t *mysql_conn = NULL;
 
 	debug2("request new connection %d", rollback);
+
+	/*
+	 * The cluster name comes off the wire and is used unquoted to build
+	 * table names, so it has to be checked before anything uses it.
+	 */
+	if (as_mysql_validate_cluster_name(cluster_name) != SLURM_SUCCESS)
+		return NULL;
 
 	if (!(mysql_conn = create_mysql_conn(
 		      conn_num, rollback, cluster_name))) {
