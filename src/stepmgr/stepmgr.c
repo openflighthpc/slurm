@@ -73,6 +73,7 @@
 #include "src/interfaces/gres.h"
 #include "src/interfaces/jobacct_gather.h"
 #include "src/interfaces/mcs.h"
+#include "src/interfaces/mpi.h"
 #include "src/interfaces/select.h"
 #include "src/interfaces/switch.h"
 #include "src/interfaces/topology.h"
@@ -883,6 +884,13 @@ static int _wake_steps(void *x, void *arg)
 				job_ptr->start_protocol_ver;
 			step_req->use_protocol_ver =
 				job_ptr->start_protocol_ver;
+			/*
+			 * Set to "none" when not set, to prevent
+			 * mpi_g_client_init() setting to MpiDefault.
+			 */
+			if (!step_req->launch_params->mpi_plugin_name)
+				step_req->launch_params->mpi_plugin_name =
+					xstrdup("none");
 
 			ctx = _step_ctx_create_stepmgr(step_req, step_resp,
 						       new_step_ptr);
@@ -1722,7 +1730,10 @@ static bitstr_t *_pick_step_nodes(job_record_t *job_ptr,
 		return NULL;
 	}
 
-	if (step_spec->min_nodes == INFINITE) {	/* use all nodes */
+	if ((step_spec->min_nodes == INFINITE) &&
+	    (!step_spec->node_list ||
+	     ((step_spec->task_dist & SLURM_DIST_STATE_BASE) !=
+	      SLURM_DIST_ARBITRARY))) { /* use all nodes */
 		if ((step_spec->num_tasks == NO_VAL) &&
 		    !(step_spec->flags & SSF_EXT_LAUNCHER)) {
 			_set_max_num_tasks(step_spec, job_ptr, nodes_avail,
@@ -1760,12 +1771,29 @@ static bitstr_t *_pick_step_nodes(job_record_t *job_ptr,
 	/*
 	 * An allocating srun will send in the same node_list that was already
 	 * used to construct the job allocation. In that case, we can assume
-	 * that the job allocation already satisfies those requirements.
+	 * that the job allocation already satisfies those requirements. An
+	 * arbitrary list is always checked: it drives the step's task layout
+	 * and indexes the job's resources.
 	 */
-	if (step_spec->node_list && xstrcmp(step_spec->node_list,
-					    job_ptr->details->req_nodes)) {
+	if (step_spec->node_list &&
+	    (xstrcmp(step_spec->node_list, job_ptr->details->req_nodes) ||
+	     ((step_spec->task_dist & SLURM_DIST_STATE_BASE) ==
+	      SLURM_DIST_ARBITRARY))) {
 		bitstr_t *selected_nodes = NULL;
 		int selected_nodes_cnt = 0;
+
+		/*
+		 * An arbitrary list must be a literal list of node names, not
+		 * a hostlist function (feature{...}, switch{...}, ...).
+		 */
+		if (((step_spec->task_dist & SLURM_DIST_STATE_BASE) ==
+		     SLURM_DIST_ARBITRARY) &&
+		    xstrchr(step_spec->node_list, '{')) {
+			log_flag(STEPS, "%s: invalid node list %s for arbitrary distribution",
+				 __func__, step_spec->node_list);
+			*return_code = ESLURM_INVALID_NODE_NAME;
+			goto cleanup;
+		}
 
 		log_flag(STEPS, "%s: selected nodelist is %s",
 			 __func__, step_spec->node_list);
@@ -1806,10 +1834,6 @@ static bitstr_t *_pick_step_nodes(job_record_t *job_ptr,
 			goto cleanup;
 		}
 		selected_nodes_cnt = bit_set_count(selected_nodes);
-		if ((step_spec->task_dist & SLURM_DIST_STATE_BASE) ==
-		    SLURM_DIST_ARBITRARY) {
-			step_spec->min_nodes = selected_nodes_cnt;
-		}
 		/*
 		 * Use selected nodes to run the step and
 		 * mark them unavailable for future use
@@ -1830,8 +1854,20 @@ static bitstr_t *_pick_step_nodes(job_record_t *job_ptr,
 				 step_spec->max_nodes);
 			FREE_NULL_BITMAP(selected_nodes);
 			goto cleanup;
-		} else if (step_spec->min_nodes &&
-			   (selected_nodes_cnt > step_spec->min_nodes)) {
+		}
+		/*
+		 * Pin the node count to the list only after the check above,
+		 * so that a max_nodes smaller than the arbitrary list is still
+		 * rejected rather than silently overridden.
+		 */
+		if ((step_spec->task_dist & SLURM_DIST_STATE_BASE) ==
+		    SLURM_DIST_ARBITRARY) {
+			step_spec->min_nodes = selected_nodes_cnt;
+			step_spec->max_nodes = selected_nodes_cnt;
+		}
+
+		if (step_spec->min_nodes &&
+		    (selected_nodes_cnt > step_spec->min_nodes)) {
 			nodes_picked = bit_alloc(bit_size(nodes_avail));
 			FREE_NULL_BITMAP(nodes_avail);
 			nodes_avail = selected_nodes;
@@ -5468,7 +5504,9 @@ extern int step_create_from_msg(slurm_msg_t *msg, int slurmd_fd,
 	    (running_in_slurmctld() ||
 	     req_step_msg->immediate ||
 	     !req_step_msg->launch_params ||
-	     req_step_msg->launch_params->pty)) {
+	     req_step_msg->launch_params->pty ||
+	     !mpi_is_none_plugin(req_step_msg->launch_params
+					 ->mpi_plugin_name))) {
 		error("Invalid async step create request");
 		error_code = ESLURM_INVALID_FEATURE;
 		goto end_it;
@@ -5589,6 +5627,13 @@ end_it:
 
 			req_step_msg->use_protocol_ver =
 				step_rec->start_protocol_ver;
+			/*
+			 * Set to "none" when not set, to prevent
+			 * mpi_g_client_init() setting to MpiDefault.
+			 */
+			if (!req_step_msg->launch_params->mpi_plugin_name)
+				req_step_msg->launch_params->mpi_plugin_name =
+					xstrdup("none");
 			ctx = _step_ctx_create_stepmgr(req_step_msg,
 						       &job_step_resp,
 						       step_rec);
@@ -5678,6 +5723,7 @@ extern int pack_job_step_info_response_msg(pack_step_args_t *args)
 		set_buf_offset(args->buffer, tmp_offset);
 	}
 
+	FREE_NULL_LIST(args->stepmgr_jobs);
 	xfree(args->visible_parts);
 
 	return error_code;

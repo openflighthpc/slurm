@@ -3133,7 +3133,8 @@ If set, jobs may be preempted to reclaim licenses. Otherwise jobs requesting
 busy licenses will have to wait even if they have preemption priority.
 The logic to support this option is only available in the select/cons_tres
 plugin. Jobs that use OR in the license request are not eligible to preempt
-other jobs to reclaim licenses.
+other jobs to reclaim licenses, and preemption is never used to reclaim
+Hierarchical Resources (HRES).
 .IP
 
 .TP
@@ -3830,6 +3831,9 @@ this option on multiple lines.\fR
 .TP
 \fBPropagatePrioProcess\fR
 Controls the scheduling priority (nice value) of user spawned tasks.
+
+\fBNOTE\fR: This has limited functionality if used in combination with cgroups
+(\fBproctrack/cgroup\fR or \fBtask/cgroup\fR).
 .IP
 .RS
 .TP 5
@@ -5898,7 +5902,7 @@ timed out. Defaults to the value of \fBMessageTimeout\fR.
 .TP
 \fBcontain_spank\fR
 If set and a namespace plugin is specified, the spank_user(),
-spank_task_post_fork() and spank_task_exit() calls will be run inside the job's
+spank_task_post_fork(), and spank_task_exit() calls will be run inside the job's
 namespace.
 .IP
 
@@ -5936,7 +5940,7 @@ mismatch between what slurmd detects and what the controller expects.
 .TP
 \fBshutdown_on_reboot\fR
 If set, the Slurmd will shut itself down when a reboot request is received.
-.IP
+.RE
 .IP
 
 .TP
@@ -6179,6 +6183,9 @@ For example "nid[10\-20]:4" will prevent 4 powered up nodes in the set
 Multiple sets of nodes can be specified with or without counts in a comma
 separated list (e.g "nid[10\-20]:4,nid[80\-90]:2").
 By default no nodes are excluded.
+Nodes explicitly requested to power down, including nodes allocated from a
+partition configured with \fBPowerDownOnIdle=YES\fR, are not affected by this
+option.
 This value may be updated with scontrol.
 See \fBReconfigFlags=KeepPowerSaveSettings\fR for setting persistence.
 .IP
@@ -6189,6 +6196,9 @@ Specifies the partitions whose nodes are to not be placed in power save
 mode, even if the node remains idle for an extended period of time.
 Multiple partitions can be identified and separated by commas.
 By default no nodes are excluded.
+Nodes explicitly requested to power down, including nodes allocated from a
+partition configured with \fBPowerDownOnIdle=YES\fR, are not affected by this
+option.
 This value may be updated with scontrol.
 See \fBReconfigFlags=KeepPowerSaveSettings\fR for setting persistence.
 .IP
@@ -6200,6 +6210,9 @@ Valid states include CLOUD, DOWN, DRAIN, DYNAMIC_FUTURE, DYNAMIC_NORM, FAIL,
 INVALID_REG, MAINTENANCE, NOT_RESPONDING, PLANNED, and RESERVED.
 By default, any of these states, if idle for \fBSuspendTime\fR, would be
 powered down.
+Nodes explicitly requested to power down, including nodes allocated from a
+partition configured with \fBPowerDownOnIdle=YES\fR, are not affected by this
+option.
 This value may be updated with scontrol.
 See \fBReconfigFlags=KeepPowerSaveSettings\fR for setting persistence.
 .IP
@@ -6821,15 +6834,24 @@ Default security policy is "20230317", which is FIPS compliant and includes TLS 
 
 .TP
 \fBTLSType\fR
-Specify the TLS implementation that will be used. Unset by default.
+Specify the TLS implementation that will be used.
+When set to a TLS plugin, RPC listening sockets reject connections that are not
+TLS wrapped. Refer to the TLS guide for more details:
+<https://slurm.schedmd.com/tls.html>
+Defaults to \fBtls/none\fR.
+.br
 Acceptable values at present:
 .IP
 .RS
 .TP
+\fBtls/none\fR
+No TLS. This is the default.
+.IP
+
+.TP
 \fBtls/s2n\fR
 Use the s2n TLS plugin. Requires additional configuration and causes significant
-processing overhead, but allows all Slurm communication to be encrypted. Refer
-to the TLS guide for more details: <https://slurm.schedmd.com/tls.html>
+processing overhead, but allows all Slurm communication to be encrypted.
 .RE
 .IP
 
@@ -7269,6 +7291,8 @@ node. If \fBCPUs\fR is omitted, its default will be set equal to the product of
 .TP
 \fBCpuSpecList\fR
 A comma\-delimited list of Slurm abstract CPU IDs reserved for system use.
+These are indices in Slurm's per-node CPU numbering, which may not match
+the CPU IDs used by the operating system.
 The list will be expanded to include all other CPUs, if any, on the same cores.
 Depending upon the \fBTaskPluginParam\fR option of \fBSlurmdOffSpec\fR,
 the Slurm daemon slurmd may either be confined to these
@@ -7333,6 +7357,13 @@ set an empty string (Gres="") to configure no Gres on a subsequent entry.
 By default a node has no generic resources and its maximum count is
 that of an unsigned 64bit integer.
 Also see \fBFeatures\fR for Boolean flags to filter nodes using job constraints.
+
+\fBNOTE\fR: Before changing a GRES's configured count, drain the node of all
+running jobs using that GRES if it has the \fBFile\fR or \fBMultipleFiles\fR
+parameters set either manually or with \fBAutoDetect\fR in \fBgres.conf\fR(5).
+Similarly, drain the node before reducing the configured count of a shared GRES
+(gres/mps, gres/shard). Failure to do so will result in any running job using
+those GRES being aborted and, if eligible, requeued.
 .IP
 
 .TP
@@ -7878,7 +7909,10 @@ This parameter only takes effect when \fBPreemptType=partition_prio\fR.
 The default value is zero, no preemption grace time is allowed on
 this partition.
 Once a job has been selected for preemption, its end time is set to the current
-time plus GraceTime. The job's tasks are immediately sent SIGCONT and SIGTERM
+time plus GraceTime, or left unchanged if it was already sooner than that. A
+job whose time limit expires before GraceTime elapses therefore receives only
+the remainder of its time limit, not the full GraceTime.
+The job's tasks are immediately sent SIGCONT and SIGTERM
 signals in order to provide notification of its imminent termination.
 This is followed by the SIGCONT, SIGTERM and SIGKILL signal sequence upon
 reaching its new end time. This second set of signals is sent to both the
@@ -8118,8 +8152,7 @@ allocated at least one job.
 These nodes will not power down until they transition from COMPLETING to IDLE.
 If set to "NO" then power saving will operate as configured for the partition.
 The default value is "NO".
-See <https://slurm.schedmd.com/power_save.html> and
-<https://slurm.schedmd.com/elastic_computing.html> for more details.
+See <https://slurm.schedmd.com/power_save.html> for more details.
 
 \fBNOTE\fR:
 The following will cause a transition from COMPLETING to IDLE:
@@ -8133,8 +8166,13 @@ user's job is allocated.
 job is allocated.
 
 \fBNOTE\fR:
+Nodes allocated from this partition will still be sent a power down request even
+if they are excluded from automatic power save mode by \fBSuspendExcNodes\fR,
+\fBSuspendExcParts\fR, or \fBSuspendExcStates\fR.
+
+\fBNOTE\fR:
 Nodes are still subject to powering down when being IDLE for \fBSuspendTime\fR
-when PowerDownOnIdle is set to NO.</p>
+when \fBPowerDownOnIdle\fR is set to "NO".
 
 Also see \fBSuspendTime\fR.
 .IP
@@ -8470,6 +8508,11 @@ environment variables.
 .TP
 \fBSLURM_JOB_ID\fR
 Job ID.
+.IP
+
+.TP
+\fBSLURM_JOB_SLUID\fR
+Job SLUID.
 .IP
 
 .TP

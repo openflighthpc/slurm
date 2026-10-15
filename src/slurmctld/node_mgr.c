@@ -528,10 +528,21 @@ extern int load_all_node_state ( bool state_only )
 						NODE_STATE_FAIL;
 				if ((node_state & NODE_STATE_POWERED_DOWN) ||
 				    (node_state & NODE_STATE_POWERING_DOWN)) {
-					node_ptr->node_state |=
+					uint32_t power_flag =
 						node_state &
 						(NODE_STATE_POWERED_DOWN |
 						 NODE_STATE_POWERING_DOWN);
+					if (IS_NODE_UNKNOWN(node_ptr)) {
+						orig_flags =
+							node_ptr->node_state &
+							NODE_STATE_FLAGS;
+						node_ptr->node_state =
+							NODE_STATE_IDLE |
+							orig_flags | power_flag;
+					} else {
+						node_ptr->node_state |=
+							power_flag;
+					}
 					/* Recover hardware state for powered
 					 * down nodes */
 					node_ptr->cpus = node_state_rec->cpus;
@@ -700,6 +711,18 @@ extern int load_all_node_state ( bool state_only )
 
 		if (node_ptr) {
 			node_cnt++;
+
+			/*
+			 * Scrub a NO_RESPOND flag recovered on a powered down
+			 * node. Such a node is never pinged, so the flag would
+			 * stick forever and keep the node out of
+			 * avail_node_bitmap. This also recovers nodes that were
+			 * stuck by a prior version of _require_node_reg().
+			 */
+			if (IS_NODE_POWERED_DOWN(node_ptr) ||
+			    IS_NODE_POWERING_DOWN(node_ptr))
+				node_ptr->node_state &=
+					(~NODE_STATE_NO_RESPOND);
 
 			node_ptr->next_state = node_state_rec->next_state;
 
@@ -1599,6 +1622,15 @@ static void _undo_reboot_asap(node_record_t *node_ptr)
 static void _require_node_reg(node_record_t *node_ptr)
 {
 	if (IS_NODE_EXTERNAL(node_ptr))
+		return;
+	/*
+	 * A powered down node is skipped by ping_nodes(), so there is nothing
+	 * to require of it and nothing to ping. A NO_RESPOND flag set here
+	 * would never be cleared, refreshing last_response would record a
+	 * response that was never received, and ping_nodes_now would schedule
+	 * a ping cycle that skips this very node.
+	 */
+	if (IS_NODE_POWERED_DOWN(node_ptr) || IS_NODE_POWERING_DOWN(node_ptr))
 		return;
 	node_ptr->node_state |= NODE_STATE_NO_RESPOND;
 	node_ptr->last_response = time(NULL);
@@ -4952,6 +4984,11 @@ static void _update_parts()
 	set_partition_tres(false);
 }
 
+/*
+ * Never delete a node here on error; create_nodes() rolls back the whole batch.
+ * Deleting the only node created so far would free config_ptr and its
+ * node_bitmap before that rollback reads them.
+ */
 static int _build_node_callback(char *alias, char *hostname, char *address,
 				char *bcast_address, uint16_t port,
 				int state_val, slurm_conf_node_t *conf_node,
@@ -4961,7 +4998,7 @@ static int _build_node_callback(char *alias, char *hostname, char *address,
 	node_record_t *node_ptr = NULL;
 
 	if ((rc = add_node_record(alias, config_ptr, &node_ptr)))
-		goto fini;
+		return rc;
 
 	if ((state_val != NO_VAL) &&
 	    (state_val != NODE_STATE_UNKNOWN))
@@ -4983,10 +5020,8 @@ static int _build_node_callback(char *alias, char *hostname, char *address,
 		node_ptr->features_act = xstrdup(config_ptr->feature);
 	}
 
-	if (node_ptr->topology_str && topology_g_add_rm_node(node_ptr)) {
-		rc = ESLURM_REQUESTED_TOPO_CONFIG_UNAVAILABLE;
-		goto fini;
-	}
+	if (node_ptr->topology_str && topology_g_add_rm_node(node_ptr))
+		return ESLURM_REQUESTED_TOPO_CONFIG_UNAVAILABLE;
 
 	bit_clear(power_up_node_bitmap, node_ptr->index);
 	if (IS_NODE_FUTURE(node_ptr)) {
@@ -5015,7 +5050,7 @@ static int _build_node_callback(char *alias, char *hostname, char *address,
 							 node_ptr->name,
 							 node_ptr->gres_list,
 							 NULL, NULL))) {
-			goto fini;
+			return rc;
 		}
 
 		rc = gres_node_config_validate(node_ptr,
@@ -5027,10 +5062,6 @@ static int _build_node_callback(char *alias, char *hostname, char *address,
 						CONF_FLAG_OR),
 					       NULL);
 	}
-
-fini:
-	if (rc && node_ptr)
-		_delete_node_ptr(node_ptr);
 
 	return rc;
 }
@@ -5123,8 +5154,38 @@ extern int create_nodes(update_node_msg_t *msg, char **err_msg)
 
 	if ((rc = expand_nodeline_info(conf_node, config_ptr, err_msg,
 				       _build_node_callback))) {
+		bitstr_t *created_bitmap = NULL;
+		node_record_t *node_ptr = NULL;
+		bool orphaned = false;
+
 		error("Failed to create a node in '%s': %s",
 		      conf_node->nodenames, *err_msg);
+
+		/*
+		 * add_node_record() only sets a bit for a node it created, so
+		 * this rolls back the batch without touching pre-existing
+		 * nodes. Iterate a copy: deleting the last node referencing
+		 * config_ptr frees it and node_bitmap with it.
+		 */
+		created_bitmap = bit_copy(config_ptr->node_bitmap);
+
+		for (int i = 0;
+		     (node_ptr = next_node_bitmap(created_bitmap, &i)); i++) {
+			if (_delete_node_ptr(node_ptr) != SLURM_SUCCESS)
+				orphaned = true;
+		}
+
+		if (orphaned)
+			error("Failed to roll back every node created from '%s'",
+			      conf_node->nodenames);
+
+		/* Nothing created means nothing ever referenced config_ptr. */
+		if (!bit_set_count(created_bitmap))
+			list_delete_ptr(config_list, config_ptr);
+		config_ptr = NULL;
+
+		FREE_NULL_BITMAP(created_bitmap);
+
 		goto fini;
 	}
 

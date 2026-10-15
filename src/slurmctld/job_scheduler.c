@@ -2080,10 +2080,8 @@ skip_start:
 
 fail_this_part:	if (fail_by_part) {
 			/* Search for duplicates */
-			if (job_ptr->part_ptr->flags & PART_FLAG_SCHED_FAILED) {
+			if (job_ptr->part_ptr->flags & PART_FLAG_SCHED_FAILED)
 				fail_by_part = false;
-				break;
-			}
 		}
 		if (fail_by_part) {
 			/*
@@ -4526,7 +4524,7 @@ static int _foreach_job_start_data_part(void *x, void *arg)
 	int rc2 = SLURM_SUCCESS;
 	time_t start_res, orig_start_time = (time_t) 0;
 	list_t *preemptee_candidates = NULL, *preemptee_job_list = NULL;
-	bool resv_overlap = false;
+	bool resv_overlap = false, resv_maint = false;
 	resv_exc_t resv_exc = { 0 };
 
 	job_start_data->rc = SLURM_SUCCESS;
@@ -4577,8 +4575,8 @@ static int _foreach_job_start_data_part(void *x, void *arg)
 	else
 		start_res = job_start_data->now;
 
-	rc2 = job_test_resv(job_ptr, &start_res, true, &resv_bitmap,
-			    &resv_exc, &resv_overlap, false);
+	rc2 = job_test_resv(job_ptr, &start_res, true, &resv_bitmap, &resv_exc,
+			    &resv_maint, &resv_overlap, false);
 	if (rc2 != SLURM_SUCCESS) {
 		FREE_NULL_BITMAP(avail_bitmap);
 		reservation_delete_resv_exc_parts(&resv_exc);
